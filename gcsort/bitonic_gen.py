@@ -2,7 +2,7 @@
 
 from functional import seq
 
-max_bitonic_sort_verctors = 16
+max_bitonic_sort_verctors = 32
 
 def next_power_of_2(v):
     v = v - 1
@@ -374,7 +374,7 @@ namespace smallsort {{
 
 def generate_all_types():
     for type in bitonic_types:
-        with open(f"bitonic_sort.{type}.generated.hpp", "w") as f:
+        with open(f"bitonic_sort.{type}.generated.h", "w") as f:
             generate_per_type(f, type)
 
 
