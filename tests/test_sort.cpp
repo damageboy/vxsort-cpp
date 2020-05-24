@@ -2,6 +2,7 @@
 #include "gtest/gtest.h"
 
 #include <gcsort.h>
+#include <introsort.h>
 #include <bitonic_sort.h>
 
 #include <random>
@@ -11,6 +12,7 @@
 namespace gcsort_tests {
     using testing::WhenSorted;
     using testing::ElementsAreArray;
+    using testing::ValuesIn;
 
 
     static std::vector<uint8_t *> generate_unique_ptrs_vec(size_t n) {
@@ -25,6 +27,26 @@ namespace gcsort_tests {
         return pvec;
     }
 
+
+    template <typename IntType>
+    std::vector<IntType> range(IntType start, IntType stop, IntType step)
+    {
+      if (step == IntType(0))
+      {
+        throw std::invalid_argument("step for range must be non-zero");
+      }
+
+      std::vector<IntType> result;
+      IntType i = start;
+      while ((step > 0) ? (i <= stop) : (i > stop))
+      {
+        result.push_back(i);
+        i += step;
+      }
+
+      return result;
+    }
+
     TEST(Sort, IntroSort) {
         auto v = generate_unique_ptrs_vec(1000);
 
@@ -34,6 +56,8 @@ namespace gcsort_tests {
         sort_introsort(begin, end);
         EXPECT_THAT(v, WhenSorted(ElementsAreArray(v)));
     }
+
+
 
     // A new one of these is create for each test
     class SortTest : public testing::TestWithParam<int>
@@ -55,7 +79,7 @@ namespace gcsort_tests {
     INSTANTIATE_TEST_SUITE_P(
         BitonicSizes,
         SortTest,
-        ::testing::Values(4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64),
+        ValuesIn(range(4, 128, 4)),
                            PrintValue());
     
     TEST_P(SortTest, BitonicSort) {
