@@ -87,7 +87,7 @@ public:
     }
 };
 
-template <typename T>
+template <typename T, int Unroll=1>
 class vxsort {
 private:
     typedef T __m256t __attribute__ ((__vector_size__ (32)));
@@ -96,15 +96,26 @@ private:
 
     static const int ELEMENT_ALIGN = sizeof(T) - 1;
     static const int N = 32 / sizeof(T);
-    static const int32_t SMALL_SORT_THRESHOLD_ELEMENTS = 16 * N;
-    static const int32_t SLACK_PER_SIDE_IN_VECTORS = 1;
+    static const int32_t MAX_BITONIC_SORT_VECTORS = 16;
+    static const int32_t SMALL_SORT_THRESHOLD_ELEMENTS = MAX_BITONIC_SORT_VECTORS * N;
+    //static const int32_t MaxInnerUnroll = ((SMALL_SORT_THRESHOLD_ELEMENTS - (N - 2*N)) / (2 * N));
+    static const int32_t MaxInnerUnroll = (MAX_BITONIC_SORT_VECTORS - 3) / 2;
+    static const int32_t SafeInnerUnroll = MaxInnerUnroll > Unroll ? Unroll : MaxInnerUnroll;
+    static const int32_t SLACK_PER_SIDE_IN_VECTORS = Unroll;
     static const size_t ALIGN = alignment_hint::ALIGN;
     static const size_t ALIGN_MASK = ALIGN - 1;
 
     static const int SLACK_PER_SIDE_IN_ELEMENTS = SLACK_PER_SIDE_IN_VECTORS * N;
-    // We allocate the amount of slack space + up-to 2 more alignment blocks
+    // The formula for figuring out how much temporary space we need for partitioning:
+    // 2 x the number of slack elements on each side for the purpose of partitioning in unrolled manner +
+    // 2 x amount of maximal bytes needed for alignment (32)
+    // one more vector's worth of elements since we write with N-way stores from both ends of the temporary area
+    // and we must make sure we do not accidentally over-write from left -> right or vice-versa right on that edge...
+    // In other words, while we allocated this much temp memory, the actual amount of elements inside said memory
+    // is smaller by 8 elements + 1 for each alignment (max alignment is actually N-1, I just round up to N...)
+    // This long sense just means that we over-allocate N+2 elements...
     static const int PARTITION_TMP_SIZE_IN_ELEMENTS =
-            (2 * SLACK_PER_SIDE_IN_ELEMENTS + N + ((2 * ALIGN) / sizeof(T)));
+            (2 * SLACK_PER_SIDE_IN_ELEMENTS + N + 4*N);
 
     static int floor_log2_plus_one(int n) {
         auto result = 0;
@@ -315,7 +326,11 @@ private:
         // Pivot is mid, place it in the right hand side
         swap(mid, right);
 
-        auto sep = vectorized_partition(left, right, realignHint);
+        auto sep = (length < PARTITION_TMP_SIZE_IN_ELEMENTS) ?
+                vectorized_partition<SafeInnerUnroll>(left, right, realignHint) :
+                vectorized_partition<Unroll>(left, right, realignHint);
+
+
 
         _depth++;
         sort(left, sep - 2, realignHint.realign_right(), depthLimit);
@@ -338,6 +353,7 @@ private:
     }
 
 
+    template<int InnerUnroll>
     T* vectorized_partition(T* left, T* right, alignment_hint hint) {
         assert(right - left >= SMALL_SORT_THRESHOLD_ELEMENTS);
         assert(((size_t)left & ELEMENT_ALIGN) == 0);
@@ -405,8 +421,8 @@ private:
         // And also know for sure that our reads will never cross cache-lines
         // Otherwise, 50% of our AVX2 Loads will need to read from two cache-lines
 
-        auto leftAlign = hint.left_align;
-        auto rightAlign = hint.right_align;
+        const auto leftAlign = hint.left_align;
+        const auto rightAlign = hint.right_align;
 
         auto preAlignedLeft = left + leftAlign;
         auto preAlignedRight = right + rightAlign - N;
@@ -457,15 +473,19 @@ private:
         assert(((size_t)readRight & ALIGN_MASK) == 0);
 
         assert((((uint8_t*)readRight - (uint8_t*)readLeft) % ALIGN) == 0);
-        assert((readRight - readLeft) >= SLACK_PER_SIDE_IN_ELEMENTS * 2);
+        assert((readRight - readLeft) >= InnerUnroll * 2);
 
-        partition_block(readLeft  + 0 * N, P, tmpLeft, tmpRight);
-        partition_block(readRight - 1 * N, P, tmpLeft, tmpRight);
+        readRight -= N;
+
+        for (auto u = 0; u < InnerUnroll; u++) {
+            partition_block(readLeft  + u*N, P, tmpLeft, tmpRight);
+            partition_block(readRight - u*N, P, tmpLeft, tmpRight);
+        }
 
         tmpRight += N;
         // Adjust for the reading that was made above
-        readLeft  += 1 * N;
-        readRight -= 2 * N;
+        readLeft  += InnerUnroll*N;
+        readRight -= InnerUnroll*N;
 
         while (readRight >= readLeft) {
             T* nextPtr;
@@ -498,6 +518,7 @@ private:
     }
 public:
     void sort(T* left, T* right) {
+        printf("PARTITION_TMP_SIZE_IN_ELEMENTS=%d, Unroll=%d, SafeInnerUnroll=%d, MaxInnerUnroll=%d\n", PARTITION_TMP_SIZE_IN_ELEMENTS, Unroll, SafeInnerUnroll, MaxInnerUnroll);
         reset(left, right);
         auto depthLimit = 2 * floor_log2_plus_one(right + 1 - left);
         sort(left, right, alignment_hint(), depthLimit);

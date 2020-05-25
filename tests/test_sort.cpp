@@ -108,7 +108,7 @@ TEST_P(FullSortTest_i32, VxSort) {
     auto begin = V.data();
     auto end = V.data() + V.size() - 1;
 
-    auto sorter = gcsort::vxsort<int32_t>();
+    auto sorter = gcsort::vxsort<int32_t, 8>();
     sorter.sort(begin, end);
 
     EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
