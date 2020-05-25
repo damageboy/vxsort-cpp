@@ -14,6 +14,57 @@ namespace gcsort {
 using gcsort::smallsort::bitonic;
 
 template <typename T>
+class vxsort_blah_common {
+  typedef T __m256t __attribute__ ((__vector_size__ (32)));
+
+ public:
+  static void sort(T* ptr, int length) {
+    T *writeLeft = ptr;
+    T *writeRight = ptr + length;
+    auto pivot = get_vec_pivot(*ptr);
+    while (length--) {
+      partition_block(ptr++, pivot, writeLeft, writeRight);
+    }
+  }
+  static __m256i get_perm_32(int mask);
+};
+
+template <typename T>
+class vxsort_blah : protected vxsort_blah_common<T> {
+  typedef T __m256t __attribute__ ((__vector_size__ (32)));
+
+ public:
+  static __m256t get_vec_pivot(T);
+
+  static void partition_block(T* dataPtr,
+                              const __m256i& P,
+                              T*& writeLeft,
+                              T*& writeRight);
+
+};
+
+template <>
+class vxsort_blah<int64_t> {
+  static __m256i get_vec_pivot(int64_t p) {
+    return _mm256_set1_epi64x(p);
+  }
+
+  static void partition_block(int64_t* dataPtr,
+                              const __m256i& P,
+                              int64_t*& writeLeft,
+                              int64_t*& writeRight) {
+    auto dataVec = _mm256_load_si256((__m256i*)dataPtr);
+    auto mask = _mm256_movemask_pd(_mm256_cmpgt_epi64(dataVec, P));
+    dataVec = _mm256_permutevar8x32_epi32(dataVec, vxsort_blah_common<int64_t>::get_perm_32(mask));
+    _mm256_storeu_si256((__m256i*)writeLeft, dataVec);
+    _mm256_storeu_si256((__m256i*)writeRight, dataVec);
+    auto popCount = -_mm_popcnt_u64(mask);
+    writeRight += popCount;
+    writeLeft += popCount + 4;
+  }
+};
+
+template <typename T>
 class vxsort {
  public:
   static void sort(T* ptr, int length);
@@ -248,7 +299,7 @@ class vxsort<int64_t> {
 
   const static int8_t perm_table[128];
 
-  __m256i get_perm(int mask) {
+  static __m256i get_perm(int mask) {
     assert(mask >= 0);
     assert(mask <= 15);
     return _mm256_cvtepu8_epi32(_mm_loadu_si128((__m128i*)(perm_table + mask * 8)));
@@ -455,7 +506,7 @@ class vxsort<int64_t> {
     return writeLeft;
   }
 
-  void partition_block(int64_t* dataPtr,
+  static void partition_block(int64_t* dataPtr,
                        const __m256i& P,
                        int64_t*& writeLeft,
                        int64_t*& writeRight) {
