@@ -1,94 +1,82 @@
- #include "gmock/gmock.h"
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "util.h"
 
-#include <gcsort.h>
 #include <introsort.h>
-#include <bitonic_sort.h>
+#include <vxsort.h>
+#include <smallsort/bitonic_sort.h>
 
-#include <random>
 #include <algorithm>
 #include <iterator>
+#include <random>
 
 namespace gcsort_tests {
-    using testing::WhenSorted;
-    using testing::ElementsAreArray;
-    using testing::ValuesIn;
-
-
-    static std::vector<uint8_t *> generate_unique_ptrs_vec(size_t n) {
-        std::vector<uint8_t *> pvec(n);
-
-        std::iota(pvec.begin(), pvec.end(), (uint8_t *) 0x1000);
-
-        std::random_device rd;
-        std::mt19937 g(rd());
-
-        std::shuffle(pvec.begin(), pvec.end(), g);
-        return pvec;
-    }
-
-
-    template <typename IntType>
-    std::vector<IntType> range(IntType start, IntType stop, IntType step)
-    {
-      if (step == IntType(0))
-      {
-        throw std::invalid_argument("step for range must be non-zero");
-      }
-
-      std::vector<IntType> result;
-      IntType i = start;
-      while ((step > 0) ? (i <= stop) : (i > stop))
-      {
-        result.push_back(i);
-        i += step;
-      }
-
-      return result;
-    }
-
-    TEST(Sort, IntroSort) {
-        auto v = generate_unique_ptrs_vec(1000);
-
-        auto begin = v.data();
-        auto end = v.data() + v.size() - 1;
-
-        sort_introsort(begin, end);
-        EXPECT_THAT(v, WhenSorted(ElementsAreArray(v)));
-    }
+using testing::ElementsAreArray;
+using testing::ValuesIn;
+using testing::WhenSorted;
 
 
 
-    // A new one of these is create for each test
-    class SortTest : public testing::TestWithParam<int>
-    {
-    public:
-      virtual void SetUp(){}
-      virtual void TearDown(){}
-    };
+// A new one of these is create for each test
+struct SortTest : public testing::TestWithParam<int> {
+ protected:
+  std::vector<int64_t> V;
 
-  struct PrintValue {
-    template <class ParamType>
-    std::string operator()( const testing::TestParamInfo<ParamType>& info ) const
-    {
-      auto v = static_cast<int>(info.param);
-      return std::to_string(v);
-    }
-  };
+ public:
+  virtual void SetUp() {
+    V = std::vector<int64_t>(GetParam());
+    generate_unique_ptrs_vec(V);
+  }
+  virtual void TearDown() {}
+};
 
-    INSTANTIATE_TEST_SUITE_P(
-        BitonicSizes,
-        SortTest,
-        ValuesIn(range(4, 128, 4)),
-                           PrintValue());
-    
-    TEST_P(SortTest, BitonicSort) {
-      auto v = generate_unique_ptrs_vec(GetParam());
-      auto begin = v.data();
+struct PrintValue {
+  template <class ParamType>
+  std::string operator()(const testing::TestParamInfo<ParamType>& info) const {
+    auto v = static_cast<int>(info.param);
+    return std::to_string(v);
+  }
+};
 
-      gcsort::smallsort::bitonic_sort_int64_t((int64_t *) begin, GetParam());
+struct SmallSortTest : public SortTest {};
 
-      EXPECT_THAT(v, WhenSorted(ElementsAreArray(v)));
-    }
+INSTANTIATE_TEST_SUITE_P(BitonicSizes,
+                         SmallSortTest,
+                         ValuesIn(range(4, 64, 4)),
+                         PrintValue());
 
+TEST_P(SmallSortTest, BitonicSort) {
+  auto begin = V.data();
+
+  gcsort::smallsort::bitonic<int64_t>::sort((int64_t*)begin, GetParam());
+
+  EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
 }
+
+struct FullSortTest : public SortTest {};
+
+INSTANTIATE_TEST_SUITE_P(IntroSortSizes,
+                         FullSortTest,
+                         ValuesIn(multiply_range(10, 1000000, 10)),
+                         PrintValue());
+
+
+TEST_P(FullSortTest, IntroSort) {
+  auto begin = (uint8_t **)V.data();
+  auto end = (uint8_t **)V.data() + V.size() - 1;
+
+  sort_introsort(begin, end);
+  EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
+}
+
+TEST_P(FullSortTest, VxSort) {
+  auto begin = V.data();
+  auto end = V.data() + V.size() - 1;
+
+  auto sorter = gcsort::vxsort<int64_t>();
+  sorter.sort(begin, end);
+
+  EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
+}
+
+}  // namespace gcsort_tests
