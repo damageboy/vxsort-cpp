@@ -12,14 +12,16 @@
 
 #ifdef _MSC_VER
 // MSVC
+#include <intrin.h>
+#define mess_up_cmov() _ReadBarrier();
 #define INLINE __forceinline
 #define NOINLINE __declspec(noinline)
 #else
 // GCC + Clang
+#define mess_up_cmov()
 #define INLINE __attribute__((always_inline))
 #define NOINLINE __attribute__((noinline))
 #endif
-
 
 namespace gcsort {
 using gcsort::smallsort::bitonic;
@@ -59,6 +61,7 @@ public:
     //typedef T __m256t __attribute__ ((__vector_size__ (32)));
     typedef __m256 Tv;
 
+    static Tv load_vec(Tv*);
     static __m256i get_perm(int mask);
     static Tv get_vec_pivot(T pivot);
     static uint32_t get_cmpgt_mask(Tv a, Tv b);
@@ -71,10 +74,16 @@ private:
 public:
     typedef __m256i Tv;
 
+    static INLINE Tv load_vec(Tv* p) {
+        return _mm256_lddqu_si256(p);
+    }
+
     static INLINE __m256i get_perm(int mask) {
         assert(mask >= 0);
         assert(mask <= 15);
         return _mm256_cvtepu8_epi32(_mm_loadu_si128((__m128i*)(perm_table + mask * 8)));
+        //return _mm256_cvtepu8_epi32(
+        //    _mm_cvtsi64_si128(*((int64_t*)perm_table + mask)));
     }
     static INLINE  Tv get_vec_pivot(int64_t pivot) {
         return _mm256_set1_epi64x(pivot);
@@ -90,6 +99,9 @@ private:
     const static int8_t perm_table[2048];
 public:
     typedef __m256i Tv;
+    static INLINE Tv load_vec(Tv* p) {
+        return _mm256_lddqu_si256(p);
+    }
     static INLINE __m256i get_perm(int mask) {
         assert(mask >= 0);
         assert(mask <= 255);
@@ -106,8 +118,8 @@ public:
 
 template <typename T, int Unroll=1>
 class vxsort {
-    static_assert( Unroll >= 1, "Unroll can be in the range 1..12");
-    static_assert( Unroll <= 12, "Unroll can be in the range 1..12");
+    static_assert(Unroll >= 1, "Unroll can be in the range 1..12");
+    static_assert(Unroll <= 12, "Unroll can be in the range 1..12");
 
 private:
     //using Tv2 = Tp::Tv;
@@ -137,7 +149,7 @@ private:
     static const int PARTITION_TMP_SIZE_IN_ELEMENTS =
             (2 * SLACK_PER_SIDE_IN_ELEMENTS + N + 4*N);
 
-    static int floor_log2_plus_one(int n) {
+    static int floor_log2_plus_one(size_t n) {
         auto result = 0;
         while (n >= 1) {
             result++;
@@ -522,48 +534,46 @@ private:
         readRight -= InnerUnroll*N*2;
 
         while (readLeft < readRight) {
-
-            //printf("Entering unrolled iteration with %lld elements\n", readRight - readLeft);
-
             T* nextPtr;
-            if (writeRight - readRight < (2*SLACK_PER_SIDE_IN_ELEMENTS - N)) {
+          if (writeRight - readRight < (2 * SLACK_PER_SIDE_IN_ELEMENTS - N)) {
                 nextPtr = readRight;
                 readRight -= N * InnerUnroll;
             } else {
+                mess_up_cmov();
                 nextPtr = readLeft;
                 readLeft += N * InnerUnroll;
             }
 
-            __m256t d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11;
+            __m256t d01, d02, d03, d04, d05, d06, d07, d08, d09, d10, d11, d12;
 
             switch (InnerUnroll) {
-                case 12: d11 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr +  InnerUnroll - 12);
-                case 11: d10 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr  + InnerUnroll - 11);
-                case 10: d9 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr  + InnerUnroll - 10);
-                case 9: d8 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr  + InnerUnroll - 9);
-                case 8: d7 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr  + InnerUnroll - 8);
-                case 7: d6 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr  + InnerUnroll - 7);
-                case 6: d5 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr  + InnerUnroll - 6);
-                case 5: d4 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + InnerUnroll - 5);
-                case 4: d3 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + InnerUnroll - 4);
-                case 3: d2 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + InnerUnroll - 3);
-                case 2: d1 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + InnerUnroll - 2);
-                case 1: d0 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + InnerUnroll - 1);
+                case 12: d12 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll - 12);
+                case 11: d11 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll - 11);
+                case 10: d10 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll - 10);
+                case  9: d09 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll -  9);
+                case  8: d08 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll -  8);
+                case  7: d07 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll -  7);
+                case  6: d06 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll -  6);
+                case  5: d05 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll -  5);
+                case  4: d04 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll -  4);
+                case  3: d03 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll -  3);
+                case  2: d02 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll -  2);
+                case  1: d01 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll -  1);
             }
 
             switch (InnerUnroll) {
-                case 12: partition_block(d11, P, writeLeft, writeRight);
-                case 11: partition_block(d10, P, writeLeft, writeRight);
-                case 10: partition_block(d9, P, writeLeft, writeRight);
-                case 9: partition_block(d8, P, writeLeft, writeRight);
-                case 8: partition_block(d7, P, writeLeft, writeRight);
-                case 7: partition_block(d6, P, writeLeft, writeRight);
-                case 6: partition_block(d5, P, writeLeft, writeRight);
-                case 5: partition_block(d4, P, writeLeft, writeRight);
-                case 4: partition_block(d3, P, writeLeft, writeRight);
-                case 3: partition_block(d2, P, writeLeft, writeRight);
-                case 2: partition_block(d1, P, writeLeft, writeRight);
-                case 1: partition_block(d0, P, writeLeft, writeRight);
+                case 12: partition_block(d12, P, writeLeft, writeRight);
+                case 11: partition_block(d11, P, writeLeft, writeRight);
+                case 10: partition_block(d10, P, writeLeft, writeRight);
+                case  9: partition_block(d09, P, writeLeft, writeRight);
+                case  8: partition_block(d08, P, writeLeft, writeRight);
+                case  7: partition_block(d07, P, writeLeft, writeRight);
+                case  6: partition_block(d06, P, writeLeft, writeRight);
+                case  5: partition_block(d05, P, writeLeft, writeRight);
+                case  4: partition_block(d04, P, writeLeft, writeRight);
+                case  3: partition_block(d03, P, writeLeft, writeRight);
+                case  2: partition_block(d02, P, writeLeft, writeRight);
+                case  1: partition_block(d01, P, writeLeft, writeRight);
             }
         }
 
@@ -571,10 +581,11 @@ private:
 
         while (readLeft <= readRight) {
             T *nextPtr;
-            if (writeRight - readRight < N) {
+          if (writeRight - readRight < N) {
                 nextPtr = readRight;
                 readRight -= N;
             } else {
+                mess_up_cmov();
                 nextPtr = readLeft;
                 readLeft += N;
             }

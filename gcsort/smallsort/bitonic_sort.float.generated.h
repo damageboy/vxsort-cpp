@@ -15,7 +15,7 @@
 	#define NOINLINE __declspec(noinline)
 #else
     // GCC + Clang
-	#define INLINE __attribute__((always_inline))
+	#define INLINE  __attribute__((always_inline))
 	#define NOINLINE __attribute__((noinline))
 #endif
 
@@ -1497,7 +1497,7 @@ static NOINLINE void sort_16v(float *ptr) {
     _mm256_storeu_ps((float *) ptr + 14, d15);
     _mm256_storeu_ps((float *) ptr + 15, d16);
 }
-    static void sort(float *ptr, int length) {
+    static void sort(float *ptr, size_t length) {
     const int N = 8;
 
     switch(length / N) {

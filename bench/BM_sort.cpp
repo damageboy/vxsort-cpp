@@ -10,7 +10,7 @@
 
 benchmark::Counter make_time_per_n_counter(int64_t n) {
   return benchmark::Counter(
-      n,
+      (double) n,
       benchmark::Counter::kIsIterationInvariantRate |
       benchmark::Counter::kInvert,
       benchmark::Counter::kIs1000);

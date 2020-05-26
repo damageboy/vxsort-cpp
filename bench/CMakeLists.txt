@@ -14,5 +14,7 @@ target_link_libraries(${TARGET_NAME}
 
 configure_file(run.sh run.sh COPYONLY)
 
+configure_file(run.cmd run.cmd COPYONLY)
+
 add_test(${TARGET_NAME} gcsort_bench)
 
