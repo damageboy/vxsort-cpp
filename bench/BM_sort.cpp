@@ -19,61 +19,64 @@ benchmark::Counter make_time_per_n_counter(int64_t n) {
 static void BM_full_introsort(benchmark::State &state) {
     auto n = state.range(0);
     auto v = std::vector<uint8_t*>(n);
-    auto begin = v.data();
-    auto end = v.data() + v.size() - 1;
-
-    for (auto _ : state) {
-        state.PauseTiming();
-        generate_unique_ptrs_vec(v, n);
-        state.ResumeTiming();
-        sort_introsort(begin, end);
-    }
-
-  state.counters["Time/N"] = make_time_per_n_counter(n);
-}
-
-BENCHMARK(BM_full_introsort)->RangeMultiplier(2)->Range(4096, 1 << 18)->Unit(benchmark::kMillisecond);
-
-static void BM_full_vxsort_i64_simple(benchmark::State &state) {
-  auto n = state.range(0);
-  auto v = std::vector<int64_t>(n);
-  auto begin = v.data();
-  auto end = v.data() + v.size() - 1;
-
-  for (auto _ : state) {
-    state.PauseTiming();
+    const auto ITERATIONS = 10;
     generate_unique_ptrs_vec(v, n);
-    state.ResumeTiming();
-
-    auto sorter = gcsort::vxsort<int64_t>();
-    sorter.sort(begin, end);
-  }
-
-  state.counters["Time/N"] = make_time_per_n_counter(n);
-}
-
-BENCHMARK(BM_full_vxsort_i64_simple)->RangeMultiplier(2)->Range(4096, 1 << 18)->Unit(benchmark::kMillisecond);
-
-static void BM_full_vxsort_i32_simple(benchmark::State &state) {
-    auto n = state.range(0);
-    auto v = std::vector<int32_t>(n);
-    auto begin = v.data();
-    auto end = v.data() + v.size() - 1;
+    auto copies = generate_copies(ITERATIONS, n, v);
+    auto begins = generate_array_beginnings(copies);
+    auto ends = generate_array_beginnings(copies);
+    for (auto i = 0; i < copies.size(); i++)
+        ends[i] = begins[i] + n - 1;
 
     for (auto _ : state) {
         state.PauseTiming();
-        generate_unique_ptrs_vec(v, n);
+        refresh_copies(copies, v);
         state.ResumeTiming();
-
-        auto sorter = gcsort::vxsort<int32_t>();
-        sorter.sort(begin, end);
+        for (auto i = 0; i < ITERATIONS; i++) {
+            sort_introsort(begins[i], ends[i]);
+        }
     }
 
-    state.counters["Time/N"] = make_time_per_n_counter(n);
+  state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
 }
 
-BENCHMARK(BM_full_vxsort_i32_simple)->RangeMultiplier(2)->Range(4096, 1 << 18)->Unit(benchmark::kMillisecond);
+static const int MIN_SORT = 4096;
+static const int MAX_SORT = 1 << 20;
 
+BENCHMARK(BM_full_introsort)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond);
+
+template <class Q, int U> static void BM_full_vxsort(benchmark::State &state) {
+    auto n = state.range(0);
+    auto v = std::vector<Q>(n);
+    const auto ITERATIONS = 10;
+
+    generate_unique_ptrs_vec(v, n);
+    auto copies = generate_copies(ITERATIONS, n, v);
+    auto begins = generate_array_beginnings(copies);
+    auto ends = generate_array_beginnings(copies);
+    for (auto i = 0; i < copies.size(); i++)
+        ends[i] = begins[i] + n - 1;
+
+    auto sorter = gcsort::vxsort<Q, U>();
+
+    for (auto _ : state) {
+        state.PauseTiming();
+        refresh_copies(copies, v);
+        state.ResumeTiming();
+        for (auto i = 0; i < ITERATIONS; i++) {
+            sorter.sort(begins[i], ends[i]);
+        }
+    }
+
+    state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
+}
+BENCHMARK_TEMPLATE(BM_full_vxsort, int64_t, 1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond);
+BENCHMARK_TEMPLATE(BM_full_vxsort, int64_t, 4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond);
+BENCHMARK_TEMPLATE(BM_full_vxsort, int64_t, 8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond);
+BENCHMARK_TEMPLATE(BM_full_vxsort, int64_t, 12)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond);
+
+BENCHMARK_TEMPLATE(BM_full_vxsort, int32_t, 1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond);
+BENCHMARK_TEMPLATE(BM_full_vxsort, int32_t, 4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond);
+BENCHMARK_TEMPLATE(BM_full_vxsort, int32_t, 8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond);
 
 static void BM_insertionsort(benchmark::State &state) {
   static const int ITERATIONS = 1024;
@@ -97,7 +100,7 @@ static void BM_insertionsort(benchmark::State &state) {
 
   delete_copies(copies);
 
-  state.counters["Time/N"] = make_time_per_n_counter(n);
+  state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
 }
 BENCHMARK(BM_insertionsort)->DenseRange(4, 64, 4)->Unit(benchmark::kNanosecond);
 
@@ -122,7 +125,7 @@ static void BM_bitonic_sort_int64(benchmark::State &state) {
 
   delete_copies(copies);
 
-  state.counters["Time/N"] = make_time_per_n_counter(n);
+  state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
 }
 BENCHMARK(BM_bitonic_sort_int64)->DenseRange(4, 64, 4)->Unit(benchmark::kNanosecond);
 
@@ -146,6 +149,6 @@ static void BM_bitonic_sort_int32(benchmark::State &state) {
 
   delete_copies(copies);
 
-  state.counters["Time/N"] = make_time_per_n_counter(n);
+  state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
 }
 BENCHMARK(BM_bitonic_sort_int32)->DenseRange(8, 128, 8)->Unit(benchmark::kNanosecond);
