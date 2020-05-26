@@ -8,88 +8,102 @@
 
 #include <immintrin.h>
 #include "bitonic_sort.h"
+
+#ifdef _MSC_VER
+    // MSVC
+	#define INLINE __forceinline
+	#define NOINLINE __declspec(noinline)
+#else
+    // GCC + Clang
+	#define INLINE __attribute__((always_inline))
+	#define NOINLINE __attribute__((noinline))
+#endif
+
+#define i2d _mm256_castsi256_pd
+#define d2i _mm256_castpd_si256
+
 namespace gcsort {
 namespace smallsort {
-template<> class bitonic<uint64_t> {
+template<> struct bitonic<uint64_t> {
 public:
 
-    static inline void sort_01v_ascending(__m256i& d01) {
+    static INLINE void sort_01v_ascending(__m256i& d01) {
         __m256i  min, max, s, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
-        s = _mm256_shuffle_pd((__m256d) d01, (__m256d) d01, 0x5);
+        s = d2i(_mm256_shuffle_pd(i2d(d01), i2d(d01), 0x5));
         cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, s), _mm256_xor_si256(topBit, d01));
-        min = _mm256_blendv_pd(s, d01, cmp);
-        max = _mm256_blendv_pd(d01, s, cmp);
-        d01 = _mm256_blend_pd((__m256d) min, (__m256d) max, 0xA);
-    
-        s = _mm256_permute4x64_pd((__m256d) d01, 0x1B);
+        min = d2i(_mm256_blendv_pd(i2d(s), i2d(d01), i2d(cmp)));
+        max = d2i(_mm256_blendv_pd(i2d(d01), i2d(s), i2d(cmp)));
+        d01 = d2i(_mm256_blend_pd(i2d(min), i2d(max), 0xA));
+
+        s = d2i(_mm256_permute4x64_pd(i2d(d01), 0x1B));
         cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, s), _mm256_xor_si256(topBit, d01));
-        min = _mm256_blendv_pd(s, d01, cmp);
-        max = _mm256_blendv_pd(d01, s, cmp);
-        d01 = _mm256_blend_pd((__m256d) min, (__m256d) max, 0xC);
-    
-        s = _mm256_shuffle_pd((__m256d) d01, (__m256d) d01, 0x5);
+        min = d2i(_mm256_blendv_pd(i2d(s), i2d(d01), i2d(cmp)));
+        max = d2i(_mm256_blendv_pd(i2d(d01), i2d(s), i2d(cmp)));
+        d01 = d2i(_mm256_blend_pd(i2d(min), i2d(max), 0xC));
+
+        s = d2i(_mm256_shuffle_pd(i2d(d01), i2d(d01), 0x5));
         cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, s), _mm256_xor_si256(topBit, d01));
-        min = _mm256_blendv_pd(s, d01, cmp);
-        max = _mm256_blendv_pd(d01, s, cmp);
-        d01 = _mm256_blend_pd((__m256d) min, (__m256d) max, 0xA);
+        min = d2i(_mm256_blendv_pd(i2d(s), i2d(d01), i2d(cmp)));
+        max = d2i(_mm256_blendv_pd(i2d(d01), i2d(s), i2d(cmp)));
+        d01 = d2i(_mm256_blend_pd(i2d(min), i2d(max), 0xA));
 }
-    static inline void sort_01v_merge_ascending(__m256i& d01) {
+    static INLINE void sort_01v_merge_ascending(__m256i& d01) {
         __m256i  min, max, s, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
-        s = _mm256_permute4x64_pd((__m256d) d01, 0x4E);
+        s = d2i(_mm256_permute4x64_pd(i2d(d01), 0x4E));
         cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, s), _mm256_xor_si256(topBit, d01));
-        min = _mm256_blendv_pd(s, d01, cmp);
-        max = _mm256_blendv_pd(d01, s, cmp);
-        d01 = _mm256_blend_pd((__m256d) min, (__m256d) max, 0xC);
+        min = d2i(_mm256_blendv_pd(i2d(s), i2d(d01), i2d(cmp)));
+        max = d2i(_mm256_blendv_pd(i2d(d01), i2d(s), i2d(cmp)));
+        d01 = d2i(_mm256_blend_pd(i2d(min), i2d(max), 0xC));
 
-        s = _mm256_shuffle_pd((__m256d) d01, (__m256d) d01, 0x5);
+        s = d2i(_mm256_shuffle_pd(i2d(d01), i2d(d01), 0x5));
         cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, s), _mm256_xor_si256(topBit, d01));
-        min = _mm256_blendv_pd(s, d01, cmp);
-        max = _mm256_blendv_pd(d01, s, cmp);
-        d01 = _mm256_blend_pd((__m256d) min, (__m256d) max, 0xA);
+        min = d2i(_mm256_blendv_pd(i2d(s), i2d(d01), i2d(cmp)));
+        max = d2i(_mm256_blendv_pd(i2d(d01), i2d(s), i2d(cmp)));
+        d01 = d2i(_mm256_blend_pd(i2d(min), i2d(max), 0xA));
 }
-    static inline void sort_01v_descending(__m256i& d01) {
+    static INLINE void sort_01v_descending(__m256i& d01) {
         __m256i  min, max, s, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
-        s = _mm256_shuffle_pd((__m256d) d01, (__m256d) d01, 0x5);
+        s = d2i(_mm256_shuffle_pd(i2d(d01), i2d(d01), 0x5));
         cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, s), _mm256_xor_si256(topBit, d01));
-        min = _mm256_blendv_pd(s, d01, cmp);
-        max = _mm256_blendv_pd(d01, s, cmp);
-        d01 = _mm256_blend_pd((__m256d) max, (__m256d) min, 0xA);
-    
-        s = _mm256_permute4x64_pd((__m256d) d01, 0x1B);
+        min = d2i(_mm256_blendv_pd(i2d(s), i2d(d01), i2d(cmp)));
+        max = d2i(_mm256_blendv_pd(i2d(d01), i2d(s), i2d(cmp)));
+        d01 = d2i(_mm256_blend_pd(i2d(max), i2d(min), 0xA));
+
+        s = d2i(_mm256_permute4x64_pd(i2d(d01), 0x1B));
         cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, s), _mm256_xor_si256(topBit, d01));
-        min = _mm256_blendv_pd(s, d01, cmp);
-        max = _mm256_blendv_pd(d01, s, cmp);
-        d01 = _mm256_blend_pd((__m256d) max, (__m256d) min, 0xC);
-    
-        s = _mm256_shuffle_pd((__m256d) d01, (__m256d) d01, 0x5);
+        min = d2i(_mm256_blendv_pd(i2d(s), i2d(d01), i2d(cmp)));
+        max = d2i(_mm256_blendv_pd(i2d(d01), i2d(s), i2d(cmp)));
+        d01 = d2i(_mm256_blend_pd(i2d(max), i2d(min), 0xC));
+
+        s = d2i(_mm256_shuffle_pd(i2d(d01), i2d(d01), 0x5));
         cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, s), _mm256_xor_si256(topBit, d01));
-        min = _mm256_blendv_pd(s, d01, cmp);
-        max = _mm256_blendv_pd(d01, s, cmp);
-        d01 = _mm256_blend_pd((__m256d) max, (__m256d) min, 0xA);
+        min = d2i(_mm256_blendv_pd(i2d(s), i2d(d01), i2d(cmp)));
+        max = d2i(_mm256_blendv_pd(i2d(d01), i2d(s), i2d(cmp)));
+        d01 = d2i(_mm256_blend_pd(i2d(max), i2d(min), 0xA));
 }
-    static inline void sort_01v_merge_descending(__m256i& d01) {
+    static INLINE void sort_01v_merge_descending(__m256i& d01) {
         __m256i  min, max, s, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
-        s = _mm256_permute4x64_pd((__m256d) d01, 0x4E);
+        s = d2i(_mm256_permute4x64_pd(i2d(d01), 0x4E));
         cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, s), _mm256_xor_si256(topBit, d01));
-        min = _mm256_blendv_pd(s, d01, cmp);
-        max = _mm256_blendv_pd(d01, s, cmp);
-        d01 = _mm256_blend_pd((__m256d) max, (__m256d) min, 0xC);
+        min = d2i(_mm256_blendv_pd(i2d(s), i2d(d01), i2d(cmp)));
+        max = d2i(_mm256_blendv_pd(i2d(d01), i2d(s), i2d(cmp)));
+        d01 = d2i(_mm256_blend_pd(i2d(max), i2d(min), 0xC));
 
-        s = _mm256_shuffle_pd((__m256d) d01, (__m256d) d01, 0x5);
+        s = d2i(_mm256_shuffle_pd(i2d(d01), i2d(d01), 0x5));
         cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, s), _mm256_xor_si256(topBit, d01));
-        min = _mm256_blendv_pd(s, d01, cmp);
-        max = _mm256_blendv_pd(d01, s, cmp);
-        d01 = _mm256_blend_pd((__m256d) max, (__m256d) min, 0xA);
+        min = d2i(_mm256_blendv_pd(i2d(s), i2d(d01), i2d(cmp)));
+        max = d2i(_mm256_blendv_pd(i2d(d01), i2d(s), i2d(cmp)));
+        d01 = d2i(_mm256_blend_pd(i2d(max), i2d(min), 0xA));
 }
-    static inline void sort_02v_ascending(__m256i& d01, __m256i& d02) {
+    static INLINE void sort_02v_ascending(__m256i& d01, __m256i& d02) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -98,13 +112,13 @@ public:
 
     tmp = d02;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d01), _mm256_xor_si256(topBit, d02));
-    d02 = _mm256_blendv_pd(d02, d01, cmp);
-    d01 = _mm256_blendv_pd(d01, tmp, cmp);
+    d02 = d2i(_mm256_blendv_pd(i2d(d02), i2d(d01), i2d(cmp)));
+    d01 = d2i(_mm256_blendv_pd(i2d(d01), i2d(tmp), i2d(cmp)));
 
     sort_01v_merge_ascending(d01);
     sort_01v_merge_ascending(d02);
 }
-    static inline void sort_02v_descending(__m256i& d01, __m256i& d02) {
+    static INLINE void sort_02v_descending(__m256i& d01, __m256i& d02) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -113,39 +127,39 @@ public:
 
     tmp = d02;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d01), _mm256_xor_si256(topBit, d02));
-    d02 = _mm256_blendv_pd(d02, d01, cmp);
-    d01 = _mm256_blendv_pd(d01, tmp, cmp);
+    d02 = d2i(_mm256_blendv_pd(i2d(d02), i2d(d01), i2d(cmp)));
+    d01 = d2i(_mm256_blendv_pd(i2d(d01), i2d(tmp), i2d(cmp)));
 
     sort_01v_merge_descending(d01);
     sort_01v_merge_descending(d02);
 }
-    static inline void sort_02v_merge_ascending(__m256i& d01, __m256i& d02) {
+    static INLINE void sort_02v_merge_ascending(__m256i& d01, __m256i& d02) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
     tmp = d01;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d02), _mm256_xor_si256(topBit, d01));
-    d01 = _mm256_blendv_pd(d02, d01, cmp);
+    d01 = d2i(_mm256_blendv_pd(i2d(d02), i2d(d01), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d02), _mm256_xor_si256(topBit, tmp));
-    d02 = _mm256_blendv_pd(tmp, d02, cmp);
+    d02 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d02), i2d(cmp)));
 
     sort_01v_merge_ascending(d01);
     sort_01v_merge_ascending(d02);
 }
-    static inline void sort_02v_merge_descending(__m256i& d01, __m256i& d02) {
+    static INLINE void sort_02v_merge_descending(__m256i& d01, __m256i& d02) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
     tmp = d01;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d02), _mm256_xor_si256(topBit, d01));
-    d01 = _mm256_blendv_pd(d02, d01, cmp);
+    d01 = d2i(_mm256_blendv_pd(i2d(d02), i2d(d01), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d02), _mm256_xor_si256(topBit, tmp));
-    d02 = _mm256_blendv_pd(tmp, d02, cmp);
+    d02 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d02), i2d(cmp)));
 
     sort_01v_merge_descending(d01);
     sort_01v_merge_descending(d02);
 }
-    static inline void sort_03v_ascending(__m256i& d01, __m256i& d02, __m256i& d03) {
+    static INLINE void sort_03v_ascending(__m256i& d01, __m256i& d02, __m256i& d03) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -154,13 +168,13 @@ public:
 
     tmp = d03;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d02), _mm256_xor_si256(topBit, d03));
-    d03 = _mm256_blendv_pd(d03, d02, cmp);
-    d02 = _mm256_blendv_pd(d02, tmp, cmp);
+    d03 = d2i(_mm256_blendv_pd(i2d(d03), i2d(d02), i2d(cmp)));
+    d02 = d2i(_mm256_blendv_pd(i2d(d02), i2d(tmp), i2d(cmp)));
 
     sort_02v_merge_ascending(d01, d02);
     sort_01v_merge_ascending(d03);
 }
-    static inline void sort_03v_descending(__m256i& d01, __m256i& d02, __m256i& d03) {
+    static INLINE void sort_03v_descending(__m256i& d01, __m256i& d02, __m256i& d03) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -169,39 +183,39 @@ public:
 
     tmp = d03;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d02), _mm256_xor_si256(topBit, d03));
-    d03 = _mm256_blendv_pd(d03, d02, cmp);
-    d02 = _mm256_blendv_pd(d02, tmp, cmp);
+    d03 = d2i(_mm256_blendv_pd(i2d(d03), i2d(d02), i2d(cmp)));
+    d02 = d2i(_mm256_blendv_pd(i2d(d02), i2d(tmp), i2d(cmp)));
 
     sort_02v_merge_descending(d01, d02);
     sort_01v_merge_descending(d03);
 }
-    static inline void sort_03v_merge_ascending(__m256i& d01, __m256i& d02, __m256i& d03) {
+    static INLINE void sort_03v_merge_ascending(__m256i& d01, __m256i& d02, __m256i& d03) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
     tmp = d01;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d03), _mm256_xor_si256(topBit, d01));
-    d01 = _mm256_blendv_pd(d03, d01, cmp);
+    d01 = d2i(_mm256_blendv_pd(i2d(d03), i2d(d01), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d03), _mm256_xor_si256(topBit, tmp));
-    d03 = _mm256_blendv_pd(tmp, d03, cmp);
+    d03 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d03), i2d(cmp)));
 
     sort_02v_merge_ascending(d01, d02);
     sort_01v_merge_ascending(d03);
 }
-    static inline void sort_03v_merge_descending(__m256i& d01, __m256i& d02, __m256i& d03) {
+    static INLINE void sort_03v_merge_descending(__m256i& d01, __m256i& d02, __m256i& d03) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
     tmp = d01;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d03), _mm256_xor_si256(topBit, d01));
-    d01 = _mm256_blendv_pd(d03, d01, cmp);
+    d01 = d2i(_mm256_blendv_pd(i2d(d03), i2d(d01), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d03), _mm256_xor_si256(topBit, tmp));
-    d03 = _mm256_blendv_pd(tmp, d03, cmp);
+    d03 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d03), i2d(cmp)));
 
     sort_02v_merge_descending(d01, d02);
     sort_01v_merge_descending(d03);
 }
-    static inline void sort_04v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04) {
+    static INLINE void sort_04v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -210,18 +224,18 @@ public:
 
     tmp = d03;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d02), _mm256_xor_si256(topBit, d03));
-    d03 = _mm256_blendv_pd(d03, d02, cmp);
-    d02 = _mm256_blendv_pd(d02, tmp, cmp);
+    d03 = d2i(_mm256_blendv_pd(i2d(d03), i2d(d02), i2d(cmp)));
+    d02 = d2i(_mm256_blendv_pd(i2d(d02), i2d(tmp), i2d(cmp)));
 
     tmp = d04;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d01), _mm256_xor_si256(topBit, d04));
-    d04 = _mm256_blendv_pd(d04, d01, cmp);
-    d01 = _mm256_blendv_pd(d01, tmp, cmp);
+    d04 = d2i(_mm256_blendv_pd(i2d(d04), i2d(d01), i2d(cmp)));
+    d01 = d2i(_mm256_blendv_pd(i2d(d01), i2d(tmp), i2d(cmp)));
 
     sort_02v_merge_ascending(d01, d02);
     sort_02v_merge_ascending(d03, d04);
 }
-    static inline void sort_04v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04) {
+    static INLINE void sort_04v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -230,56 +244,56 @@ public:
 
     tmp = d03;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d02), _mm256_xor_si256(topBit, d03));
-    d03 = _mm256_blendv_pd(d03, d02, cmp);
-    d02 = _mm256_blendv_pd(d02, tmp, cmp);
+    d03 = d2i(_mm256_blendv_pd(i2d(d03), i2d(d02), i2d(cmp)));
+    d02 = d2i(_mm256_blendv_pd(i2d(d02), i2d(tmp), i2d(cmp)));
 
     tmp = d04;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d01), _mm256_xor_si256(topBit, d04));
-    d04 = _mm256_blendv_pd(d04, d01, cmp);
-    d01 = _mm256_blendv_pd(d01, tmp, cmp);
+    d04 = d2i(_mm256_blendv_pd(i2d(d04), i2d(d01), i2d(cmp)));
+    d01 = d2i(_mm256_blendv_pd(i2d(d01), i2d(tmp), i2d(cmp)));
 
     sort_02v_merge_descending(d01, d02);
     sort_02v_merge_descending(d03, d04);
 }
-    static inline void sort_04v_merge_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04) {
+    static INLINE void sort_04v_merge_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
     tmp = d01;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d03), _mm256_xor_si256(topBit, d01));
-    d01 = _mm256_blendv_pd(d03, d01, cmp);
+    d01 = d2i(_mm256_blendv_pd(i2d(d03), i2d(d01), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d03), _mm256_xor_si256(topBit, tmp));
-    d03 = _mm256_blendv_pd(tmp, d03, cmp);
+    d03 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d03), i2d(cmp)));
 
     tmp = d02;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d04), _mm256_xor_si256(topBit, d02));
-    d02 = _mm256_blendv_pd(d04, d02, cmp);
+    d02 = d2i(_mm256_blendv_pd(i2d(d04), i2d(d02), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d04), _mm256_xor_si256(topBit, tmp));
-    d04 = _mm256_blendv_pd(tmp, d04, cmp);
+    d04 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d04), i2d(cmp)));
 
     sort_02v_merge_ascending(d01, d02);
     sort_02v_merge_ascending(d03, d04);
 }
-    static inline void sort_04v_merge_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04) {
+    static INLINE void sort_04v_merge_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
     tmp = d01;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d03), _mm256_xor_si256(topBit, d01));
-    d01 = _mm256_blendv_pd(d03, d01, cmp);
+    d01 = d2i(_mm256_blendv_pd(i2d(d03), i2d(d01), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d03), _mm256_xor_si256(topBit, tmp));
-    d03 = _mm256_blendv_pd(tmp, d03, cmp);
+    d03 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d03), i2d(cmp)));
 
     tmp = d02;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d04), _mm256_xor_si256(topBit, d02));
-    d02 = _mm256_blendv_pd(d04, d02, cmp);
+    d02 = d2i(_mm256_blendv_pd(i2d(d04), i2d(d02), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d04), _mm256_xor_si256(topBit, tmp));
-    d04 = _mm256_blendv_pd(tmp, d04, cmp);
+    d04 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d04), i2d(cmp)));
 
     sort_02v_merge_descending(d01, d02);
     sort_02v_merge_descending(d03, d04);
 }
-    static inline void sort_05v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05) {
+    static INLINE void sort_05v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -288,13 +302,13 @@ public:
 
     tmp = d05;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d04), _mm256_xor_si256(topBit, d05));
-    d05 = _mm256_blendv_pd(d05, d04, cmp);
-    d04 = _mm256_blendv_pd(d04, tmp, cmp);
+    d05 = d2i(_mm256_blendv_pd(i2d(d05), i2d(d04), i2d(cmp)));
+    d04 = d2i(_mm256_blendv_pd(i2d(d04), i2d(tmp), i2d(cmp)));
 
     sort_04v_merge_ascending(d01, d02, d03, d04);
     sort_01v_merge_ascending(d05);
 }
-    static inline void sort_05v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05) {
+    static INLINE void sort_05v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -303,39 +317,39 @@ public:
 
     tmp = d05;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d04), _mm256_xor_si256(topBit, d05));
-    d05 = _mm256_blendv_pd(d05, d04, cmp);
-    d04 = _mm256_blendv_pd(d04, tmp, cmp);
+    d05 = d2i(_mm256_blendv_pd(i2d(d05), i2d(d04), i2d(cmp)));
+    d04 = d2i(_mm256_blendv_pd(i2d(d04), i2d(tmp), i2d(cmp)));
 
     sort_04v_merge_descending(d01, d02, d03, d04);
     sort_01v_merge_descending(d05);
 }
-    static inline void sort_05v_merge_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05) {
+    static INLINE void sort_05v_merge_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
     tmp = d01;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, d01));
-    d01 = _mm256_blendv_pd(d05, d01, cmp);
+    d01 = d2i(_mm256_blendv_pd(i2d(d05), i2d(d01), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, tmp));
-    d05 = _mm256_blendv_pd(tmp, d05, cmp);
+    d05 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d05), i2d(cmp)));
 
     sort_04v_merge_ascending(d01, d02, d03, d04);
     sort_01v_merge_ascending(d05);
 }
-    static inline void sort_05v_merge_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05) {
+    static INLINE void sort_05v_merge_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
     tmp = d01;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, d01));
-    d01 = _mm256_blendv_pd(d05, d01, cmp);
+    d01 = d2i(_mm256_blendv_pd(i2d(d05), i2d(d01), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, tmp));
-    d05 = _mm256_blendv_pd(tmp, d05, cmp);
+    d05 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d05), i2d(cmp)));
 
     sort_04v_merge_descending(d01, d02, d03, d04);
     sort_01v_merge_descending(d05);
 }
-    static inline void sort_06v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06) {
+    static INLINE void sort_06v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -344,18 +358,18 @@ public:
 
     tmp = d05;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d04), _mm256_xor_si256(topBit, d05));
-    d05 = _mm256_blendv_pd(d05, d04, cmp);
-    d04 = _mm256_blendv_pd(d04, tmp, cmp);
+    d05 = d2i(_mm256_blendv_pd(i2d(d05), i2d(d04), i2d(cmp)));
+    d04 = d2i(_mm256_blendv_pd(i2d(d04), i2d(tmp), i2d(cmp)));
 
     tmp = d06;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d03), _mm256_xor_si256(topBit, d06));
-    d06 = _mm256_blendv_pd(d06, d03, cmp);
-    d03 = _mm256_blendv_pd(d03, tmp, cmp);
+    d06 = d2i(_mm256_blendv_pd(i2d(d06), i2d(d03), i2d(cmp)));
+    d03 = d2i(_mm256_blendv_pd(i2d(d03), i2d(tmp), i2d(cmp)));
 
     sort_04v_merge_ascending(d01, d02, d03, d04);
     sort_02v_merge_ascending(d05, d06);
 }
-    static inline void sort_06v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06) {
+    static INLINE void sort_06v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -364,56 +378,56 @@ public:
 
     tmp = d05;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d04), _mm256_xor_si256(topBit, d05));
-    d05 = _mm256_blendv_pd(d05, d04, cmp);
-    d04 = _mm256_blendv_pd(d04, tmp, cmp);
+    d05 = d2i(_mm256_blendv_pd(i2d(d05), i2d(d04), i2d(cmp)));
+    d04 = d2i(_mm256_blendv_pd(i2d(d04), i2d(tmp), i2d(cmp)));
 
     tmp = d06;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d03), _mm256_xor_si256(topBit, d06));
-    d06 = _mm256_blendv_pd(d06, d03, cmp);
-    d03 = _mm256_blendv_pd(d03, tmp, cmp);
+    d06 = d2i(_mm256_blendv_pd(i2d(d06), i2d(d03), i2d(cmp)));
+    d03 = d2i(_mm256_blendv_pd(i2d(d03), i2d(tmp), i2d(cmp)));
 
     sort_04v_merge_descending(d01, d02, d03, d04);
     sort_02v_merge_descending(d05, d06);
 }
-    static inline void sort_06v_merge_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06) {
+    static INLINE void sort_06v_merge_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
     tmp = d01;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, d01));
-    d01 = _mm256_blendv_pd(d05, d01, cmp);
+    d01 = d2i(_mm256_blendv_pd(i2d(d05), i2d(d01), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, tmp));
-    d05 = _mm256_blendv_pd(tmp, d05, cmp);
+    d05 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d05), i2d(cmp)));
 
     tmp = d02;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, d02));
-    d02 = _mm256_blendv_pd(d06, d02, cmp);
+    d02 = d2i(_mm256_blendv_pd(i2d(d06), i2d(d02), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, tmp));
-    d06 = _mm256_blendv_pd(tmp, d06, cmp);
+    d06 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d06), i2d(cmp)));
 
     sort_04v_merge_ascending(d01, d02, d03, d04);
     sort_02v_merge_ascending(d05, d06);
 }
-    static inline void sort_06v_merge_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06) {
+    static INLINE void sort_06v_merge_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
     tmp = d01;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, d01));
-    d01 = _mm256_blendv_pd(d05, d01, cmp);
+    d01 = d2i(_mm256_blendv_pd(i2d(d05), i2d(d01), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, tmp));
-    d05 = _mm256_blendv_pd(tmp, d05, cmp);
+    d05 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d05), i2d(cmp)));
 
     tmp = d02;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, d02));
-    d02 = _mm256_blendv_pd(d06, d02, cmp);
+    d02 = d2i(_mm256_blendv_pd(i2d(d06), i2d(d02), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, tmp));
-    d06 = _mm256_blendv_pd(tmp, d06, cmp);
+    d06 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d06), i2d(cmp)));
 
     sort_04v_merge_descending(d01, d02, d03, d04);
     sort_02v_merge_descending(d05, d06);
 }
-    static inline void sort_07v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07) {
+    static INLINE void sort_07v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -422,23 +436,23 @@ public:
 
     tmp = d05;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d04), _mm256_xor_si256(topBit, d05));
-    d05 = _mm256_blendv_pd(d05, d04, cmp);
-    d04 = _mm256_blendv_pd(d04, tmp, cmp);
+    d05 = d2i(_mm256_blendv_pd(i2d(d05), i2d(d04), i2d(cmp)));
+    d04 = d2i(_mm256_blendv_pd(i2d(d04), i2d(tmp), i2d(cmp)));
 
     tmp = d06;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d03), _mm256_xor_si256(topBit, d06));
-    d06 = _mm256_blendv_pd(d06, d03, cmp);
-    d03 = _mm256_blendv_pd(d03, tmp, cmp);
+    d06 = d2i(_mm256_blendv_pd(i2d(d06), i2d(d03), i2d(cmp)));
+    d03 = d2i(_mm256_blendv_pd(i2d(d03), i2d(tmp), i2d(cmp)));
 
     tmp = d07;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d02), _mm256_xor_si256(topBit, d07));
-    d07 = _mm256_blendv_pd(d07, d02, cmp);
-    d02 = _mm256_blendv_pd(d02, tmp, cmp);
+    d07 = d2i(_mm256_blendv_pd(i2d(d07), i2d(d02), i2d(cmp)));
+    d02 = d2i(_mm256_blendv_pd(i2d(d02), i2d(tmp), i2d(cmp)));
 
     sort_04v_merge_ascending(d01, d02, d03, d04);
     sort_03v_merge_ascending(d05, d06, d07);
 }
-    static inline void sort_07v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07) {
+    static INLINE void sort_07v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -447,73 +461,73 @@ public:
 
     tmp = d05;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d04), _mm256_xor_si256(topBit, d05));
-    d05 = _mm256_blendv_pd(d05, d04, cmp);
-    d04 = _mm256_blendv_pd(d04, tmp, cmp);
+    d05 = d2i(_mm256_blendv_pd(i2d(d05), i2d(d04), i2d(cmp)));
+    d04 = d2i(_mm256_blendv_pd(i2d(d04), i2d(tmp), i2d(cmp)));
 
     tmp = d06;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d03), _mm256_xor_si256(topBit, d06));
-    d06 = _mm256_blendv_pd(d06, d03, cmp);
-    d03 = _mm256_blendv_pd(d03, tmp, cmp);
+    d06 = d2i(_mm256_blendv_pd(i2d(d06), i2d(d03), i2d(cmp)));
+    d03 = d2i(_mm256_blendv_pd(i2d(d03), i2d(tmp), i2d(cmp)));
 
     tmp = d07;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d02), _mm256_xor_si256(topBit, d07));
-    d07 = _mm256_blendv_pd(d07, d02, cmp);
-    d02 = _mm256_blendv_pd(d02, tmp, cmp);
+    d07 = d2i(_mm256_blendv_pd(i2d(d07), i2d(d02), i2d(cmp)));
+    d02 = d2i(_mm256_blendv_pd(i2d(d02), i2d(tmp), i2d(cmp)));
 
     sort_04v_merge_descending(d01, d02, d03, d04);
     sort_03v_merge_descending(d05, d06, d07);
 }
-    static inline void sort_07v_merge_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07) {
+    static INLINE void sort_07v_merge_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
     tmp = d01;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, d01));
-    d01 = _mm256_blendv_pd(d05, d01, cmp);
+    d01 = d2i(_mm256_blendv_pd(i2d(d05), i2d(d01), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, tmp));
-    d05 = _mm256_blendv_pd(tmp, d05, cmp);
+    d05 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d05), i2d(cmp)));
 
     tmp = d02;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, d02));
-    d02 = _mm256_blendv_pd(d06, d02, cmp);
+    d02 = d2i(_mm256_blendv_pd(i2d(d06), i2d(d02), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, tmp));
-    d06 = _mm256_blendv_pd(tmp, d06, cmp);
+    d06 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d06), i2d(cmp)));
 
     tmp = d03;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d07), _mm256_xor_si256(topBit, d03));
-    d03 = _mm256_blendv_pd(d07, d03, cmp);
+    d03 = d2i(_mm256_blendv_pd(i2d(d07), i2d(d03), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d07), _mm256_xor_si256(topBit, tmp));
-    d07 = _mm256_blendv_pd(tmp, d07, cmp);
+    d07 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d07), i2d(cmp)));
 
     sort_04v_merge_ascending(d01, d02, d03, d04);
     sort_03v_merge_ascending(d05, d06, d07);
 }
-    static inline void sort_07v_merge_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07) {
+    static INLINE void sort_07v_merge_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
     tmp = d01;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, d01));
-    d01 = _mm256_blendv_pd(d05, d01, cmp);
+    d01 = d2i(_mm256_blendv_pd(i2d(d05), i2d(d01), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, tmp));
-    d05 = _mm256_blendv_pd(tmp, d05, cmp);
+    d05 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d05), i2d(cmp)));
 
     tmp = d02;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, d02));
-    d02 = _mm256_blendv_pd(d06, d02, cmp);
+    d02 = d2i(_mm256_blendv_pd(i2d(d06), i2d(d02), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, tmp));
-    d06 = _mm256_blendv_pd(tmp, d06, cmp);
+    d06 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d06), i2d(cmp)));
 
     tmp = d03;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d07), _mm256_xor_si256(topBit, d03));
-    d03 = _mm256_blendv_pd(d07, d03, cmp);
+    d03 = d2i(_mm256_blendv_pd(i2d(d07), i2d(d03), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d07), _mm256_xor_si256(topBit, tmp));
-    d07 = _mm256_blendv_pd(tmp, d07, cmp);
+    d07 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d07), i2d(cmp)));
 
     sort_04v_merge_descending(d01, d02, d03, d04);
     sort_03v_merge_descending(d05, d06, d07);
 }
-    static inline void sort_08v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08) {
+    static INLINE void sort_08v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -522,28 +536,28 @@ public:
 
     tmp = d05;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d04), _mm256_xor_si256(topBit, d05));
-    d05 = _mm256_blendv_pd(d05, d04, cmp);
-    d04 = _mm256_blendv_pd(d04, tmp, cmp);
+    d05 = d2i(_mm256_blendv_pd(i2d(d05), i2d(d04), i2d(cmp)));
+    d04 = d2i(_mm256_blendv_pd(i2d(d04), i2d(tmp), i2d(cmp)));
 
     tmp = d06;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d03), _mm256_xor_si256(topBit, d06));
-    d06 = _mm256_blendv_pd(d06, d03, cmp);
-    d03 = _mm256_blendv_pd(d03, tmp, cmp);
+    d06 = d2i(_mm256_blendv_pd(i2d(d06), i2d(d03), i2d(cmp)));
+    d03 = d2i(_mm256_blendv_pd(i2d(d03), i2d(tmp), i2d(cmp)));
 
     tmp = d07;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d02), _mm256_xor_si256(topBit, d07));
-    d07 = _mm256_blendv_pd(d07, d02, cmp);
-    d02 = _mm256_blendv_pd(d02, tmp, cmp);
+    d07 = d2i(_mm256_blendv_pd(i2d(d07), i2d(d02), i2d(cmp)));
+    d02 = d2i(_mm256_blendv_pd(i2d(d02), i2d(tmp), i2d(cmp)));
 
     tmp = d08;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d01), _mm256_xor_si256(topBit, d08));
-    d08 = _mm256_blendv_pd(d08, d01, cmp);
-    d01 = _mm256_blendv_pd(d01, tmp, cmp);
+    d08 = d2i(_mm256_blendv_pd(i2d(d08), i2d(d01), i2d(cmp)));
+    d01 = d2i(_mm256_blendv_pd(i2d(d01), i2d(tmp), i2d(cmp)));
 
     sort_04v_merge_ascending(d01, d02, d03, d04);
     sort_04v_merge_ascending(d05, d06, d07, d08);
 }
-    static inline void sort_08v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08) {
+    static INLINE void sort_08v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -552,90 +566,90 @@ public:
 
     tmp = d05;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d04), _mm256_xor_si256(topBit, d05));
-    d05 = _mm256_blendv_pd(d05, d04, cmp);
-    d04 = _mm256_blendv_pd(d04, tmp, cmp);
+    d05 = d2i(_mm256_blendv_pd(i2d(d05), i2d(d04), i2d(cmp)));
+    d04 = d2i(_mm256_blendv_pd(i2d(d04), i2d(tmp), i2d(cmp)));
 
     tmp = d06;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d03), _mm256_xor_si256(topBit, d06));
-    d06 = _mm256_blendv_pd(d06, d03, cmp);
-    d03 = _mm256_blendv_pd(d03, tmp, cmp);
+    d06 = d2i(_mm256_blendv_pd(i2d(d06), i2d(d03), i2d(cmp)));
+    d03 = d2i(_mm256_blendv_pd(i2d(d03), i2d(tmp), i2d(cmp)));
 
     tmp = d07;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d02), _mm256_xor_si256(topBit, d07));
-    d07 = _mm256_blendv_pd(d07, d02, cmp);
-    d02 = _mm256_blendv_pd(d02, tmp, cmp);
+    d07 = d2i(_mm256_blendv_pd(i2d(d07), i2d(d02), i2d(cmp)));
+    d02 = d2i(_mm256_blendv_pd(i2d(d02), i2d(tmp), i2d(cmp)));
 
     tmp = d08;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d01), _mm256_xor_si256(topBit, d08));
-    d08 = _mm256_blendv_pd(d08, d01, cmp);
-    d01 = _mm256_blendv_pd(d01, tmp, cmp);
+    d08 = d2i(_mm256_blendv_pd(i2d(d08), i2d(d01), i2d(cmp)));
+    d01 = d2i(_mm256_blendv_pd(i2d(d01), i2d(tmp), i2d(cmp)));
 
     sort_04v_merge_descending(d01, d02, d03, d04);
     sort_04v_merge_descending(d05, d06, d07, d08);
 }
-    static inline void sort_08v_merge_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08) {
+    static INLINE void sort_08v_merge_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
     tmp = d01;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, d01));
-    d01 = _mm256_blendv_pd(d05, d01, cmp);
+    d01 = d2i(_mm256_blendv_pd(i2d(d05), i2d(d01), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, tmp));
-    d05 = _mm256_blendv_pd(tmp, d05, cmp);
+    d05 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d05), i2d(cmp)));
 
     tmp = d02;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, d02));
-    d02 = _mm256_blendv_pd(d06, d02, cmp);
+    d02 = d2i(_mm256_blendv_pd(i2d(d06), i2d(d02), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, tmp));
-    d06 = _mm256_blendv_pd(tmp, d06, cmp);
+    d06 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d06), i2d(cmp)));
 
     tmp = d03;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d07), _mm256_xor_si256(topBit, d03));
-    d03 = _mm256_blendv_pd(d07, d03, cmp);
+    d03 = d2i(_mm256_blendv_pd(i2d(d07), i2d(d03), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d07), _mm256_xor_si256(topBit, tmp));
-    d07 = _mm256_blendv_pd(tmp, d07, cmp);
+    d07 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d07), i2d(cmp)));
 
     tmp = d04;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d08), _mm256_xor_si256(topBit, d04));
-    d04 = _mm256_blendv_pd(d08, d04, cmp);
+    d04 = d2i(_mm256_blendv_pd(i2d(d08), i2d(d04), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d08), _mm256_xor_si256(topBit, tmp));
-    d08 = _mm256_blendv_pd(tmp, d08, cmp);
+    d08 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d08), i2d(cmp)));
 
     sort_04v_merge_ascending(d01, d02, d03, d04);
     sort_04v_merge_ascending(d05, d06, d07, d08);
 }
-    static inline void sort_08v_merge_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08) {
+    static INLINE void sort_08v_merge_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
     tmp = d01;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, d01));
-    d01 = _mm256_blendv_pd(d05, d01, cmp);
+    d01 = d2i(_mm256_blendv_pd(i2d(d05), i2d(d01), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, tmp));
-    d05 = _mm256_blendv_pd(tmp, d05, cmp);
+    d05 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d05), i2d(cmp)));
 
     tmp = d02;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, d02));
-    d02 = _mm256_blendv_pd(d06, d02, cmp);
+    d02 = d2i(_mm256_blendv_pd(i2d(d06), i2d(d02), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, tmp));
-    d06 = _mm256_blendv_pd(tmp, d06, cmp);
+    d06 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d06), i2d(cmp)));
 
     tmp = d03;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d07), _mm256_xor_si256(topBit, d03));
-    d03 = _mm256_blendv_pd(d07, d03, cmp);
+    d03 = d2i(_mm256_blendv_pd(i2d(d07), i2d(d03), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d07), _mm256_xor_si256(topBit, tmp));
-    d07 = _mm256_blendv_pd(tmp, d07, cmp);
+    d07 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d07), i2d(cmp)));
 
     tmp = d04;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d08), _mm256_xor_si256(topBit, d04));
-    d04 = _mm256_blendv_pd(d08, d04, cmp);
+    d04 = d2i(_mm256_blendv_pd(i2d(d08), i2d(d04), i2d(cmp)));
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d08), _mm256_xor_si256(topBit, tmp));
-    d08 = _mm256_blendv_pd(tmp, d08, cmp);
+    d08 = d2i(_mm256_blendv_pd(i2d(tmp), i2d(d08), i2d(cmp)));
 
     sort_04v_merge_descending(d01, d02, d03, d04);
     sort_04v_merge_descending(d05, d06, d07, d08);
 }
-    static inline void sort_09v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09) {
+    static INLINE void sort_09v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -644,13 +658,13 @@ public:
 
     tmp = d09;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d08), _mm256_xor_si256(topBit, d09));
-    d09 = _mm256_blendv_pd(d09, d08, cmp);
-    d08 = _mm256_blendv_pd(d08, tmp, cmp);
+    d09 = d2i(_mm256_blendv_pd(i2d(d09), i2d(d08), i2d(cmp)));
+    d08 = d2i(_mm256_blendv_pd(i2d(d08), i2d(tmp), i2d(cmp)));
 
     sort_08v_merge_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_01v_merge_ascending(d09);
 }
-    static inline void sort_09v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09) {
+    static INLINE void sort_09v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -659,13 +673,13 @@ public:
 
     tmp = d09;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d08), _mm256_xor_si256(topBit, d09));
-    d09 = _mm256_blendv_pd(d09, d08, cmp);
-    d08 = _mm256_blendv_pd(d08, tmp, cmp);
+    d09 = d2i(_mm256_blendv_pd(i2d(d09), i2d(d08), i2d(cmp)));
+    d08 = d2i(_mm256_blendv_pd(i2d(d08), i2d(tmp), i2d(cmp)));
 
     sort_08v_merge_descending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_01v_merge_descending(d09);
 }
-    static inline void sort_10v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10) {
+    static INLINE void sort_10v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -674,18 +688,18 @@ public:
 
     tmp = d09;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d08), _mm256_xor_si256(topBit, d09));
-    d09 = _mm256_blendv_pd(d09, d08, cmp);
-    d08 = _mm256_blendv_pd(d08, tmp, cmp);
+    d09 = d2i(_mm256_blendv_pd(i2d(d09), i2d(d08), i2d(cmp)));
+    d08 = d2i(_mm256_blendv_pd(i2d(d08), i2d(tmp), i2d(cmp)));
 
     tmp = d10;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d07), _mm256_xor_si256(topBit, d10));
-    d10 = _mm256_blendv_pd(d10, d07, cmp);
-    d07 = _mm256_blendv_pd(d07, tmp, cmp);
+    d10 = d2i(_mm256_blendv_pd(i2d(d10), i2d(d07), i2d(cmp)));
+    d07 = d2i(_mm256_blendv_pd(i2d(d07), i2d(tmp), i2d(cmp)));
 
     sort_08v_merge_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_02v_merge_ascending(d09, d10);
 }
-    static inline void sort_10v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10) {
+    static INLINE void sort_10v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -694,18 +708,18 @@ public:
 
     tmp = d09;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d08), _mm256_xor_si256(topBit, d09));
-    d09 = _mm256_blendv_pd(d09, d08, cmp);
-    d08 = _mm256_blendv_pd(d08, tmp, cmp);
+    d09 = d2i(_mm256_blendv_pd(i2d(d09), i2d(d08), i2d(cmp)));
+    d08 = d2i(_mm256_blendv_pd(i2d(d08), i2d(tmp), i2d(cmp)));
 
     tmp = d10;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d07), _mm256_xor_si256(topBit, d10));
-    d10 = _mm256_blendv_pd(d10, d07, cmp);
-    d07 = _mm256_blendv_pd(d07, tmp, cmp);
+    d10 = d2i(_mm256_blendv_pd(i2d(d10), i2d(d07), i2d(cmp)));
+    d07 = d2i(_mm256_blendv_pd(i2d(d07), i2d(tmp), i2d(cmp)));
 
     sort_08v_merge_descending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_02v_merge_descending(d09, d10);
 }
-    static inline void sort_11v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11) {
+    static INLINE void sort_11v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -714,23 +728,23 @@ public:
 
     tmp = d09;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d08), _mm256_xor_si256(topBit, d09));
-    d09 = _mm256_blendv_pd(d09, d08, cmp);
-    d08 = _mm256_blendv_pd(d08, tmp, cmp);
+    d09 = d2i(_mm256_blendv_pd(i2d(d09), i2d(d08), i2d(cmp)));
+    d08 = d2i(_mm256_blendv_pd(i2d(d08), i2d(tmp), i2d(cmp)));
 
     tmp = d10;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d07), _mm256_xor_si256(topBit, d10));
-    d10 = _mm256_blendv_pd(d10, d07, cmp);
-    d07 = _mm256_blendv_pd(d07, tmp, cmp);
+    d10 = d2i(_mm256_blendv_pd(i2d(d10), i2d(d07), i2d(cmp)));
+    d07 = d2i(_mm256_blendv_pd(i2d(d07), i2d(tmp), i2d(cmp)));
 
     tmp = d11;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, d11));
-    d11 = _mm256_blendv_pd(d11, d06, cmp);
-    d06 = _mm256_blendv_pd(d06, tmp, cmp);
+    d11 = d2i(_mm256_blendv_pd(i2d(d11), i2d(d06), i2d(cmp)));
+    d06 = d2i(_mm256_blendv_pd(i2d(d06), i2d(tmp), i2d(cmp)));
 
     sort_08v_merge_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_03v_merge_ascending(d09, d10, d11);
 }
-    static inline void sort_11v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11) {
+    static INLINE void sort_11v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -739,23 +753,23 @@ public:
 
     tmp = d09;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d08), _mm256_xor_si256(topBit, d09));
-    d09 = _mm256_blendv_pd(d09, d08, cmp);
-    d08 = _mm256_blendv_pd(d08, tmp, cmp);
+    d09 = d2i(_mm256_blendv_pd(i2d(d09), i2d(d08), i2d(cmp)));
+    d08 = d2i(_mm256_blendv_pd(i2d(d08), i2d(tmp), i2d(cmp)));
 
     tmp = d10;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d07), _mm256_xor_si256(topBit, d10));
-    d10 = _mm256_blendv_pd(d10, d07, cmp);
-    d07 = _mm256_blendv_pd(d07, tmp, cmp);
+    d10 = d2i(_mm256_blendv_pd(i2d(d10), i2d(d07), i2d(cmp)));
+    d07 = d2i(_mm256_blendv_pd(i2d(d07), i2d(tmp), i2d(cmp)));
 
     tmp = d11;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, d11));
-    d11 = _mm256_blendv_pd(d11, d06, cmp);
-    d06 = _mm256_blendv_pd(d06, tmp, cmp);
+    d11 = d2i(_mm256_blendv_pd(i2d(d11), i2d(d06), i2d(cmp)));
+    d06 = d2i(_mm256_blendv_pd(i2d(d06), i2d(tmp), i2d(cmp)));
 
     sort_08v_merge_descending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_03v_merge_descending(d09, d10, d11);
 }
-    static inline void sort_12v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11, __m256i& d12) {
+    static INLINE void sort_12v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11, __m256i& d12) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -764,28 +778,28 @@ public:
 
     tmp = d09;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d08), _mm256_xor_si256(topBit, d09));
-    d09 = _mm256_blendv_pd(d09, d08, cmp);
-    d08 = _mm256_blendv_pd(d08, tmp, cmp);
+    d09 = d2i(_mm256_blendv_pd(i2d(d09), i2d(d08), i2d(cmp)));
+    d08 = d2i(_mm256_blendv_pd(i2d(d08), i2d(tmp), i2d(cmp)));
 
     tmp = d10;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d07), _mm256_xor_si256(topBit, d10));
-    d10 = _mm256_blendv_pd(d10, d07, cmp);
-    d07 = _mm256_blendv_pd(d07, tmp, cmp);
+    d10 = d2i(_mm256_blendv_pd(i2d(d10), i2d(d07), i2d(cmp)));
+    d07 = d2i(_mm256_blendv_pd(i2d(d07), i2d(tmp), i2d(cmp)));
 
     tmp = d11;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, d11));
-    d11 = _mm256_blendv_pd(d11, d06, cmp);
-    d06 = _mm256_blendv_pd(d06, tmp, cmp);
+    d11 = d2i(_mm256_blendv_pd(i2d(d11), i2d(d06), i2d(cmp)));
+    d06 = d2i(_mm256_blendv_pd(i2d(d06), i2d(tmp), i2d(cmp)));
 
     tmp = d12;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, d12));
-    d12 = _mm256_blendv_pd(d12, d05, cmp);
-    d05 = _mm256_blendv_pd(d05, tmp, cmp);
+    d12 = d2i(_mm256_blendv_pd(i2d(d12), i2d(d05), i2d(cmp)));
+    d05 = d2i(_mm256_blendv_pd(i2d(d05), i2d(tmp), i2d(cmp)));
 
     sort_08v_merge_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_04v_merge_ascending(d09, d10, d11, d12);
 }
-    static inline void sort_12v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11, __m256i& d12) {
+    static INLINE void sort_12v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11, __m256i& d12) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -794,28 +808,28 @@ public:
 
     tmp = d09;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d08), _mm256_xor_si256(topBit, d09));
-    d09 = _mm256_blendv_pd(d09, d08, cmp);
-    d08 = _mm256_blendv_pd(d08, tmp, cmp);
+    d09 = d2i(_mm256_blendv_pd(i2d(d09), i2d(d08), i2d(cmp)));
+    d08 = d2i(_mm256_blendv_pd(i2d(d08), i2d(tmp), i2d(cmp)));
 
     tmp = d10;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d07), _mm256_xor_si256(topBit, d10));
-    d10 = _mm256_blendv_pd(d10, d07, cmp);
-    d07 = _mm256_blendv_pd(d07, tmp, cmp);
+    d10 = d2i(_mm256_blendv_pd(i2d(d10), i2d(d07), i2d(cmp)));
+    d07 = d2i(_mm256_blendv_pd(i2d(d07), i2d(tmp), i2d(cmp)));
 
     tmp = d11;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, d11));
-    d11 = _mm256_blendv_pd(d11, d06, cmp);
-    d06 = _mm256_blendv_pd(d06, tmp, cmp);
+    d11 = d2i(_mm256_blendv_pd(i2d(d11), i2d(d06), i2d(cmp)));
+    d06 = d2i(_mm256_blendv_pd(i2d(d06), i2d(tmp), i2d(cmp)));
 
     tmp = d12;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, d12));
-    d12 = _mm256_blendv_pd(d12, d05, cmp);
-    d05 = _mm256_blendv_pd(d05, tmp, cmp);
+    d12 = d2i(_mm256_blendv_pd(i2d(d12), i2d(d05), i2d(cmp)));
+    d05 = d2i(_mm256_blendv_pd(i2d(d05), i2d(tmp), i2d(cmp)));
 
     sort_08v_merge_descending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_04v_merge_descending(d09, d10, d11, d12);
 }
-    static inline void sort_13v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11, __m256i& d12, __m256i& d13) {
+    static INLINE void sort_13v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11, __m256i& d12, __m256i& d13) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -824,33 +838,33 @@ public:
 
     tmp = d09;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d08), _mm256_xor_si256(topBit, d09));
-    d09 = _mm256_blendv_pd(d09, d08, cmp);
-    d08 = _mm256_blendv_pd(d08, tmp, cmp);
+    d09 = d2i(_mm256_blendv_pd(i2d(d09), i2d(d08), i2d(cmp)));
+    d08 = d2i(_mm256_blendv_pd(i2d(d08), i2d(tmp), i2d(cmp)));
 
     tmp = d10;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d07), _mm256_xor_si256(topBit, d10));
-    d10 = _mm256_blendv_pd(d10, d07, cmp);
-    d07 = _mm256_blendv_pd(d07, tmp, cmp);
+    d10 = d2i(_mm256_blendv_pd(i2d(d10), i2d(d07), i2d(cmp)));
+    d07 = d2i(_mm256_blendv_pd(i2d(d07), i2d(tmp), i2d(cmp)));
 
     tmp = d11;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, d11));
-    d11 = _mm256_blendv_pd(d11, d06, cmp);
-    d06 = _mm256_blendv_pd(d06, tmp, cmp);
+    d11 = d2i(_mm256_blendv_pd(i2d(d11), i2d(d06), i2d(cmp)));
+    d06 = d2i(_mm256_blendv_pd(i2d(d06), i2d(tmp), i2d(cmp)));
 
     tmp = d12;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, d12));
-    d12 = _mm256_blendv_pd(d12, d05, cmp);
-    d05 = _mm256_blendv_pd(d05, tmp, cmp);
+    d12 = d2i(_mm256_blendv_pd(i2d(d12), i2d(d05), i2d(cmp)));
+    d05 = d2i(_mm256_blendv_pd(i2d(d05), i2d(tmp), i2d(cmp)));
 
     tmp = d13;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d04), _mm256_xor_si256(topBit, d13));
-    d13 = _mm256_blendv_pd(d13, d04, cmp);
-    d04 = _mm256_blendv_pd(d04, tmp, cmp);
+    d13 = d2i(_mm256_blendv_pd(i2d(d13), i2d(d04), i2d(cmp)));
+    d04 = d2i(_mm256_blendv_pd(i2d(d04), i2d(tmp), i2d(cmp)));
 
     sort_08v_merge_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_05v_merge_ascending(d09, d10, d11, d12, d13);
 }
-    static inline void sort_13v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11, __m256i& d12, __m256i& d13) {
+    static INLINE void sort_13v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11, __m256i& d12, __m256i& d13) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -859,33 +873,33 @@ public:
 
     tmp = d09;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d08), _mm256_xor_si256(topBit, d09));
-    d09 = _mm256_blendv_pd(d09, d08, cmp);
-    d08 = _mm256_blendv_pd(d08, tmp, cmp);
+    d09 = d2i(_mm256_blendv_pd(i2d(d09), i2d(d08), i2d(cmp)));
+    d08 = d2i(_mm256_blendv_pd(i2d(d08), i2d(tmp), i2d(cmp)));
 
     tmp = d10;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d07), _mm256_xor_si256(topBit, d10));
-    d10 = _mm256_blendv_pd(d10, d07, cmp);
-    d07 = _mm256_blendv_pd(d07, tmp, cmp);
+    d10 = d2i(_mm256_blendv_pd(i2d(d10), i2d(d07), i2d(cmp)));
+    d07 = d2i(_mm256_blendv_pd(i2d(d07), i2d(tmp), i2d(cmp)));
 
     tmp = d11;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, d11));
-    d11 = _mm256_blendv_pd(d11, d06, cmp);
-    d06 = _mm256_blendv_pd(d06, tmp, cmp);
+    d11 = d2i(_mm256_blendv_pd(i2d(d11), i2d(d06), i2d(cmp)));
+    d06 = d2i(_mm256_blendv_pd(i2d(d06), i2d(tmp), i2d(cmp)));
 
     tmp = d12;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, d12));
-    d12 = _mm256_blendv_pd(d12, d05, cmp);
-    d05 = _mm256_blendv_pd(d05, tmp, cmp);
+    d12 = d2i(_mm256_blendv_pd(i2d(d12), i2d(d05), i2d(cmp)));
+    d05 = d2i(_mm256_blendv_pd(i2d(d05), i2d(tmp), i2d(cmp)));
 
     tmp = d13;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d04), _mm256_xor_si256(topBit, d13));
-    d13 = _mm256_blendv_pd(d13, d04, cmp);
-    d04 = _mm256_blendv_pd(d04, tmp, cmp);
+    d13 = d2i(_mm256_blendv_pd(i2d(d13), i2d(d04), i2d(cmp)));
+    d04 = d2i(_mm256_blendv_pd(i2d(d04), i2d(tmp), i2d(cmp)));
 
     sort_08v_merge_descending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_05v_merge_descending(d09, d10, d11, d12, d13);
 }
-    static inline void sort_14v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11, __m256i& d12, __m256i& d13, __m256i& d14) {
+    static INLINE void sort_14v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11, __m256i& d12, __m256i& d13, __m256i& d14) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -894,38 +908,38 @@ public:
 
     tmp = d09;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d08), _mm256_xor_si256(topBit, d09));
-    d09 = _mm256_blendv_pd(d09, d08, cmp);
-    d08 = _mm256_blendv_pd(d08, tmp, cmp);
+    d09 = d2i(_mm256_blendv_pd(i2d(d09), i2d(d08), i2d(cmp)));
+    d08 = d2i(_mm256_blendv_pd(i2d(d08), i2d(tmp), i2d(cmp)));
 
     tmp = d10;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d07), _mm256_xor_si256(topBit, d10));
-    d10 = _mm256_blendv_pd(d10, d07, cmp);
-    d07 = _mm256_blendv_pd(d07, tmp, cmp);
+    d10 = d2i(_mm256_blendv_pd(i2d(d10), i2d(d07), i2d(cmp)));
+    d07 = d2i(_mm256_blendv_pd(i2d(d07), i2d(tmp), i2d(cmp)));
 
     tmp = d11;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, d11));
-    d11 = _mm256_blendv_pd(d11, d06, cmp);
-    d06 = _mm256_blendv_pd(d06, tmp, cmp);
+    d11 = d2i(_mm256_blendv_pd(i2d(d11), i2d(d06), i2d(cmp)));
+    d06 = d2i(_mm256_blendv_pd(i2d(d06), i2d(tmp), i2d(cmp)));
 
     tmp = d12;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, d12));
-    d12 = _mm256_blendv_pd(d12, d05, cmp);
-    d05 = _mm256_blendv_pd(d05, tmp, cmp);
+    d12 = d2i(_mm256_blendv_pd(i2d(d12), i2d(d05), i2d(cmp)));
+    d05 = d2i(_mm256_blendv_pd(i2d(d05), i2d(tmp), i2d(cmp)));
 
     tmp = d13;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d04), _mm256_xor_si256(topBit, d13));
-    d13 = _mm256_blendv_pd(d13, d04, cmp);
-    d04 = _mm256_blendv_pd(d04, tmp, cmp);
+    d13 = d2i(_mm256_blendv_pd(i2d(d13), i2d(d04), i2d(cmp)));
+    d04 = d2i(_mm256_blendv_pd(i2d(d04), i2d(tmp), i2d(cmp)));
 
     tmp = d14;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d03), _mm256_xor_si256(topBit, d14));
-    d14 = _mm256_blendv_pd(d14, d03, cmp);
-    d03 = _mm256_blendv_pd(d03, tmp, cmp);
+    d14 = d2i(_mm256_blendv_pd(i2d(d14), i2d(d03), i2d(cmp)));
+    d03 = d2i(_mm256_blendv_pd(i2d(d03), i2d(tmp), i2d(cmp)));
 
     sort_08v_merge_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_06v_merge_ascending(d09, d10, d11, d12, d13, d14);
 }
-    static inline void sort_14v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11, __m256i& d12, __m256i& d13, __m256i& d14) {
+    static INLINE void sort_14v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11, __m256i& d12, __m256i& d13, __m256i& d14) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -934,38 +948,38 @@ public:
 
     tmp = d09;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d08), _mm256_xor_si256(topBit, d09));
-    d09 = _mm256_blendv_pd(d09, d08, cmp);
-    d08 = _mm256_blendv_pd(d08, tmp, cmp);
+    d09 = d2i(_mm256_blendv_pd(i2d(d09), i2d(d08), i2d(cmp)));
+    d08 = d2i(_mm256_blendv_pd(i2d(d08), i2d(tmp), i2d(cmp)));
 
     tmp = d10;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d07), _mm256_xor_si256(topBit, d10));
-    d10 = _mm256_blendv_pd(d10, d07, cmp);
-    d07 = _mm256_blendv_pd(d07, tmp, cmp);
+    d10 = d2i(_mm256_blendv_pd(i2d(d10), i2d(d07), i2d(cmp)));
+    d07 = d2i(_mm256_blendv_pd(i2d(d07), i2d(tmp), i2d(cmp)));
 
     tmp = d11;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, d11));
-    d11 = _mm256_blendv_pd(d11, d06, cmp);
-    d06 = _mm256_blendv_pd(d06, tmp, cmp);
+    d11 = d2i(_mm256_blendv_pd(i2d(d11), i2d(d06), i2d(cmp)));
+    d06 = d2i(_mm256_blendv_pd(i2d(d06), i2d(tmp), i2d(cmp)));
 
     tmp = d12;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, d12));
-    d12 = _mm256_blendv_pd(d12, d05, cmp);
-    d05 = _mm256_blendv_pd(d05, tmp, cmp);
+    d12 = d2i(_mm256_blendv_pd(i2d(d12), i2d(d05), i2d(cmp)));
+    d05 = d2i(_mm256_blendv_pd(i2d(d05), i2d(tmp), i2d(cmp)));
 
     tmp = d13;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d04), _mm256_xor_si256(topBit, d13));
-    d13 = _mm256_blendv_pd(d13, d04, cmp);
-    d04 = _mm256_blendv_pd(d04, tmp, cmp);
+    d13 = d2i(_mm256_blendv_pd(i2d(d13), i2d(d04), i2d(cmp)));
+    d04 = d2i(_mm256_blendv_pd(i2d(d04), i2d(tmp), i2d(cmp)));
 
     tmp = d14;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d03), _mm256_xor_si256(topBit, d14));
-    d14 = _mm256_blendv_pd(d14, d03, cmp);
-    d03 = _mm256_blendv_pd(d03, tmp, cmp);
+    d14 = d2i(_mm256_blendv_pd(i2d(d14), i2d(d03), i2d(cmp)));
+    d03 = d2i(_mm256_blendv_pd(i2d(d03), i2d(tmp), i2d(cmp)));
 
     sort_08v_merge_descending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_06v_merge_descending(d09, d10, d11, d12, d13, d14);
 }
-    static inline void sort_15v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11, __m256i& d12, __m256i& d13, __m256i& d14, __m256i& d15) {
+    static INLINE void sort_15v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11, __m256i& d12, __m256i& d13, __m256i& d14, __m256i& d15) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -974,43 +988,43 @@ public:
 
     tmp = d09;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d08), _mm256_xor_si256(topBit, d09));
-    d09 = _mm256_blendv_pd(d09, d08, cmp);
-    d08 = _mm256_blendv_pd(d08, tmp, cmp);
+    d09 = d2i(_mm256_blendv_pd(i2d(d09), i2d(d08), i2d(cmp)));
+    d08 = d2i(_mm256_blendv_pd(i2d(d08), i2d(tmp), i2d(cmp)));
 
     tmp = d10;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d07), _mm256_xor_si256(topBit, d10));
-    d10 = _mm256_blendv_pd(d10, d07, cmp);
-    d07 = _mm256_blendv_pd(d07, tmp, cmp);
+    d10 = d2i(_mm256_blendv_pd(i2d(d10), i2d(d07), i2d(cmp)));
+    d07 = d2i(_mm256_blendv_pd(i2d(d07), i2d(tmp), i2d(cmp)));
 
     tmp = d11;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, d11));
-    d11 = _mm256_blendv_pd(d11, d06, cmp);
-    d06 = _mm256_blendv_pd(d06, tmp, cmp);
+    d11 = d2i(_mm256_blendv_pd(i2d(d11), i2d(d06), i2d(cmp)));
+    d06 = d2i(_mm256_blendv_pd(i2d(d06), i2d(tmp), i2d(cmp)));
 
     tmp = d12;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, d12));
-    d12 = _mm256_blendv_pd(d12, d05, cmp);
-    d05 = _mm256_blendv_pd(d05, tmp, cmp);
+    d12 = d2i(_mm256_blendv_pd(i2d(d12), i2d(d05), i2d(cmp)));
+    d05 = d2i(_mm256_blendv_pd(i2d(d05), i2d(tmp), i2d(cmp)));
 
     tmp = d13;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d04), _mm256_xor_si256(topBit, d13));
-    d13 = _mm256_blendv_pd(d13, d04, cmp);
-    d04 = _mm256_blendv_pd(d04, tmp, cmp);
+    d13 = d2i(_mm256_blendv_pd(i2d(d13), i2d(d04), i2d(cmp)));
+    d04 = d2i(_mm256_blendv_pd(i2d(d04), i2d(tmp), i2d(cmp)));
 
     tmp = d14;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d03), _mm256_xor_si256(topBit, d14));
-    d14 = _mm256_blendv_pd(d14, d03, cmp);
-    d03 = _mm256_blendv_pd(d03, tmp, cmp);
+    d14 = d2i(_mm256_blendv_pd(i2d(d14), i2d(d03), i2d(cmp)));
+    d03 = d2i(_mm256_blendv_pd(i2d(d03), i2d(tmp), i2d(cmp)));
 
     tmp = d15;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d02), _mm256_xor_si256(topBit, d15));
-    d15 = _mm256_blendv_pd(d15, d02, cmp);
-    d02 = _mm256_blendv_pd(d02, tmp, cmp);
+    d15 = d2i(_mm256_blendv_pd(i2d(d15), i2d(d02), i2d(cmp)));
+    d02 = d2i(_mm256_blendv_pd(i2d(d02), i2d(tmp), i2d(cmp)));
 
     sort_08v_merge_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_07v_merge_ascending(d09, d10, d11, d12, d13, d14, d15);
 }
-    static inline void sort_15v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11, __m256i& d12, __m256i& d13, __m256i& d14, __m256i& d15) {
+    static INLINE void sort_15v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11, __m256i& d12, __m256i& d13, __m256i& d14, __m256i& d15) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -1019,43 +1033,43 @@ public:
 
     tmp = d09;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d08), _mm256_xor_si256(topBit, d09));
-    d09 = _mm256_blendv_pd(d09, d08, cmp);
-    d08 = _mm256_blendv_pd(d08, tmp, cmp);
+    d09 = d2i(_mm256_blendv_pd(i2d(d09), i2d(d08), i2d(cmp)));
+    d08 = d2i(_mm256_blendv_pd(i2d(d08), i2d(tmp), i2d(cmp)));
 
     tmp = d10;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d07), _mm256_xor_si256(topBit, d10));
-    d10 = _mm256_blendv_pd(d10, d07, cmp);
-    d07 = _mm256_blendv_pd(d07, tmp, cmp);
+    d10 = d2i(_mm256_blendv_pd(i2d(d10), i2d(d07), i2d(cmp)));
+    d07 = d2i(_mm256_blendv_pd(i2d(d07), i2d(tmp), i2d(cmp)));
 
     tmp = d11;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, d11));
-    d11 = _mm256_blendv_pd(d11, d06, cmp);
-    d06 = _mm256_blendv_pd(d06, tmp, cmp);
+    d11 = d2i(_mm256_blendv_pd(i2d(d11), i2d(d06), i2d(cmp)));
+    d06 = d2i(_mm256_blendv_pd(i2d(d06), i2d(tmp), i2d(cmp)));
 
     tmp = d12;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, d12));
-    d12 = _mm256_blendv_pd(d12, d05, cmp);
-    d05 = _mm256_blendv_pd(d05, tmp, cmp);
+    d12 = d2i(_mm256_blendv_pd(i2d(d12), i2d(d05), i2d(cmp)));
+    d05 = d2i(_mm256_blendv_pd(i2d(d05), i2d(tmp), i2d(cmp)));
 
     tmp = d13;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d04), _mm256_xor_si256(topBit, d13));
-    d13 = _mm256_blendv_pd(d13, d04, cmp);
-    d04 = _mm256_blendv_pd(d04, tmp, cmp);
+    d13 = d2i(_mm256_blendv_pd(i2d(d13), i2d(d04), i2d(cmp)));
+    d04 = d2i(_mm256_blendv_pd(i2d(d04), i2d(tmp), i2d(cmp)));
 
     tmp = d14;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d03), _mm256_xor_si256(topBit, d14));
-    d14 = _mm256_blendv_pd(d14, d03, cmp);
-    d03 = _mm256_blendv_pd(d03, tmp, cmp);
+    d14 = d2i(_mm256_blendv_pd(i2d(d14), i2d(d03), i2d(cmp)));
+    d03 = d2i(_mm256_blendv_pd(i2d(d03), i2d(tmp), i2d(cmp)));
 
     tmp = d15;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d02), _mm256_xor_si256(topBit, d15));
-    d15 = _mm256_blendv_pd(d15, d02, cmp);
-    d02 = _mm256_blendv_pd(d02, tmp, cmp);
+    d15 = d2i(_mm256_blendv_pd(i2d(d15), i2d(d02), i2d(cmp)));
+    d02 = d2i(_mm256_blendv_pd(i2d(d02), i2d(tmp), i2d(cmp)));
 
     sort_08v_merge_descending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_07v_merge_descending(d09, d10, d11, d12, d13, d14, d15);
 }
-    static inline void sort_16v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11, __m256i& d12, __m256i& d13, __m256i& d14, __m256i& d15, __m256i& d16) {
+    static INLINE void sort_16v_ascending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11, __m256i& d12, __m256i& d13, __m256i& d14, __m256i& d15, __m256i& d16) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -1064,48 +1078,48 @@ public:
 
     tmp = d09;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d08), _mm256_xor_si256(topBit, d09));
-    d09 = _mm256_blendv_pd(d09, d08, cmp);
-    d08 = _mm256_blendv_pd(d08, tmp, cmp);
+    d09 = d2i(_mm256_blendv_pd(i2d(d09), i2d(d08), i2d(cmp)));
+    d08 = d2i(_mm256_blendv_pd(i2d(d08), i2d(tmp), i2d(cmp)));
 
     tmp = d10;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d07), _mm256_xor_si256(topBit, d10));
-    d10 = _mm256_blendv_pd(d10, d07, cmp);
-    d07 = _mm256_blendv_pd(d07, tmp, cmp);
+    d10 = d2i(_mm256_blendv_pd(i2d(d10), i2d(d07), i2d(cmp)));
+    d07 = d2i(_mm256_blendv_pd(i2d(d07), i2d(tmp), i2d(cmp)));
 
     tmp = d11;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, d11));
-    d11 = _mm256_blendv_pd(d11, d06, cmp);
-    d06 = _mm256_blendv_pd(d06, tmp, cmp);
+    d11 = d2i(_mm256_blendv_pd(i2d(d11), i2d(d06), i2d(cmp)));
+    d06 = d2i(_mm256_blendv_pd(i2d(d06), i2d(tmp), i2d(cmp)));
 
     tmp = d12;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, d12));
-    d12 = _mm256_blendv_pd(d12, d05, cmp);
-    d05 = _mm256_blendv_pd(d05, tmp, cmp);
+    d12 = d2i(_mm256_blendv_pd(i2d(d12), i2d(d05), i2d(cmp)));
+    d05 = d2i(_mm256_blendv_pd(i2d(d05), i2d(tmp), i2d(cmp)));
 
     tmp = d13;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d04), _mm256_xor_si256(topBit, d13));
-    d13 = _mm256_blendv_pd(d13, d04, cmp);
-    d04 = _mm256_blendv_pd(d04, tmp, cmp);
+    d13 = d2i(_mm256_blendv_pd(i2d(d13), i2d(d04), i2d(cmp)));
+    d04 = d2i(_mm256_blendv_pd(i2d(d04), i2d(tmp), i2d(cmp)));
 
     tmp = d14;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d03), _mm256_xor_si256(topBit, d14));
-    d14 = _mm256_blendv_pd(d14, d03, cmp);
-    d03 = _mm256_blendv_pd(d03, tmp, cmp);
+    d14 = d2i(_mm256_blendv_pd(i2d(d14), i2d(d03), i2d(cmp)));
+    d03 = d2i(_mm256_blendv_pd(i2d(d03), i2d(tmp), i2d(cmp)));
 
     tmp = d15;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d02), _mm256_xor_si256(topBit, d15));
-    d15 = _mm256_blendv_pd(d15, d02, cmp);
-    d02 = _mm256_blendv_pd(d02, tmp, cmp);
+    d15 = d2i(_mm256_blendv_pd(i2d(d15), i2d(d02), i2d(cmp)));
+    d02 = d2i(_mm256_blendv_pd(i2d(d02), i2d(tmp), i2d(cmp)));
 
     tmp = d16;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d01), _mm256_xor_si256(topBit, d16));
-    d16 = _mm256_blendv_pd(d16, d01, cmp);
-    d01 = _mm256_blendv_pd(d01, tmp, cmp);
+    d16 = d2i(_mm256_blendv_pd(i2d(d16), i2d(d01), i2d(cmp)));
+    d01 = d2i(_mm256_blendv_pd(i2d(d01), i2d(tmp), i2d(cmp)));
 
     sort_08v_merge_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_08v_merge_ascending(d09, d10, d11, d12, d13, d14, d15, d16);
 }
-    static inline void sort_16v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11, __m256i& d12, __m256i& d13, __m256i& d14, __m256i& d15, __m256i& d16) {
+    static INLINE void sort_16v_descending(__m256i& d01, __m256i& d02, __m256i& d03, __m256i& d04, __m256i& d05, __m256i& d06, __m256i& d07, __m256i& d08, __m256i& d09, __m256i& d10, __m256i& d11, __m256i& d12, __m256i& d13, __m256i& d14, __m256i& d15, __m256i& d16) {
     __m256i  tmp, cmp;
         __m256i topBit = _mm256_set1_epi64x(1LLU << 63);
 
@@ -1114,55 +1128,55 @@ public:
 
     tmp = d09;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d08), _mm256_xor_si256(topBit, d09));
-    d09 = _mm256_blendv_pd(d09, d08, cmp);
-    d08 = _mm256_blendv_pd(d08, tmp, cmp);
+    d09 = d2i(_mm256_blendv_pd(i2d(d09), i2d(d08), i2d(cmp)));
+    d08 = d2i(_mm256_blendv_pd(i2d(d08), i2d(tmp), i2d(cmp)));
 
     tmp = d10;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d07), _mm256_xor_si256(topBit, d10));
-    d10 = _mm256_blendv_pd(d10, d07, cmp);
-    d07 = _mm256_blendv_pd(d07, tmp, cmp);
+    d10 = d2i(_mm256_blendv_pd(i2d(d10), i2d(d07), i2d(cmp)));
+    d07 = d2i(_mm256_blendv_pd(i2d(d07), i2d(tmp), i2d(cmp)));
 
     tmp = d11;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d06), _mm256_xor_si256(topBit, d11));
-    d11 = _mm256_blendv_pd(d11, d06, cmp);
-    d06 = _mm256_blendv_pd(d06, tmp, cmp);
+    d11 = d2i(_mm256_blendv_pd(i2d(d11), i2d(d06), i2d(cmp)));
+    d06 = d2i(_mm256_blendv_pd(i2d(d06), i2d(tmp), i2d(cmp)));
 
     tmp = d12;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d05), _mm256_xor_si256(topBit, d12));
-    d12 = _mm256_blendv_pd(d12, d05, cmp);
-    d05 = _mm256_blendv_pd(d05, tmp, cmp);
+    d12 = d2i(_mm256_blendv_pd(i2d(d12), i2d(d05), i2d(cmp)));
+    d05 = d2i(_mm256_blendv_pd(i2d(d05), i2d(tmp), i2d(cmp)));
 
     tmp = d13;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d04), _mm256_xor_si256(topBit, d13));
-    d13 = _mm256_blendv_pd(d13, d04, cmp);
-    d04 = _mm256_blendv_pd(d04, tmp, cmp);
+    d13 = d2i(_mm256_blendv_pd(i2d(d13), i2d(d04), i2d(cmp)));
+    d04 = d2i(_mm256_blendv_pd(i2d(d04), i2d(tmp), i2d(cmp)));
 
     tmp = d14;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d03), _mm256_xor_si256(topBit, d14));
-    d14 = _mm256_blendv_pd(d14, d03, cmp);
-    d03 = _mm256_blendv_pd(d03, tmp, cmp);
+    d14 = d2i(_mm256_blendv_pd(i2d(d14), i2d(d03), i2d(cmp)));
+    d03 = d2i(_mm256_blendv_pd(i2d(d03), i2d(tmp), i2d(cmp)));
 
     tmp = d15;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d02), _mm256_xor_si256(topBit, d15));
-    d15 = _mm256_blendv_pd(d15, d02, cmp);
-    d02 = _mm256_blendv_pd(d02, tmp, cmp);
+    d15 = d2i(_mm256_blendv_pd(i2d(d15), i2d(d02), i2d(cmp)));
+    d02 = d2i(_mm256_blendv_pd(i2d(d02), i2d(tmp), i2d(cmp)));
 
     tmp = d16;
     cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, d01), _mm256_xor_si256(topBit, d16));
-    d16 = _mm256_blendv_pd(d16, d01, cmp);
-    d01 = _mm256_blendv_pd(d01, tmp, cmp);
+    d16 = d2i(_mm256_blendv_pd(i2d(d16), i2d(d01), i2d(cmp)));
+    d01 = d2i(_mm256_blendv_pd(i2d(d01), i2d(tmp), i2d(cmp)));
 
     sort_08v_merge_descending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_08v_merge_descending(d09, d10, d11, d12, d13, d14, d15, d16);
 }
 
-static __attribute__((noinline)) void sort_01v(uint64_t *ptr) {
+static NOINLINE void sort_01v(uint64_t *ptr) {
     __m256i d01 = _mm256_lddqu_si256((__m256i const *) ptr + 0);
     sort_01v_ascending(d01);
     _mm256_storeu_si256((__m256i *) ptr + 0, d01);
 }
 
-static __attribute__((noinline)) void sort_02v(uint64_t *ptr) {
+static NOINLINE void sort_02v(uint64_t *ptr) {
     __m256i d01 = _mm256_lddqu_si256((__m256i const *) ptr + 0);
     __m256i d02 = _mm256_lddqu_si256((__m256i const *) ptr + 1);
     sort_02v_ascending(d01, d02);
@@ -1170,7 +1184,7 @@ static __attribute__((noinline)) void sort_02v(uint64_t *ptr) {
     _mm256_storeu_si256((__m256i *) ptr + 1, d02);
 }
 
-static __attribute__((noinline)) void sort_03v(uint64_t *ptr) {
+static NOINLINE void sort_03v(uint64_t *ptr) {
     __m256i d01 = _mm256_lddqu_si256((__m256i const *) ptr + 0);
     __m256i d02 = _mm256_lddqu_si256((__m256i const *) ptr + 1);
     __m256i d03 = _mm256_lddqu_si256((__m256i const *) ptr + 2);
@@ -1180,7 +1194,7 @@ static __attribute__((noinline)) void sort_03v(uint64_t *ptr) {
     _mm256_storeu_si256((__m256i *) ptr + 2, d03);
 }
 
-static __attribute__((noinline)) void sort_04v(uint64_t *ptr) {
+static NOINLINE void sort_04v(uint64_t *ptr) {
     __m256i d01 = _mm256_lddqu_si256((__m256i const *) ptr + 0);
     __m256i d02 = _mm256_lddqu_si256((__m256i const *) ptr + 1);
     __m256i d03 = _mm256_lddqu_si256((__m256i const *) ptr + 2);
@@ -1192,7 +1206,7 @@ static __attribute__((noinline)) void sort_04v(uint64_t *ptr) {
     _mm256_storeu_si256((__m256i *) ptr + 3, d04);
 }
 
-static __attribute__((noinline)) void sort_05v(uint64_t *ptr) {
+static NOINLINE void sort_05v(uint64_t *ptr) {
     __m256i d01 = _mm256_lddqu_si256((__m256i const *) ptr + 0);
     __m256i d02 = _mm256_lddqu_si256((__m256i const *) ptr + 1);
     __m256i d03 = _mm256_lddqu_si256((__m256i const *) ptr + 2);
@@ -1206,7 +1220,7 @@ static __attribute__((noinline)) void sort_05v(uint64_t *ptr) {
     _mm256_storeu_si256((__m256i *) ptr + 4, d05);
 }
 
-static __attribute__((noinline)) void sort_06v(uint64_t *ptr) {
+static NOINLINE void sort_06v(uint64_t *ptr) {
     __m256i d01 = _mm256_lddqu_si256((__m256i const *) ptr + 0);
     __m256i d02 = _mm256_lddqu_si256((__m256i const *) ptr + 1);
     __m256i d03 = _mm256_lddqu_si256((__m256i const *) ptr + 2);
@@ -1222,7 +1236,7 @@ static __attribute__((noinline)) void sort_06v(uint64_t *ptr) {
     _mm256_storeu_si256((__m256i *) ptr + 5, d06);
 }
 
-static __attribute__((noinline)) void sort_07v(uint64_t *ptr) {
+static NOINLINE void sort_07v(uint64_t *ptr) {
     __m256i d01 = _mm256_lddqu_si256((__m256i const *) ptr + 0);
     __m256i d02 = _mm256_lddqu_si256((__m256i const *) ptr + 1);
     __m256i d03 = _mm256_lddqu_si256((__m256i const *) ptr + 2);
@@ -1240,7 +1254,7 @@ static __attribute__((noinline)) void sort_07v(uint64_t *ptr) {
     _mm256_storeu_si256((__m256i *) ptr + 6, d07);
 }
 
-static __attribute__((noinline)) void sort_08v(uint64_t *ptr) {
+static NOINLINE void sort_08v(uint64_t *ptr) {
     __m256i d01 = _mm256_lddqu_si256((__m256i const *) ptr + 0);
     __m256i d02 = _mm256_lddqu_si256((__m256i const *) ptr + 1);
     __m256i d03 = _mm256_lddqu_si256((__m256i const *) ptr + 2);
@@ -1260,7 +1274,7 @@ static __attribute__((noinline)) void sort_08v(uint64_t *ptr) {
     _mm256_storeu_si256((__m256i *) ptr + 7, d08);
 }
 
-static __attribute__((noinline)) void sort_09v(uint64_t *ptr) {
+static NOINLINE void sort_09v(uint64_t *ptr) {
     __m256i d01 = _mm256_lddqu_si256((__m256i const *) ptr + 0);
     __m256i d02 = _mm256_lddqu_si256((__m256i const *) ptr + 1);
     __m256i d03 = _mm256_lddqu_si256((__m256i const *) ptr + 2);
@@ -1282,7 +1296,7 @@ static __attribute__((noinline)) void sort_09v(uint64_t *ptr) {
     _mm256_storeu_si256((__m256i *) ptr + 8, d09);
 }
 
-static __attribute__((noinline)) void sort_10v(uint64_t *ptr) {
+static NOINLINE void sort_10v(uint64_t *ptr) {
     __m256i d01 = _mm256_lddqu_si256((__m256i const *) ptr + 0);
     __m256i d02 = _mm256_lddqu_si256((__m256i const *) ptr + 1);
     __m256i d03 = _mm256_lddqu_si256((__m256i const *) ptr + 2);
@@ -1306,7 +1320,7 @@ static __attribute__((noinline)) void sort_10v(uint64_t *ptr) {
     _mm256_storeu_si256((__m256i *) ptr + 9, d10);
 }
 
-static __attribute__((noinline)) void sort_11v(uint64_t *ptr) {
+static NOINLINE void sort_11v(uint64_t *ptr) {
     __m256i d01 = _mm256_lddqu_si256((__m256i const *) ptr + 0);
     __m256i d02 = _mm256_lddqu_si256((__m256i const *) ptr + 1);
     __m256i d03 = _mm256_lddqu_si256((__m256i const *) ptr + 2);
@@ -1332,7 +1346,7 @@ static __attribute__((noinline)) void sort_11v(uint64_t *ptr) {
     _mm256_storeu_si256((__m256i *) ptr + 10, d11);
 }
 
-static __attribute__((noinline)) void sort_12v(uint64_t *ptr) {
+static NOINLINE void sort_12v(uint64_t *ptr) {
     __m256i d01 = _mm256_lddqu_si256((__m256i const *) ptr + 0);
     __m256i d02 = _mm256_lddqu_si256((__m256i const *) ptr + 1);
     __m256i d03 = _mm256_lddqu_si256((__m256i const *) ptr + 2);
@@ -1360,7 +1374,7 @@ static __attribute__((noinline)) void sort_12v(uint64_t *ptr) {
     _mm256_storeu_si256((__m256i *) ptr + 11, d12);
 }
 
-static __attribute__((noinline)) void sort_13v(uint64_t *ptr) {
+static NOINLINE void sort_13v(uint64_t *ptr) {
     __m256i d01 = _mm256_lddqu_si256((__m256i const *) ptr + 0);
     __m256i d02 = _mm256_lddqu_si256((__m256i const *) ptr + 1);
     __m256i d03 = _mm256_lddqu_si256((__m256i const *) ptr + 2);
@@ -1390,7 +1404,7 @@ static __attribute__((noinline)) void sort_13v(uint64_t *ptr) {
     _mm256_storeu_si256((__m256i *) ptr + 12, d13);
 }
 
-static __attribute__((noinline)) void sort_14v(uint64_t *ptr) {
+static NOINLINE void sort_14v(uint64_t *ptr) {
     __m256i d01 = _mm256_lddqu_si256((__m256i const *) ptr + 0);
     __m256i d02 = _mm256_lddqu_si256((__m256i const *) ptr + 1);
     __m256i d03 = _mm256_lddqu_si256((__m256i const *) ptr + 2);
@@ -1422,7 +1436,7 @@ static __attribute__((noinline)) void sort_14v(uint64_t *ptr) {
     _mm256_storeu_si256((__m256i *) ptr + 13, d14);
 }
 
-static __attribute__((noinline)) void sort_15v(uint64_t *ptr) {
+static NOINLINE void sort_15v(uint64_t *ptr) {
     __m256i d01 = _mm256_lddqu_si256((__m256i const *) ptr + 0);
     __m256i d02 = _mm256_lddqu_si256((__m256i const *) ptr + 1);
     __m256i d03 = _mm256_lddqu_si256((__m256i const *) ptr + 2);
@@ -1456,7 +1470,7 @@ static __attribute__((noinline)) void sort_15v(uint64_t *ptr) {
     _mm256_storeu_si256((__m256i *) ptr + 14, d15);
 }
 
-static __attribute__((noinline)) void sort_16v(uint64_t *ptr) {
+static NOINLINE void sort_16v(uint64_t *ptr) {
     __m256i d01 = _mm256_lddqu_si256((__m256i const *) ptr + 0);
     __m256i d02 = _mm256_lddqu_si256((__m256i const *) ptr + 1);
     __m256i d03 = _mm256_lddqu_si256((__m256i const *) ptr + 2);

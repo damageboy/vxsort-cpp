@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <algorithm>
+#include <numeric>
 #include <random>
 
 template <typename T>

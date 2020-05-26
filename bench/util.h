@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <algorithm>
+#include <numeric>
 #include <random>
 
 template <typename T>
@@ -17,17 +18,19 @@ extern void generate_unique_ptrs_vec(std::vector<T>& vec, size_t n) {
 
 template <typename T>
 extern std::vector<T *> generate_array_beginnings(const std::vector<std::vector<T> *> &copies) {
-  std::vector<T *> begins(copies.size());
-  for (auto i = 0; i < copies.size(); i++)
+  const auto num_copies = copies.size();
+  std::vector<T *> begins(num_copies);
+  for (auto i = 0; i < num_copies; i++)
     begins[i] = copies[i]->data();
   return begins;
 }
 template <typename T>
 extern void refresh_copies(const std::vector<std::vector<T> *> &copies,
                            std::vector<T>& orig) {
-  auto begin = orig.begin();
-  auto end = orig.end();
-  for (auto i = 0; i < copies.size(); i++)
+  const auto begin = orig.begin();
+  const auto end = orig.end();
+  const auto num_copies = copies.size();
+  for (auto i = 0; i < num_copies; i++)
     copies[i]->assign(begin, end);
 }
 template <typename T>

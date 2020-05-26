@@ -10,6 +10,17 @@
 #include <cstdio>
 #include <cstring>
 
+#ifdef _MSC_VER
+// MSVC
+#define INLINE __forceinline
+#define NOINLINE __declspec(noinline)
+#else
+// GCC + Clang
+#define INLINE __attribute__((always_inline))
+#define NOINLINE __attribute__((noinline))
+#endif
+
+
 namespace gcsort {
 using gcsort::smallsort::bitonic;
 
@@ -42,13 +53,15 @@ struct alignment_hint {
 
 
 template <typename T>
+//using Tv = __m256;
 struct vxsort_partition_traits {
 public:
-    typedef T __m256t __attribute__ ((__vector_size__ (32)));
+    //typedef T __m256t __attribute__ ((__vector_size__ (32)));
+    typedef __m256 Tv;
 
     static __m256i get_perm(int mask);
-    static __m256t get_vec_pivot(T);
-    static uint32_t get_cmpgt_mask(__m256t a, __m256t b);
+    static Tv get_vec_pivot(T pivot);
+    static uint32_t get_cmpgt_mask(Tv a, Tv b);
 };
 
 template <>
@@ -56,16 +69,18 @@ class vxsort_partition_traits<int64_t> {
 private:
     const static int8_t perm_table[128];
 public:
-    static __m256i get_perm(int mask) {
+    typedef __m256i Tv;
+
+    static INLINE __m256i get_perm(int mask) {
         assert(mask >= 0);
         assert(mask <= 15);
         return _mm256_cvtepu8_epi32(_mm_loadu_si128((__m128i*)(perm_table + mask * 8)));
     }
-    static __m256i get_vec_pivot(int64_t pivot) {
+    static INLINE  Tv get_vec_pivot(int64_t pivot) {
         return _mm256_set1_epi64x(pivot);
     }
-    static uint32_t get_cmpgt_mask(__m256i a, __m256i b) {
-        return _mm256_movemask_pd(_mm256_cmpgt_epi64(a, b));
+    static INLINE uint32_t get_cmpgt_mask(Tv a, Tv b) {
+        return _mm256_movemask_pd(_mm256_castsi256_pd(_mm256_cmpgt_epi64(a, b)));
     }
 };
 
@@ -74,25 +89,26 @@ class vxsort_partition_traits<int32_t> {
 private:
     const static int8_t perm_table[2048];
 public:
-    static __m256i get_perm(int mask) {
+    typedef __m256i Tv;
+    static INLINE __m256i get_perm(int mask) {
         assert(mask >= 0);
         assert(mask <= 255);
         return _mm256_cvtepu8_epi32(_mm_loadu_si128((__m128i*)(perm_table + mask * 8)));
     }
-    static __m256i get_vec_pivot(int32_t pivot) {
+    static INLINE __m256i get_vec_pivot(int32_t pivot) {
         return _mm256_set1_epi32(pivot);
     }
-    static uint32_t get_cmpgt_mask(__m256i a, __m256i b) {
-        return _mm256_movemask_ps(_mm256_cmpgt_epi32(a, b));
+    static INLINE  uint32_t get_cmpgt_mask(__m256i a, __m256i b) {
+        return _mm256_movemask_ps(_mm256_castsi256_ps(_mm256_cmpgt_epi32(a, b)));
     }
 };
+
 
 template <typename T, int Unroll=1>
 class vxsort {
 private:
-    typedef T __m256t __attribute__ ((__vector_size__ (32)));
-
-    typedef vxsort_partition_traits<T> Tp;
+    //using Tv2 = Tp::Tv;
+    using Tp = vxsort_partition_traits<T>;
 
     static const int ELEMENT_ALIGN = sizeof(T) - 1;
     static const int N = 32 / sizeof(T);
@@ -182,13 +198,13 @@ private:
     }
 
 
-    T* _startPtr;
-    T* _endPtr;
+    T* _startPtr = nullptr;
+    T* _endPtr = nullptr;
 
     T _temp[PARTITION_TMP_SIZE_IN_ELEMENTS];
-    int _depth;
+    int _depth = 0;
 
-    __attribute__((noinline))
+    NOINLINE
     T* align_left_scalar_uncommon(T* read_left, T pivot,
                                   T*& tmp_left, T*& tmp_right) {
         if (((size_t)read_left & ALIGN_MASK) == 0)
@@ -207,7 +223,7 @@ private:
         return read_left;
     }
 
-    __attribute__((noinline))
+    NOINLINE
     T* align_right_scalar_uncommon(T* readRight, T pivot,
                                    T*& tmpLeft, T*& tmpRight) {
         if (((size_t) readRight & ALIGN_MASK) == 0)
@@ -338,15 +354,15 @@ private:
         _depth--;
     }
 
-    static void partition_block(T* dataPtr,
-                                const __m256t& P,
-                                T*& writeLeft,
-                                T*& writeRight) {
+    static INLINE void partition_block(T* dataPtr,
+                                       const typename Tp::Tv& P,
+                                       T*& writeLeft,
+                                       T*& writeRight) {
         auto dataVec = _mm256_load_si256((__m256i*)dataPtr);
         auto mask = Tp::get_cmpgt_mask(dataVec, P);
         dataVec = _mm256_permutevar8x32_epi32(dataVec, Tp::get_perm(mask));
-        _mm256_storeu_si256((__m256i*)writeLeft, dataVec);
-        _mm256_storeu_si256((__m256i*)writeRight, dataVec);
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(writeLeft), dataVec);
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(writeRight), dataVec);
         auto popCount = -_mm_popcnt_u64(mask);
         writeRight += popCount;
         writeLeft += popCount + N;
@@ -356,8 +372,8 @@ private:
     template<int InnerUnroll>
     T* vectorized_partition(T* left, T* right, alignment_hint hint) {
         assert(right - left >= SMALL_SORT_THRESHOLD_ELEMENTS);
-        assert(((size_t)left & ELEMENT_ALIGN) == 0);
-        assert(((size_t)right & ELEMENT_ALIGN) == 0);
+        assert((reinterpret_cast<size_t>(left) & ELEMENT_ALIGN) == 0);
+        assert((reinterpret_cast<size_t>(right) & ELEMENT_ALIGN) == 0);
 
         // Vectorized double-pumped (dual-sided) partitioning:
         // We start with picking a pivot using the media-of-3 "method"
@@ -428,8 +444,8 @@ private:
         auto preAlignedRight = right + rightAlign - N;
 
         // Read overlapped data from right (includes re-reading the pivot)
-        auto RT0 = (__m256t) _mm256_lddqu_si256((__m256i*)preAlignedRight);
-        auto LT0 = (__m256t) _mm256_lddqu_si256((__m256i*)preAlignedLeft);
+        auto RT0 = (typename Tp::Tv) _mm256_lddqu_si256((__m256i*)preAlignedRight);
+        auto LT0 = (typename Tp::Tv) _mm256_lddqu_si256((__m256i*)preAlignedLeft);
         auto rtMask = Tp::get_cmpgt_mask(RT0, P);
         auto ltMask = Tp::get_cmpgt_mask(LT0, P);
         auto rtPopCount = std::max(_mm_popcnt_u32(rtMask), rightAlign);
@@ -517,8 +533,7 @@ private:
         return writeLeft;
     }
 public:
-    void sort(T* left, T* right) {
-        printf("PARTITION_TMP_SIZE_IN_ELEMENTS=%d, Unroll=%d, SafeInnerUnroll=%d, MaxInnerUnroll=%d\n", PARTITION_TMP_SIZE_IN_ELEMENTS, Unroll, SafeInnerUnroll, MaxInnerUnroll);
+    void sort(T* left, T* right) {        
         reset(left, right);
         auto depthLimit = 2 * floor_log2_plus_one(right + 1 - left);
         sort(left, right, alignment_hint(), depthLimit);

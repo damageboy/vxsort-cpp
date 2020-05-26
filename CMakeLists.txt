@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.10)
-project(gcsort LANGUAGES CXX)
+
+project(gcsort)
 set(CMAKE_CXX_STANDARD 11)
 
 # Location of additional cmake modules
