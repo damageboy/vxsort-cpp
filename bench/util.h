@@ -34,7 +34,7 @@ extern void refresh_copies(const std::vector<std::vector<T> *> &copies,
     copies[i]->assign(begin, end);
 }
 template <typename T>
-extern std::vector<std::vector<T> *> generate_copies(int num_copies,  int32_t n, std::vector<T>& orig) {
+extern std::vector<std::vector<T> *> generate_copies(int num_copies,  int64_t n, std::vector<T>& orig) {
   std::vector<std::vector<T>*> copies(num_copies);
   for (auto i = 0; i < num_copies; i++)
     copies[i] = new std::vector<T>(n);

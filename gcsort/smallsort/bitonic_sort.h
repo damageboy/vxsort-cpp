@@ -7,7 +7,7 @@ namespace smallsort {
 template <typename T>
 class bitonic {
  public:
-  static void sort(T* ptr, int length);
+  static void sort(T* ptr, size_t length);
 };
 }  // namespace smallsort
 }  // namespace gcsort

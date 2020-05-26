@@ -369,7 +369,7 @@ static NOINLINE void sort_{m:02d}v({type} *ptr) {{"""
 
 
 def generate_master_entry_point(f, type):
-    s = f"""    static void sort({type} *ptr, int length) {{
+    s = f"""    static void sort({type} *ptr, size_t length) {{
     const int N = {int(32 / bitonic_size_map[type])};
 
     switch(length / N) {{"""
