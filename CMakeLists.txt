@@ -30,7 +30,7 @@ set(SANITIZERS "-fsanitize=address,bounds,alignment,bool,enum,shift,shift-expone
 if((CMAKE_CXX_COMPILER_ID MATCHES GNU) OR (CMAKE_CXX_COMPILER_ID MATCHES Clang))
    set(CMAKE_CXX_FLAGS         "${CMAKE_CXX_FLAGS} -mavx2 -DBENCHMARK_ENABLE_LTO=true")
    set(CMAKE_CXX_FLAGS_DEBUG   "-O0 -g3 ${SANITIZERS}")
-   set(CMAKE_CXX_FLAGS_RELEASE "-O3 -mtune=native -DNDEBUG")
+   set(CMAKE_CXX_FLAGS_RELEASE "-O3 -g3 -mtune=native -DNDEBUG")
 endif()
 
 set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING

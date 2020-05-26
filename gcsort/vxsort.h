@@ -537,22 +537,19 @@ private:
             __m256t d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11;
 
             switch (InnerUnroll) {
-                case 12: d11 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 11);
-                case 11: d10 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 10);
-                case 10: d9 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 9);
-                case 9: d8 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 8);
-                case 8: d7 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 7);
-                case 7: d6 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 6);
-                case 6: d5 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 5);
-                case 5: d4 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 4);
-                case 4: d3 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 3);
-                case 3: d2 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 2);
-                case 2: d1 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 1);
-                case 1: d0 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 0);
+                case 12: d11 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr +  InnerUnroll - 12);
+                case 11: d10 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr  + InnerUnroll - 11);
+                case 10: d9 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr  + InnerUnroll - 10);
+                case 9: d8 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr  + InnerUnroll - 9);
+                case 8: d7 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr  + InnerUnroll - 8);
+                case 7: d6 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr  + InnerUnroll - 7);
+                case 6: d5 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr  + InnerUnroll - 6);
+                case 5: d4 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + InnerUnroll - 5);
+                case 4: d3 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + InnerUnroll - 4);
+                case 3: d2 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + InnerUnroll - 3);
+                case 2: d1 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + InnerUnroll - 2);
+                case 1: d0 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + InnerUnroll - 1);
             }
-
-            //assert(readLeft - writeLeft >= 2*SLACK_PER_SIDE_IN_ELEMENTS);
-            //assert(writeRight - readRight >= 2*SLACK_PER_SIDE_IN_ELEMENTS);
 
             switch (InnerUnroll) {
                 case 12: partition_block(d11, P, writeLeft, writeRight);
@@ -570,7 +567,6 @@ private:
             }
         }
 
-        //if (InnerUnroll > 1) {
         readRight += (N * InnerUnroll) - N;
 
         while (readLeft <= readRight) {
@@ -585,7 +581,6 @@ private:
 
             partition_block(nextPtr, P, writeLeft, writeRight);
         }
-        //}
 
         // 3. Copy-back the 4 registers + remainder we partitioned in the beginning
         auto leftTmpSize = tmpLeft - tmpStartLeft;
