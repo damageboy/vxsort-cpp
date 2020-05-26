@@ -2,6 +2,7 @@
 
 max_bitonic_sort_verctors = 16
 
+
 def next_power_of_2(v):
     v = v - 1
     v |= v >> 1
@@ -37,6 +38,22 @@ bitonic_size_map = {
 bitonic_types = bitonic_size_map.keys()
 
 
+def i2d(v, t):
+    if t == "double":
+        return v
+    elif t == "float":
+        return v
+    return f"i2d({v})"
+
+
+def d2i(v, t):
+    if t == "double":
+        return v
+    elif t == "float":
+        return v
+    return f"d2i({v})"
+
+
 def generate_param_list(start, numParams):
     return str.join(", ", list(map(lambda p: f"d{p:02d}", range(start, start + numParams))))
 
@@ -45,123 +62,125 @@ def generate_param_def_list(numParams, nativeType):
     return str.join(", ", list(map(lambda p: f"{bitonic_type_map[nativeType]}& d{p:02d}", range(1, numParams + 1))))
 
 
-def generate_shuffle_X1(v, type):
-    if bitonic_size_map[type] == 4:
+def generate_shuffle_X1(v, t):
+    if bitonic_size_map[t] == 4:
         return f"_mm256_shuffle_epi32({v}, 0xB1)"
-    elif bitonic_size_map[type] == 8:
-        return f"_mm256_shuffle_pd((__m256d) {v}, (__m256d) {v}, 0x5)"
+    elif bitonic_size_map[t] == 8:
+        return d2i(f"_mm256_shuffle_pd({i2d(v, t)}, {i2d(v, t)}, 0x5)", t)
 
 
-def generate_shuffle_X2(v, type):
-    if bitonic_size_map[type] == 4:
+def generate_shuffle_X2(v, t):
+    if bitonic_size_map[t] == 4:
         return f"_mm256_shuffle_epi32({v}, 0x4E)"
-    elif bitonic_size_map[type] == 8:
-        return f"_mm256_permute4x64_pd((__m256d) {v}, 0x4E)"
+    elif bitonic_size_map[t] == 8:
+        return d2i(f"_mm256_permute4x64_pd({i2d(v, t)}, 0x4E)", t)
 
 
-def generate_shuffle_XR(v, type):
-    if bitonic_size_map[type] == 4:
+def generate_shuffle_XR(v, t):
+    if bitonic_size_map[t] == 4:
         return f"_mm256_shuffle_epi32({v}, 0x1B)"
-    elif bitonic_size_map[type] == 8:
-        return f"_mm256_permute4x64_pd((__m256d) {v}, 0x1B)"
+    elif bitonic_size_map[t] == 8:
+        return d2i(f"_mm256_permute4x64_pd({i2d(v, t)}, 0x1B)", t)
 
 
-def generate_blend_B1(v1, v2, type, ascending):
-    if bitonic_size_map[type] == 4:
+def generate_blend_B1(v1, v2, t, ascending):
+    if bitonic_size_map[t] == 4:
         if ascending:
             return f"_mm256_blend_epi32({v1}, {v2}, 0xAA)"
         else:
             return f"_mm256_blend_epi32({v2}, {v1}, 0xAA)"
-    elif bitonic_size_map[type] == 8:
+    elif bitonic_size_map[t] == 8:
         if ascending:
-            return f"_mm256_blend_pd((__m256d) {v1}, (__m256d) {v2}, 0xA)"
+            return d2i(f"_mm256_blend_pd({i2d(v1, t)}, {i2d(v2, t)}, 0xA)", t)
         else:
-            return f"_mm256_blend_pd((__m256d) {v2}, (__m256d) {v1}, 0xA)"
+            return d2i(f"_mm256_blend_pd({i2d(v2, t)}, {i2d(v1, t)}, 0xA)", t)
 
 
-def generate_blend_B2(v1, v2, type, ascending):
-    if bitonic_size_map[type] == 4:
+def generate_blend_B2(v1, v2, t, ascending):
+    if bitonic_size_map[t] == 4:
         if ascending:
             return f"_mm256_blend_epi32({v1}, {v2}, 0xCC)"
         else:
             return f"_mm256_blend_epi32({v2}, {v1}, 0xCC)"
-    elif bitonic_size_map[type] == 8:
+    elif bitonic_size_map[t] == 8:
         if ascending:
-            return f"_mm256_blend_pd((__m256d) {v1}, (__m256d) {v2}, 0xC)"
+            return d2i(f"_mm256_blend_pd({i2d(v1, t)}, {i2d(v2, t)}, 0xC)", t)
         else:
-            return f"_mm256_blend_pd((__m256d) {v2}, (__m256d) {v1}, 0xC)"
+            return d2i(f"_mm256_blend_pd({i2d(v2, t)}, {i2d(v1, t)}, 0xC)", t)
 
 
-def generate_blend_B4(v1, v2, type, ascending):
-    if bitonic_size_map[type] == 4:
+def generate_blend_B4(v1, v2, t, ascending):
+    if bitonic_size_map[t] == 4:
         if ascending:
             return f"_mm256_blend_epi32({v1}, {v2}, 0xF0)"
         else:
             return f"_mm256_blend_epi32({v2}, {v1}, 0xF0)"
-    elif bitonic_size_map[type] == 8:
+    elif bitonic_size_map[t] == 8:
         raise Exception("WTF")
 
 
-def generate_cross(v, type):
-    if bitonic_size_map[type] == 4:
-        return f"_mm256_permute4x64_pd((__m256d) {v}, 0x4E)"
-    elif bitonic_size_map[type] == 8:
+def generate_cross(v, t):
+    if bitonic_size_map[t] == 4:
+        return d2i(f"_mm256_permute4x64_pd({i2d(v, t)}, 0x4E)", t)
+    elif bitonic_size_map[t] == 8:
         raise Exception("WTF")
 
 
-def generate_reverse(v, type):
-    if bitonic_size_map[type] == 4:
-        return f"_mm256_permute4x64_pd((__m256d) _mm256_shuffle_epi32({v}, 0x1B), 0x4E)"
-    elif bitonic_size_map[type] == 8:
-        return f"_mm256_permute4x64_pd((__m256d) {v}, 0x1B)"
+def generate_reverse(v, t):
+    if bitonic_size_map[t] == 4:
+        v = f"_mm256_shuffle_epi32({v}, 0x1B)"
+        return d2i(f"_mm256_permute4x64_pd({i2d(v, t)}, 0x4E)", t)
+    elif bitonic_size_map[t] == 8:
+        return d2i(f"_mm256_permute4x64_pd({i2d(v, t)}, 0x1B)", t)
 
 
-def crappity_crap_crap(v1, v2, type):
-    if type == "int64_t":
+def crappity_crap_crap(v1, v2, t):
+    if t == "int64_t":
         return f"cmp = _mm256_cmpgt_epi64({v1}, {v2});"
-    elif type == "uint64_t":
+    elif t == "uint64_t":
         return f"cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, {v1}), _mm256_xor_si256(topBit, {v2}));"
 
     return ""
 
 
-def generate_min(v1, v2, type):
-    if type == "int32_t":
+def generate_min(v1, v2, t):
+    if t == "int32_t":
         return f"_mm256_min_epi32({v1}, {v2})"
-    elif type == "uint32_t":
+    elif t == "uint32_t":
         return f"_mm256_min_epu32({v1}, {v2})"
-    elif type == "float":
+    elif t == "float":
         return f"_mm256_min_ps({v1}, {v2})"
-    elif type == "int64_t":
-        return f"_mm256_blendv_pd({v1}, {v2}, cmp)"
-    elif type == "uint64_t":
-        return f"_mm256_blendv_pd({v1}, {v2}, cmp)"
-    elif type == "double":
+    elif t == "int64_t":
+        return d2i(f"_mm256_blendv_pd({i2d(v1, t)}, {i2d(v2, t)}, i2d(cmp))", t)
+    elif t == "uint64_t":
+        return d2i(f"_mm256_blendv_pd({i2d(v1, t)}, {i2d(v2, t)}, i2d(cmp))", t)
+    elif t == "double":
         return f"_mm256_min_pd({v1}, {v2})"
 
 
-def generate_max(v1, v2, type):
-    if type == "int32_t":
+def generate_max(v1, v2, t):
+    if t == "int32_t":
         return f"_mm256_max_epi32({v1}, {v2})"
-    elif type == "uint32_t":
+    elif t == "uint32_t":
         return f"_mm256_max_epu32({v1}, {v2})"
-    elif type == "float":
+    elif t == "float":
         return f"_mm256_max_ps({v1}, {v2})"
-    elif type == "int64_t":
-        return f"_mm256_blendv_pd({v2}, {v1}, cmp)"
-    elif type == "uint64_t":
-        return f"_mm256_blendv_pd({v2}, {v1}, cmp)"
-    elif type == "double":
+    elif t == "int64_t":
+        return d2i(f"_mm256_blendv_pd({i2d(v2, t)}, {i2d(v1, t)}, i2d(cmp))", t)
+    elif t == "uint64_t":
+        return d2i(f"_mm256_blendv_pd({i2d(v2, t)}, {i2d(v1, t)}, i2d(cmp))", t)
+    elif t == "double":
         return f"_mm256_max_pd({v1}, {v2})"
 
 
 def generate_1v_basic_sorters(f, type, ascending):
     maybe_cmp = lambda: ", cmp" if (type == "int64_t" or type == "uint64_t") else ""
-    maybe_topbit = lambda: f"\n        {bitonic_type_map[type]} topBit = _mm256_set1_epi64x(1LLU << 63);" if (type == "uint64_t") else ""
+    maybe_topbit = lambda: f"\n        {bitonic_type_map[type]} topBit = _mm256_set1_epi64x(1LLU << 63);" if (
+                type == "uint64_t") else ""
 
     suffix = "ascending" if ascending else "descending"
 
-    s = f"""    static inline void sort_01v_{suffix}({generate_param_def_list(1, type)}) {{
+    s = f"""    static INLINE void sort_01v_{suffix}({generate_param_def_list(1, type)}) {{
         {bitonic_type_map[type]}  min, max, s{maybe_cmp()};{maybe_topbit()}
 
         s = {generate_shuffle_X1("d01", type)};
@@ -169,13 +188,13 @@ def generate_1v_basic_sorters(f, type, ascending):
         min = {generate_min("s", "d01", type)};
         max = {generate_max("s", "d01", type)};
         d01 = {generate_blend_B1("min", "max", type, ascending)};
-    
+
         s = {generate_shuffle_XR("d01", type)};
         {crappity_crap_crap("s", "d01", type)}
         min = {generate_min("s", "d01", type)};
         max = {generate_max("s", "d01", type)};
         d01 = {generate_blend_B2("min", "max", type, ascending)};
-    
+
         s = {generate_shuffle_X1("d01", type)};
         {crappity_crap_crap("s", "d01", type)}
         min = {generate_min("s", "d01", type)};
@@ -190,12 +209,12 @@ def generate_1v_basic_sorters(f, type, ascending):
         min = {generate_min("s", "d01", type)};
         max = {generate_max("s", "d01", type)};
         d01 = {generate_blend_B4("min", "max", type, ascending)};
-    
+
         s = {generate_shuffle_X2("d01", type)};
         min = {generate_min("s", "d01", type)};
         max = {generate_max("s", "d01", type)};
         d01 = {generate_blend_B2("min", "max", type, ascending)};
-    
+
         s = {generate_shuffle_X1("d01", type)};
         min = {generate_min("s", "d01", type)};
         max = {generate_max("s", "d01", type)};
@@ -206,11 +225,12 @@ def generate_1v_basic_sorters(f, type, ascending):
 
 def generate_1v_merge_sorters(f, type, ascending):
     maybe_cmp = lambda: ", cmp" if (type == "int64_t" or type == "uint64_t") else ""
-    maybe_topbit = lambda: f"\n        {bitonic_type_map[type]} topBit = _mm256_set1_epi64x(1LLU << 63);" if (type == "uint64_t") else ""
+    maybe_topbit = lambda: f"\n        {bitonic_type_map[type]} topBit = _mm256_set1_epi64x(1LLU << 63);" if (
+                type == "uint64_t") else ""
 
     suffix = "ascending" if ascending else "descending"
 
-    s = f"""    static inline void sort_01v_merge_{suffix}({generate_param_def_list(1, type)}) {{
+    s = f"""    static INLINE void sort_01v_merge_{suffix}({generate_param_def_list(1, type)}) {{
         {bitonic_type_map[type]}  min, max, s{maybe_cmp()};{maybe_topbit()}"""
     print(s, file=f)
 
@@ -246,7 +266,8 @@ def generate_1v_sorters(f, type, ascending):
 
 def generate_compounded_sorters(f, width, type, ascending):
     maybe_cmp = lambda: ", cmp" if (type == "int64_t" or type == "uint64_t") else ""
-    maybe_topbit = lambda: f"\n        {bitonic_type_map[type]} topBit = _mm256_set1_epi64x(1LLU << 63);" if (type == "uint64_t") else ""
+    maybe_topbit = lambda: f"\n        {bitonic_type_map[type]} topBit = _mm256_set1_epi64x(1LLU << 63);" if (
+                type == "uint64_t") else ""
 
     w1 = int(next_power_of_2(width) / 2)
     w2 = int(width - w1)
@@ -254,7 +275,7 @@ def generate_compounded_sorters(f, width, type, ascending):
     suffix = "ascending" if ascending else "descending"
     rev_suffix = "descending" if ascending else "ascending"
 
-    s = f"""    static inline void sort_{width:02d}v_{suffix}({generate_param_def_list(width, type)}) {{
+    s = f"""    static INLINE void sort_{width:02d}v_{suffix}({generate_param_def_list(width, type)}) {{
     {bitonic_type_map[type]}  tmp{maybe_cmp()};{maybe_topbit()}
 
     sort_{w1:02d}v_{suffix}({generate_param_list(1, w1)});
@@ -281,7 +302,8 @@ def generate_compounded_sorters(f, width, type, ascending):
 
 def generate_compounded_mergers(f, width, type, ascending):
     maybe_cmp = lambda: ", cmp" if (type == "int64_t" or type == "uint64_t") else ""
-    maybe_topbit = lambda: f"\n        {bitonic_type_map[type]} topBit = _mm256_set1_epi64x(1LLU << 63);" if (type == "uint64_t") else ""
+    maybe_topbit = lambda: f"\n        {bitonic_type_map[type]} topBit = _mm256_set1_epi64x(1LLU << 63);" if (
+                type == "uint64_t") else ""
 
     w1 = int(next_power_of_2(width) / 2)
     w2 = int(width - w1)
@@ -289,7 +311,7 @@ def generate_compounded_mergers(f, width, type, ascending):
     suffix = "ascending" if ascending else "descending"
     rev_suffix = "descending" if ascending else "ascending"
 
-    s = f"""    static inline void sort_{width:02d}v_merge_{suffix}({generate_param_def_list(width, type)}) {{
+    s = f"""    static INLINE void sort_{width:02d}v_merge_{suffix}({generate_param_def_list(width, type)}) {{
     {bitonic_type_map[type]}  tmp{maybe_cmp()};{maybe_topbit()}"""
     print(s, file=f)
 
@@ -329,7 +351,7 @@ def get_store_intrinsic(type):
 def generate_entry_points(f, type):
     for m in range(1, max_bitonic_sort_verctors + 1):
         s = f"""
-static __attribute__((noinline)) void sort_{m:02d}v({type} *ptr) {{"""
+static NOINLINE void sort_{m:02d}v({type} *ptr) {{"""
         print(s, file=f)
 
         for l in range(0, m):
@@ -372,9 +394,23 @@ def generate_per_type(f, type):
 
 #include <immintrin.h>
 #include "bitonic_sort.h"
+
+#ifdef _MSC_VER
+    // MSVC
+	#define INLINE __forceinline
+	#define NOINLINE __declspec(noinline)
+#else
+    // GCC + Clang
+	#define INLINE  __attribute__((always_inline))
+	#define NOINLINE __attribute__((noinline))
+#endif
+
+#define i2d _mm256_castsi256_pd
+#define d2i _mm256_castpd_si256
+
 namespace gcsort {{
 namespace smallsort {{
-template<> class bitonic<{type}> {{
+template<> struct bitonic<{type}> {{
 public:
 """
     print(s, file=f)
@@ -390,6 +426,7 @@ public:
     generate_entry_points(f, type)
     generate_master_entry_point(f, type)
     print("};\n}\n}\n#endif", file=f)
+
 
 def generate_all_types():
     for type in bitonic_types:

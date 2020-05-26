@@ -124,7 +124,7 @@ static void BM_bitonic_sort_int64(benchmark::State &state) {
 
   state.counters["Time/N"] = make_time_per_n_counter(n);
 }
-BENCHMARK(BM_bitonic_sort_int64)->DenseRange(4, 128, 4)->Unit(benchmark::kNanosecond);
+BENCHMARK(BM_bitonic_sort_int64)->DenseRange(4, 64, 4)->Unit(benchmark::kNanosecond);
 
 
 static void BM_bitonic_sort_int32(benchmark::State &state) {

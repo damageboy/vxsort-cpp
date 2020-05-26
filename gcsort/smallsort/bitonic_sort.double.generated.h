@@ -8,84 +8,98 @@
 
 #include <immintrin.h>
 #include "bitonic_sort.h"
+
+#ifdef _MSC_VER
+    // MSVC
+	#define INLINE __forceinline
+	#define NOINLINE __declspec(noinline)
+#else
+    // GCC + Clang
+	#define INLINE __attribute__((always_inline))
+	#define NOINLINE __attribute__((noinline))
+#endif
+
+#define i2d _mm256_castsi256_pd
+#define d2i _mm256_castpd_si256
+
 namespace gcsort {
 namespace smallsort {
-template<> class bitonic<double> {
+template<> struct bitonic<double> {
 public:
 
-    static inline void sort_01v_ascending(__m256d& d01) {
+    static INLINE void sort_01v_ascending(__m256d& d01) {
         __m256d  min, max, s;
 
-        s = _mm256_shuffle_pd((__m256d) d01, (__m256d) d01, 0x5);
+        s = _mm256_shuffle_pd(d01, d01, 0x5);
         
         min = _mm256_min_pd(s, d01);
         max = _mm256_max_pd(s, d01);
-        d01 = _mm256_blend_pd((__m256d) min, (__m256d) max, 0xA);
-    
-        s = _mm256_permute4x64_pd((__m256d) d01, 0x1B);
+        d01 = _mm256_blend_pd(min, max, 0xA);
+
+        s = _mm256_permute4x64_pd(d01, 0x1B);
         
         min = _mm256_min_pd(s, d01);
         max = _mm256_max_pd(s, d01);
-        d01 = _mm256_blend_pd((__m256d) min, (__m256d) max, 0xC);
-    
-        s = _mm256_shuffle_pd((__m256d) d01, (__m256d) d01, 0x5);
+        d01 = _mm256_blend_pd(min, max, 0xC);
+
+        s = _mm256_shuffle_pd(d01, d01, 0x5);
         
         min = _mm256_min_pd(s, d01);
         max = _mm256_max_pd(s, d01);
-        d01 = _mm256_blend_pd((__m256d) min, (__m256d) max, 0xA);
+        d01 = _mm256_blend_pd(min, max, 0xA);
 }
-    static inline void sort_01v_merge_ascending(__m256d& d01) {
+    static INLINE void sort_01v_merge_ascending(__m256d& d01) {
         __m256d  min, max, s;
 
-        s = _mm256_permute4x64_pd((__m256d) d01, 0x4E);
+        s = _mm256_permute4x64_pd(d01, 0x4E);
         
         min = _mm256_min_pd(s, d01);
         max = _mm256_max_pd(s, d01);
-        d01 = _mm256_blend_pd((__m256d) min, (__m256d) max, 0xC);
+        d01 = _mm256_blend_pd(min, max, 0xC);
 
-        s = _mm256_shuffle_pd((__m256d) d01, (__m256d) d01, 0x5);
+        s = _mm256_shuffle_pd(d01, d01, 0x5);
         
         min = _mm256_min_pd(s, d01);
         max = _mm256_max_pd(s, d01);
-        d01 = _mm256_blend_pd((__m256d) min, (__m256d) max, 0xA);
+        d01 = _mm256_blend_pd(min, max, 0xA);
 }
-    static inline void sort_01v_descending(__m256d& d01) {
+    static INLINE void sort_01v_descending(__m256d& d01) {
         __m256d  min, max, s;
 
-        s = _mm256_shuffle_pd((__m256d) d01, (__m256d) d01, 0x5);
+        s = _mm256_shuffle_pd(d01, d01, 0x5);
         
         min = _mm256_min_pd(s, d01);
         max = _mm256_max_pd(s, d01);
-        d01 = _mm256_blend_pd((__m256d) max, (__m256d) min, 0xA);
-    
-        s = _mm256_permute4x64_pd((__m256d) d01, 0x1B);
+        d01 = _mm256_blend_pd(max, min, 0xA);
+
+        s = _mm256_permute4x64_pd(d01, 0x1B);
         
         min = _mm256_min_pd(s, d01);
         max = _mm256_max_pd(s, d01);
-        d01 = _mm256_blend_pd((__m256d) max, (__m256d) min, 0xC);
-    
-        s = _mm256_shuffle_pd((__m256d) d01, (__m256d) d01, 0x5);
+        d01 = _mm256_blend_pd(max, min, 0xC);
+
+        s = _mm256_shuffle_pd(d01, d01, 0x5);
         
         min = _mm256_min_pd(s, d01);
         max = _mm256_max_pd(s, d01);
-        d01 = _mm256_blend_pd((__m256d) max, (__m256d) min, 0xA);
+        d01 = _mm256_blend_pd(max, min, 0xA);
 }
-    static inline void sort_01v_merge_descending(__m256d& d01) {
+    static INLINE void sort_01v_merge_descending(__m256d& d01) {
         __m256d  min, max, s;
 
-        s = _mm256_permute4x64_pd((__m256d) d01, 0x4E);
+        s = _mm256_permute4x64_pd(d01, 0x4E);
         
         min = _mm256_min_pd(s, d01);
         max = _mm256_max_pd(s, d01);
-        d01 = _mm256_blend_pd((__m256d) max, (__m256d) min, 0xC);
+        d01 = _mm256_blend_pd(max, min, 0xC);
 
-        s = _mm256_shuffle_pd((__m256d) d01, (__m256d) d01, 0x5);
+        s = _mm256_shuffle_pd(d01, d01, 0x5);
         
         min = _mm256_min_pd(s, d01);
         max = _mm256_max_pd(s, d01);
-        d01 = _mm256_blend_pd((__m256d) max, (__m256d) min, 0xA);
+        d01 = _mm256_blend_pd(max, min, 0xA);
 }
-    static inline void sort_02v_ascending(__m256d& d01, __m256d& d02) {
+    static INLINE void sort_02v_ascending(__m256d& d01, __m256d& d02) {
     __m256d  tmp;
 
     sort_01v_ascending(d01);
@@ -99,7 +113,7 @@ public:
     sort_01v_merge_ascending(d01);
     sort_01v_merge_ascending(d02);
 }
-    static inline void sort_02v_descending(__m256d& d01, __m256d& d02) {
+    static INLINE void sort_02v_descending(__m256d& d01, __m256d& d02) {
     __m256d  tmp;
 
     sort_01v_descending(d01);
@@ -113,7 +127,7 @@ public:
     sort_01v_merge_descending(d01);
     sort_01v_merge_descending(d02);
 }
-    static inline void sort_02v_merge_ascending(__m256d& d01, __m256d& d02) {
+    static INLINE void sort_02v_merge_ascending(__m256d& d01, __m256d& d02) {
     __m256d  tmp;
 
     tmp = d01;
@@ -125,7 +139,7 @@ public:
     sort_01v_merge_ascending(d01);
     sort_01v_merge_ascending(d02);
 }
-    static inline void sort_02v_merge_descending(__m256d& d01, __m256d& d02) {
+    static INLINE void sort_02v_merge_descending(__m256d& d01, __m256d& d02) {
     __m256d  tmp;
 
     tmp = d01;
@@ -137,7 +151,7 @@ public:
     sort_01v_merge_descending(d01);
     sort_01v_merge_descending(d02);
 }
-    static inline void sort_03v_ascending(__m256d& d01, __m256d& d02, __m256d& d03) {
+    static INLINE void sort_03v_ascending(__m256d& d01, __m256d& d02, __m256d& d03) {
     __m256d  tmp;
 
     sort_02v_ascending(d01, d02);
@@ -151,7 +165,7 @@ public:
     sort_02v_merge_ascending(d01, d02);
     sort_01v_merge_ascending(d03);
 }
-    static inline void sort_03v_descending(__m256d& d01, __m256d& d02, __m256d& d03) {
+    static INLINE void sort_03v_descending(__m256d& d01, __m256d& d02, __m256d& d03) {
     __m256d  tmp;
 
     sort_02v_descending(d01, d02);
@@ -165,7 +179,7 @@ public:
     sort_02v_merge_descending(d01, d02);
     sort_01v_merge_descending(d03);
 }
-    static inline void sort_03v_merge_ascending(__m256d& d01, __m256d& d02, __m256d& d03) {
+    static INLINE void sort_03v_merge_ascending(__m256d& d01, __m256d& d02, __m256d& d03) {
     __m256d  tmp;
 
     tmp = d01;
@@ -177,7 +191,7 @@ public:
     sort_02v_merge_ascending(d01, d02);
     sort_01v_merge_ascending(d03);
 }
-    static inline void sort_03v_merge_descending(__m256d& d01, __m256d& d02, __m256d& d03) {
+    static INLINE void sort_03v_merge_descending(__m256d& d01, __m256d& d02, __m256d& d03) {
     __m256d  tmp;
 
     tmp = d01;
@@ -189,7 +203,7 @@ public:
     sort_02v_merge_descending(d01, d02);
     sort_01v_merge_descending(d03);
 }
-    static inline void sort_04v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04) {
+    static INLINE void sort_04v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04) {
     __m256d  tmp;
 
     sort_02v_ascending(d01, d02);
@@ -208,7 +222,7 @@ public:
     sort_02v_merge_ascending(d01, d02);
     sort_02v_merge_ascending(d03, d04);
 }
-    static inline void sort_04v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04) {
+    static INLINE void sort_04v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04) {
     __m256d  tmp;
 
     sort_02v_descending(d01, d02);
@@ -227,7 +241,7 @@ public:
     sort_02v_merge_descending(d01, d02);
     sort_02v_merge_descending(d03, d04);
 }
-    static inline void sort_04v_merge_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04) {
+    static INLINE void sort_04v_merge_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04) {
     __m256d  tmp;
 
     tmp = d01;
@@ -245,7 +259,7 @@ public:
     sort_02v_merge_ascending(d01, d02);
     sort_02v_merge_ascending(d03, d04);
 }
-    static inline void sort_04v_merge_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04) {
+    static INLINE void sort_04v_merge_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04) {
     __m256d  tmp;
 
     tmp = d01;
@@ -263,7 +277,7 @@ public:
     sort_02v_merge_descending(d01, d02);
     sort_02v_merge_descending(d03, d04);
 }
-    static inline void sort_05v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05) {
+    static INLINE void sort_05v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05) {
     __m256d  tmp;
 
     sort_04v_ascending(d01, d02, d03, d04);
@@ -277,7 +291,7 @@ public:
     sort_04v_merge_ascending(d01, d02, d03, d04);
     sort_01v_merge_ascending(d05);
 }
-    static inline void sort_05v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05) {
+    static INLINE void sort_05v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05) {
     __m256d  tmp;
 
     sort_04v_descending(d01, d02, d03, d04);
@@ -291,7 +305,7 @@ public:
     sort_04v_merge_descending(d01, d02, d03, d04);
     sort_01v_merge_descending(d05);
 }
-    static inline void sort_05v_merge_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05) {
+    static INLINE void sort_05v_merge_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05) {
     __m256d  tmp;
 
     tmp = d01;
@@ -303,7 +317,7 @@ public:
     sort_04v_merge_ascending(d01, d02, d03, d04);
     sort_01v_merge_ascending(d05);
 }
-    static inline void sort_05v_merge_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05) {
+    static INLINE void sort_05v_merge_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05) {
     __m256d  tmp;
 
     tmp = d01;
@@ -315,7 +329,7 @@ public:
     sort_04v_merge_descending(d01, d02, d03, d04);
     sort_01v_merge_descending(d05);
 }
-    static inline void sort_06v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06) {
+    static INLINE void sort_06v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06) {
     __m256d  tmp;
 
     sort_04v_ascending(d01, d02, d03, d04);
@@ -334,7 +348,7 @@ public:
     sort_04v_merge_ascending(d01, d02, d03, d04);
     sort_02v_merge_ascending(d05, d06);
 }
-    static inline void sort_06v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06) {
+    static INLINE void sort_06v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06) {
     __m256d  tmp;
 
     sort_04v_descending(d01, d02, d03, d04);
@@ -353,7 +367,7 @@ public:
     sort_04v_merge_descending(d01, d02, d03, d04);
     sort_02v_merge_descending(d05, d06);
 }
-    static inline void sort_06v_merge_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06) {
+    static INLINE void sort_06v_merge_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06) {
     __m256d  tmp;
 
     tmp = d01;
@@ -371,7 +385,7 @@ public:
     sort_04v_merge_ascending(d01, d02, d03, d04);
     sort_02v_merge_ascending(d05, d06);
 }
-    static inline void sort_06v_merge_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06) {
+    static INLINE void sort_06v_merge_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06) {
     __m256d  tmp;
 
     tmp = d01;
@@ -389,7 +403,7 @@ public:
     sort_04v_merge_descending(d01, d02, d03, d04);
     sort_02v_merge_descending(d05, d06);
 }
-    static inline void sort_07v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07) {
+    static INLINE void sort_07v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07) {
     __m256d  tmp;
 
     sort_04v_ascending(d01, d02, d03, d04);
@@ -413,7 +427,7 @@ public:
     sort_04v_merge_ascending(d01, d02, d03, d04);
     sort_03v_merge_ascending(d05, d06, d07);
 }
-    static inline void sort_07v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07) {
+    static INLINE void sort_07v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07) {
     __m256d  tmp;
 
     sort_04v_descending(d01, d02, d03, d04);
@@ -437,7 +451,7 @@ public:
     sort_04v_merge_descending(d01, d02, d03, d04);
     sort_03v_merge_descending(d05, d06, d07);
 }
-    static inline void sort_07v_merge_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07) {
+    static INLINE void sort_07v_merge_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07) {
     __m256d  tmp;
 
     tmp = d01;
@@ -461,7 +475,7 @@ public:
     sort_04v_merge_ascending(d01, d02, d03, d04);
     sort_03v_merge_ascending(d05, d06, d07);
 }
-    static inline void sort_07v_merge_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07) {
+    static INLINE void sort_07v_merge_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07) {
     __m256d  tmp;
 
     tmp = d01;
@@ -485,7 +499,7 @@ public:
     sort_04v_merge_descending(d01, d02, d03, d04);
     sort_03v_merge_descending(d05, d06, d07);
 }
-    static inline void sort_08v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08) {
+    static INLINE void sort_08v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08) {
     __m256d  tmp;
 
     sort_04v_ascending(d01, d02, d03, d04);
@@ -514,7 +528,7 @@ public:
     sort_04v_merge_ascending(d01, d02, d03, d04);
     sort_04v_merge_ascending(d05, d06, d07, d08);
 }
-    static inline void sort_08v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08) {
+    static INLINE void sort_08v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08) {
     __m256d  tmp;
 
     sort_04v_descending(d01, d02, d03, d04);
@@ -543,7 +557,7 @@ public:
     sort_04v_merge_descending(d01, d02, d03, d04);
     sort_04v_merge_descending(d05, d06, d07, d08);
 }
-    static inline void sort_08v_merge_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08) {
+    static INLINE void sort_08v_merge_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08) {
     __m256d  tmp;
 
     tmp = d01;
@@ -573,7 +587,7 @@ public:
     sort_04v_merge_ascending(d01, d02, d03, d04);
     sort_04v_merge_ascending(d05, d06, d07, d08);
 }
-    static inline void sort_08v_merge_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08) {
+    static INLINE void sort_08v_merge_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08) {
     __m256d  tmp;
 
     tmp = d01;
@@ -603,7 +617,7 @@ public:
     sort_04v_merge_descending(d01, d02, d03, d04);
     sort_04v_merge_descending(d05, d06, d07, d08);
 }
-    static inline void sort_09v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09) {
+    static INLINE void sort_09v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09) {
     __m256d  tmp;
 
     sort_08v_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
@@ -617,7 +631,7 @@ public:
     sort_08v_merge_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_01v_merge_ascending(d09);
 }
-    static inline void sort_09v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09) {
+    static INLINE void sort_09v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09) {
     __m256d  tmp;
 
     sort_08v_descending(d01, d02, d03, d04, d05, d06, d07, d08);
@@ -631,7 +645,7 @@ public:
     sort_08v_merge_descending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_01v_merge_descending(d09);
 }
-    static inline void sort_10v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10) {
+    static INLINE void sort_10v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10) {
     __m256d  tmp;
 
     sort_08v_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
@@ -650,7 +664,7 @@ public:
     sort_08v_merge_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_02v_merge_ascending(d09, d10);
 }
-    static inline void sort_10v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10) {
+    static INLINE void sort_10v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10) {
     __m256d  tmp;
 
     sort_08v_descending(d01, d02, d03, d04, d05, d06, d07, d08);
@@ -669,7 +683,7 @@ public:
     sort_08v_merge_descending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_02v_merge_descending(d09, d10);
 }
-    static inline void sort_11v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11) {
+    static INLINE void sort_11v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11) {
     __m256d  tmp;
 
     sort_08v_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
@@ -693,7 +707,7 @@ public:
     sort_08v_merge_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_03v_merge_ascending(d09, d10, d11);
 }
-    static inline void sort_11v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11) {
+    static INLINE void sort_11v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11) {
     __m256d  tmp;
 
     sort_08v_descending(d01, d02, d03, d04, d05, d06, d07, d08);
@@ -717,7 +731,7 @@ public:
     sort_08v_merge_descending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_03v_merge_descending(d09, d10, d11);
 }
-    static inline void sort_12v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11, __m256d& d12) {
+    static INLINE void sort_12v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11, __m256d& d12) {
     __m256d  tmp;
 
     sort_08v_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
@@ -746,7 +760,7 @@ public:
     sort_08v_merge_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_04v_merge_ascending(d09, d10, d11, d12);
 }
-    static inline void sort_12v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11, __m256d& d12) {
+    static INLINE void sort_12v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11, __m256d& d12) {
     __m256d  tmp;
 
     sort_08v_descending(d01, d02, d03, d04, d05, d06, d07, d08);
@@ -775,7 +789,7 @@ public:
     sort_08v_merge_descending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_04v_merge_descending(d09, d10, d11, d12);
 }
-    static inline void sort_13v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11, __m256d& d12, __m256d& d13) {
+    static INLINE void sort_13v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11, __m256d& d12, __m256d& d13) {
     __m256d  tmp;
 
     sort_08v_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
@@ -809,7 +823,7 @@ public:
     sort_08v_merge_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_05v_merge_ascending(d09, d10, d11, d12, d13);
 }
-    static inline void sort_13v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11, __m256d& d12, __m256d& d13) {
+    static INLINE void sort_13v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11, __m256d& d12, __m256d& d13) {
     __m256d  tmp;
 
     sort_08v_descending(d01, d02, d03, d04, d05, d06, d07, d08);
@@ -843,7 +857,7 @@ public:
     sort_08v_merge_descending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_05v_merge_descending(d09, d10, d11, d12, d13);
 }
-    static inline void sort_14v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11, __m256d& d12, __m256d& d13, __m256d& d14) {
+    static INLINE void sort_14v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11, __m256d& d12, __m256d& d13, __m256d& d14) {
     __m256d  tmp;
 
     sort_08v_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
@@ -882,7 +896,7 @@ public:
     sort_08v_merge_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_06v_merge_ascending(d09, d10, d11, d12, d13, d14);
 }
-    static inline void sort_14v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11, __m256d& d12, __m256d& d13, __m256d& d14) {
+    static INLINE void sort_14v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11, __m256d& d12, __m256d& d13, __m256d& d14) {
     __m256d  tmp;
 
     sort_08v_descending(d01, d02, d03, d04, d05, d06, d07, d08);
@@ -921,7 +935,7 @@ public:
     sort_08v_merge_descending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_06v_merge_descending(d09, d10, d11, d12, d13, d14);
 }
-    static inline void sort_15v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11, __m256d& d12, __m256d& d13, __m256d& d14, __m256d& d15) {
+    static INLINE void sort_15v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11, __m256d& d12, __m256d& d13, __m256d& d14, __m256d& d15) {
     __m256d  tmp;
 
     sort_08v_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
@@ -965,7 +979,7 @@ public:
     sort_08v_merge_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_07v_merge_ascending(d09, d10, d11, d12, d13, d14, d15);
 }
-    static inline void sort_15v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11, __m256d& d12, __m256d& d13, __m256d& d14, __m256d& d15) {
+    static INLINE void sort_15v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11, __m256d& d12, __m256d& d13, __m256d& d14, __m256d& d15) {
     __m256d  tmp;
 
     sort_08v_descending(d01, d02, d03, d04, d05, d06, d07, d08);
@@ -1009,7 +1023,7 @@ public:
     sort_08v_merge_descending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_07v_merge_descending(d09, d10, d11, d12, d13, d14, d15);
 }
-    static inline void sort_16v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11, __m256d& d12, __m256d& d13, __m256d& d14, __m256d& d15, __m256d& d16) {
+    static INLINE void sort_16v_ascending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11, __m256d& d12, __m256d& d13, __m256d& d14, __m256d& d15, __m256d& d16) {
     __m256d  tmp;
 
     sort_08v_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
@@ -1058,7 +1072,7 @@ public:
     sort_08v_merge_ascending(d01, d02, d03, d04, d05, d06, d07, d08);
     sort_08v_merge_ascending(d09, d10, d11, d12, d13, d14, d15, d16);
 }
-    static inline void sort_16v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11, __m256d& d12, __m256d& d13, __m256d& d14, __m256d& d15, __m256d& d16) {
+    static INLINE void sort_16v_descending(__m256d& d01, __m256d& d02, __m256d& d03, __m256d& d04, __m256d& d05, __m256d& d06, __m256d& d07, __m256d& d08, __m256d& d09, __m256d& d10, __m256d& d11, __m256d& d12, __m256d& d13, __m256d& d14, __m256d& d15, __m256d& d16) {
     __m256d  tmp;
 
     sort_08v_descending(d01, d02, d03, d04, d05, d06, d07, d08);
@@ -1108,13 +1122,13 @@ public:
     sort_08v_merge_descending(d09, d10, d11, d12, d13, d14, d15, d16);
 }
 
-static __attribute__((noinline)) void sort_01v(double *ptr) {
+static NOINLINE void sort_01v(double *ptr) {
     __m256d d01 = _mm256_loadu_pd((double const *) ptr + 0);
     sort_01v_ascending(d01);
     _mm256_storeu_pd((double *) ptr + 0, d01);
 }
 
-static __attribute__((noinline)) void sort_02v(double *ptr) {
+static NOINLINE void sort_02v(double *ptr) {
     __m256d d01 = _mm256_loadu_pd((double const *) ptr + 0);
     __m256d d02 = _mm256_loadu_pd((double const *) ptr + 1);
     sort_02v_ascending(d01, d02);
@@ -1122,7 +1136,7 @@ static __attribute__((noinline)) void sort_02v(double *ptr) {
     _mm256_storeu_pd((double *) ptr + 1, d02);
 }
 
-static __attribute__((noinline)) void sort_03v(double *ptr) {
+static NOINLINE void sort_03v(double *ptr) {
     __m256d d01 = _mm256_loadu_pd((double const *) ptr + 0);
     __m256d d02 = _mm256_loadu_pd((double const *) ptr + 1);
     __m256d d03 = _mm256_loadu_pd((double const *) ptr + 2);
@@ -1132,7 +1146,7 @@ static __attribute__((noinline)) void sort_03v(double *ptr) {
     _mm256_storeu_pd((double *) ptr + 2, d03);
 }
 
-static __attribute__((noinline)) void sort_04v(double *ptr) {
+static NOINLINE void sort_04v(double *ptr) {
     __m256d d01 = _mm256_loadu_pd((double const *) ptr + 0);
     __m256d d02 = _mm256_loadu_pd((double const *) ptr + 1);
     __m256d d03 = _mm256_loadu_pd((double const *) ptr + 2);
@@ -1144,7 +1158,7 @@ static __attribute__((noinline)) void sort_04v(double *ptr) {
     _mm256_storeu_pd((double *) ptr + 3, d04);
 }
 
-static __attribute__((noinline)) void sort_05v(double *ptr) {
+static NOINLINE void sort_05v(double *ptr) {
     __m256d d01 = _mm256_loadu_pd((double const *) ptr + 0);
     __m256d d02 = _mm256_loadu_pd((double const *) ptr + 1);
     __m256d d03 = _mm256_loadu_pd((double const *) ptr + 2);
@@ -1158,7 +1172,7 @@ static __attribute__((noinline)) void sort_05v(double *ptr) {
     _mm256_storeu_pd((double *) ptr + 4, d05);
 }
 
-static __attribute__((noinline)) void sort_06v(double *ptr) {
+static NOINLINE void sort_06v(double *ptr) {
     __m256d d01 = _mm256_loadu_pd((double const *) ptr + 0);
     __m256d d02 = _mm256_loadu_pd((double const *) ptr + 1);
     __m256d d03 = _mm256_loadu_pd((double const *) ptr + 2);
@@ -1174,7 +1188,7 @@ static __attribute__((noinline)) void sort_06v(double *ptr) {
     _mm256_storeu_pd((double *) ptr + 5, d06);
 }
 
-static __attribute__((noinline)) void sort_07v(double *ptr) {
+static NOINLINE void sort_07v(double *ptr) {
     __m256d d01 = _mm256_loadu_pd((double const *) ptr + 0);
     __m256d d02 = _mm256_loadu_pd((double const *) ptr + 1);
     __m256d d03 = _mm256_loadu_pd((double const *) ptr + 2);
@@ -1192,7 +1206,7 @@ static __attribute__((noinline)) void sort_07v(double *ptr) {
     _mm256_storeu_pd((double *) ptr + 6, d07);
 }
 
-static __attribute__((noinline)) void sort_08v(double *ptr) {
+static NOINLINE void sort_08v(double *ptr) {
     __m256d d01 = _mm256_loadu_pd((double const *) ptr + 0);
     __m256d d02 = _mm256_loadu_pd((double const *) ptr + 1);
     __m256d d03 = _mm256_loadu_pd((double const *) ptr + 2);
@@ -1212,7 +1226,7 @@ static __attribute__((noinline)) void sort_08v(double *ptr) {
     _mm256_storeu_pd((double *) ptr + 7, d08);
 }
 
-static __attribute__((noinline)) void sort_09v(double *ptr) {
+static NOINLINE void sort_09v(double *ptr) {
     __m256d d01 = _mm256_loadu_pd((double const *) ptr + 0);
     __m256d d02 = _mm256_loadu_pd((double const *) ptr + 1);
     __m256d d03 = _mm256_loadu_pd((double const *) ptr + 2);
@@ -1234,7 +1248,7 @@ static __attribute__((noinline)) void sort_09v(double *ptr) {
     _mm256_storeu_pd((double *) ptr + 8, d09);
 }
 
-static __attribute__((noinline)) void sort_10v(double *ptr) {
+static NOINLINE void sort_10v(double *ptr) {
     __m256d d01 = _mm256_loadu_pd((double const *) ptr + 0);
     __m256d d02 = _mm256_loadu_pd((double const *) ptr + 1);
     __m256d d03 = _mm256_loadu_pd((double const *) ptr + 2);
@@ -1258,7 +1272,7 @@ static __attribute__((noinline)) void sort_10v(double *ptr) {
     _mm256_storeu_pd((double *) ptr + 9, d10);
 }
 
-static __attribute__((noinline)) void sort_11v(double *ptr) {
+static NOINLINE void sort_11v(double *ptr) {
     __m256d d01 = _mm256_loadu_pd((double const *) ptr + 0);
     __m256d d02 = _mm256_loadu_pd((double const *) ptr + 1);
     __m256d d03 = _mm256_loadu_pd((double const *) ptr + 2);
@@ -1284,7 +1298,7 @@ static __attribute__((noinline)) void sort_11v(double *ptr) {
     _mm256_storeu_pd((double *) ptr + 10, d11);
 }
 
-static __attribute__((noinline)) void sort_12v(double *ptr) {
+static NOINLINE void sort_12v(double *ptr) {
     __m256d d01 = _mm256_loadu_pd((double const *) ptr + 0);
     __m256d d02 = _mm256_loadu_pd((double const *) ptr + 1);
     __m256d d03 = _mm256_loadu_pd((double const *) ptr + 2);
@@ -1312,7 +1326,7 @@ static __attribute__((noinline)) void sort_12v(double *ptr) {
     _mm256_storeu_pd((double *) ptr + 11, d12);
 }
 
-static __attribute__((noinline)) void sort_13v(double *ptr) {
+static NOINLINE void sort_13v(double *ptr) {
     __m256d d01 = _mm256_loadu_pd((double const *) ptr + 0);
     __m256d d02 = _mm256_loadu_pd((double const *) ptr + 1);
     __m256d d03 = _mm256_loadu_pd((double const *) ptr + 2);
@@ -1342,7 +1356,7 @@ static __attribute__((noinline)) void sort_13v(double *ptr) {
     _mm256_storeu_pd((double *) ptr + 12, d13);
 }
 
-static __attribute__((noinline)) void sort_14v(double *ptr) {
+static NOINLINE void sort_14v(double *ptr) {
     __m256d d01 = _mm256_loadu_pd((double const *) ptr + 0);
     __m256d d02 = _mm256_loadu_pd((double const *) ptr + 1);
     __m256d d03 = _mm256_loadu_pd((double const *) ptr + 2);
@@ -1374,7 +1388,7 @@ static __attribute__((noinline)) void sort_14v(double *ptr) {
     _mm256_storeu_pd((double *) ptr + 13, d14);
 }
 
-static __attribute__((noinline)) void sort_15v(double *ptr) {
+static NOINLINE void sort_15v(double *ptr) {
     __m256d d01 = _mm256_loadu_pd((double const *) ptr + 0);
     __m256d d02 = _mm256_loadu_pd((double const *) ptr + 1);
     __m256d d03 = _mm256_loadu_pd((double const *) ptr + 2);
@@ -1408,7 +1422,7 @@ static __attribute__((noinline)) void sort_15v(double *ptr) {
     _mm256_storeu_pd((double *) ptr + 14, d15);
 }
 
-static __attribute__((noinline)) void sort_16v(double *ptr) {
+static NOINLINE void sort_16v(double *ptr) {
     __m256d d01 = _mm256_loadu_pd((double const *) ptr + 0);
     __m256d d02 = _mm256_loadu_pd((double const *) ptr + 1);
     __m256d d03 = _mm256_loadu_pd((double const *) ptr + 2);
