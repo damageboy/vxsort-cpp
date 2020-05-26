@@ -106,9 +106,13 @@ public:
 
 template <typename T, int Unroll=1>
 class vxsort {
+    static_assert( Unroll >= 1, "Unroll can be in the range 1..12");
+    static_assert( Unroll <= 12, "Unroll can be in the range 1..12");
+
 private:
     //using Tv2 = Tp::Tv;
     using Tp = vxsort_partition_traits<T>;
+    typedef typename Tp::Tv __m256t;
 
     static const int ELEMENT_ALIGN = sizeof(T) - 1;
     static const int N = 32 / sizeof(T);
@@ -355,7 +359,7 @@ private:
     }
 
     static INLINE void partition_block(T* dataPtr,
-                                       const typename Tp::Tv& P,
+                                       const __m256t & P,
                                        T*& writeLeft,
                                        T*& writeRight) {
         auto dataVec = _mm256_load_si256((__m256i*)dataPtr);
@@ -367,6 +371,20 @@ private:
         writeRight += popCount;
         writeLeft += popCount + N;
     }
+
+    static INLINE void partition_block(__m256t& dataVec,
+                                       const __m256t& P,
+                                       T*& writeLeft,
+                                       T*& writeRight) {
+        auto mask = Tp::get_cmpgt_mask(dataVec, P);
+        dataVec = _mm256_permutevar8x32_epi32(dataVec, Tp::get_perm(mask));
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(writeLeft), dataVec);
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(writeRight), dataVec);
+        auto popCount = -_mm_popcnt_u64(mask);
+        writeRight += popCount;
+        writeLeft += popCount + N;
+    }
+
 
 
     template<int InnerUnroll>
@@ -444,8 +462,8 @@ private:
         auto preAlignedRight = right + rightAlign - N;
 
         // Read overlapped data from right (includes re-reading the pivot)
-        auto RT0 = (typename Tp::Tv) _mm256_lddqu_si256((__m256i*)preAlignedRight);
-        auto LT0 = (typename Tp::Tv) _mm256_lddqu_si256((__m256i*)preAlignedLeft);
+        auto RT0 = (__m256t) _mm256_lddqu_si256((__m256i*)preAlignedRight);
+        auto LT0 = (__m256t) _mm256_lddqu_si256((__m256i*)preAlignedLeft);
         auto rtMask = Tp::get_cmpgt_mask(RT0, P);
         auto ltMask = Tp::get_cmpgt_mask(LT0, P);
         auto rtPopCount = std::max(_mm_popcnt_u32(rtMask), rightAlign);
@@ -491,20 +509,72 @@ private:
         assert((((uint8_t*)readRight - (uint8_t*)readLeft) % ALIGN) == 0);
         assert((readRight - readLeft) >= InnerUnroll * 2);
 
-        readRight -= N;
+        //readRight -= N;
 
         for (auto u = 0; u < InnerUnroll; u++) {
             partition_block(readLeft  + u*N, P, tmpLeft, tmpRight);
-            partition_block(readRight - u*N, P, tmpLeft, tmpRight);
+            partition_block(readRight - (u+1)*N, P, tmpLeft, tmpRight);
         }
 
         tmpRight += N;
         // Adjust for the reading that was made above
         readLeft  += InnerUnroll*N;
-        readRight -= InnerUnroll*N;
+        readRight -= InnerUnroll*N*2;
 
-        while (readRight >= readLeft) {
+        while (readLeft < readRight) {
+
+            //printf("Entering unrolled iteration with %lld elements\n", readRight - readLeft);
+
             T* nextPtr;
+            if (writeRight - readRight < (2*SLACK_PER_SIDE_IN_ELEMENTS - N)) {
+                nextPtr = readRight;
+                readRight -= N * InnerUnroll;
+            } else {
+                nextPtr = readLeft;
+                readLeft += N * InnerUnroll;
+            }
+
+            __m256t d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11;
+
+            switch (InnerUnroll) {
+                case 12: d11 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 11);
+                case 11: d10 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 10);
+                case 10: d9 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 9);
+                case 9: d8 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 8);
+                case 8: d7 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 7);
+                case 7: d6 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 6);
+                case 6: d5 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 5);
+                case 5: d4 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 4);
+                case 4: d3 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 3);
+                case 3: d2 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 2);
+                case 2: d1 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 1);
+                case 1: d0 = (__m256t) _mm256_lddqu_si256((__m256i *) nextPtr + 0);
+            }
+
+            //assert(readLeft - writeLeft >= 2*SLACK_PER_SIDE_IN_ELEMENTS);
+            //assert(writeRight - readRight >= 2*SLACK_PER_SIDE_IN_ELEMENTS);
+
+            switch (InnerUnroll) {
+                case 12: partition_block(d11, P, writeLeft, writeRight);
+                case 11: partition_block(d10, P, writeLeft, writeRight);
+                case 10: partition_block(d9, P, writeLeft, writeRight);
+                case 9: partition_block(d8, P, writeLeft, writeRight);
+                case 8: partition_block(d7, P, writeLeft, writeRight);
+                case 7: partition_block(d6, P, writeLeft, writeRight);
+                case 6: partition_block(d5, P, writeLeft, writeRight);
+                case 5: partition_block(d4, P, writeLeft, writeRight);
+                case 4: partition_block(d3, P, writeLeft, writeRight);
+                case 3: partition_block(d2, P, writeLeft, writeRight);
+                case 2: partition_block(d1, P, writeLeft, writeRight);
+                case 1: partition_block(d0, P, writeLeft, writeRight);
+            }
+        }
+
+        //if (InnerUnroll > 1) {
+        readRight += (N * InnerUnroll) - N;
+
+        while (readLeft <= readRight) {
+            T *nextPtr;
             if (writeRight - readRight < N) {
                 nextPtr = readRight;
                 readRight -= N;
@@ -515,6 +585,7 @@ private:
 
             partition_block(nextPtr, P, writeLeft, writeRight);
         }
+        //}
 
         // 3. Copy-back the 4 registers + remainder we partitioned in the beginning
         auto leftTmpSize = tmpLeft - tmpStartLeft;

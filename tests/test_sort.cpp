@@ -98,6 +98,46 @@ TEST_P(FullSortTest_i64, VxSort) {
       EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
 }
 
+TEST_P(FullSortTest_i64, VxSort_Unroll2) {
+        auto begin = V.data();
+        auto end = V.data() + V.size() - 1;
+
+        auto sorter = gcsort::vxsort<int64_t, 2>();
+        sorter.sort(begin, end);
+
+        EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
+}
+
+TEST_P(FullSortTest_i64, VxSort_Unroll4) {
+    auto begin = V.data();
+    auto end = V.data() + V.size() - 1;
+
+    auto sorter = gcsort::vxsort<int64_t, 4>();
+    sorter.sort(begin, end);
+
+    EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
+}
+
+TEST_P(FullSortTest_i64, VxSort_Unroll8) {
+    auto begin = V.data();
+    auto end = V.data() + V.size() - 1;
+
+    auto sorter = gcsort::vxsort<int64_t, 8>();
+    sorter.sort(begin, end);
+
+    EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
+}
+
+TEST_P(FullSortTest_i64, VxSort_Unroll12) {
+    auto begin = V.data();
+    auto end = V.data() + V.size() - 1;
+
+    auto sorter = gcsort::vxsort<int64_t, 12>();
+    sorter.sort(begin, end);
+
+    EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
+}
+
 INSTANTIATE_TEST_SUITE_P(IntroSortSizes,
                          FullSortTest_i32,
                          ValuesIn(multiply_range(10, 1000000, 10)),
@@ -108,7 +148,7 @@ TEST_P(FullSortTest_i32, VxSort) {
     auto begin = V.data();
     auto end = V.data() + V.size() - 1;
 
-    auto sorter = gcsort::vxsort<int32_t, 8>();
+    auto sorter = gcsort::vxsort<int32_t, 1>();
     sorter.sort(begin, end);
 
     EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
