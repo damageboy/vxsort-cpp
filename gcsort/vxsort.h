@@ -58,10 +58,11 @@ template <typename T>
 //using Tv = __m256;
 struct vxsort_partition_traits {
 public:
-    //typedef T __m256t __attribute__ ((__vector_size__ (32)));
+    //typedef T TV __attribute__ ((__vector_size__ (32)));
     typedef __m256 Tv;
 
-    static Tv load_vec(Tv*);
+    static Tv load_vec(Tv* ptr);
+    static Tv store_vec(Tv* ptr, Tv v);
     static __m256i get_perm(int mask);
     static Tv get_vec_pivot(T pivot);
     static uint32_t get_cmpgt_mask(Tv a, Tv b);
@@ -76,6 +77,10 @@ public:
 
     static INLINE Tv load_vec(Tv* p) {
         return _mm256_lddqu_si256(p);
+    }
+
+    static INLINE void store_vec(Tv* ptr, Tv v) {
+      _mm256_storeu_si256(ptr, v);
     }
 
     static INLINE __m256i get_perm(int mask) {
@@ -102,6 +107,11 @@ public:
     static INLINE Tv load_vec(Tv* p) {
         return _mm256_lddqu_si256(p);
     }
+
+    static INLINE void store_vec(Tv* ptr, Tv v) {
+      _mm256_storeu_si256(ptr, v);
+    }
+
     static INLINE __m256i get_perm(int mask) {
         assert(mask >= 0);
         assert(mask <= 255);
@@ -124,7 +134,7 @@ class vxsort {
 private:
     //using Tv2 = Tp::Tv;
     using Tp = vxsort_partition_traits<T>;
-    typedef typename Tp::Tv __m256t;
+    typedef typename Tp::Tv TV;
 
     static const int ELEMENT_ALIGN = sizeof(T) - 1;
     static const int N = 32 / sizeof(T);
@@ -370,14 +380,14 @@ private:
         _depth--;
     }
 
-    static INLINE void partition_block(__m256t& dataVec,
-                                       const __m256t& P,
+    static INLINE void partition_block(TV& dataVec,
+                                       const TV& P,
                                        T*& left,
                                        T*& right) {
         auto mask = Tp::get_cmpgt_mask(dataVec, P);
         dataVec = _mm256_permutevar8x32_epi32(dataVec, Tp::get_perm(mask));
-        _mm256_storeu_si256(reinterpret_cast<__m256i*>(left), dataVec);
-        _mm256_storeu_si256(reinterpret_cast<__m256i*>(right), dataVec);
+        Tp::store_vec(reinterpret_cast<TV*>(left), dataVec);
+        Tp::store_vec(reinterpret_cast<TV*>(right), dataVec);
         auto popCount = -_mm_popcnt_u64(mask);
         right += popCount;
         left += popCount + N;
@@ -429,7 +439,8 @@ private:
         // We end up
         *right = std::numeric_limits<T>::max();
 
-        const __m256i P = Tp::get_vec_pivot(pivot);//_mm256_set1_epi64x(pivot);
+        // Broadcast the selected pivot
+        const TV P = Tp::get_vec_pivot(pivot);//_mm256_set1_epi64x(pivot);
 
         auto readLeft = left;
         auto readRight = right;
@@ -441,7 +452,7 @@ private:
         auto tmpStartRight = _temp + PARTITION_TMP_SIZE_IN_ELEMENTS;
         auto tmpRight = tmpStartRight;
 
-        // Broadcast the selected pivot
+
         tmpRight -= N;
 
         // the read heads always advance by 8 elements, or 32 bytes,
@@ -454,20 +465,20 @@ private:
         const auto leftAlign = hint.left_align;
         const auto rightAlign = hint.right_align;
 
-        auto preAlignedLeft = left + leftAlign;
-        auto preAlignedRight = right + rightAlign - N;
+        auto preAlignedLeft = (TV*) (left + leftAlign);
+        auto preAlignedRight = (TV*) (right + rightAlign - N);
 
         // Read overlapped data from right (includes re-reading the pivot)
-        auto RT0 = Tp::load_vec((__m256t *) preAlignedRight);
-        auto LT0 = Tp::load_vec((__m256t *) preAlignedLeft);
+        auto RT0 = Tp::load_vec(preAlignedRight);
+        auto LT0 = Tp::load_vec(preAlignedLeft);
         auto rtMask = Tp::get_cmpgt_mask(RT0, P);
         auto ltMask = Tp::get_cmpgt_mask(LT0, P);
         auto rtPopCount = std::max(_mm_popcnt_u32(rtMask), rightAlign);
         auto ltPopCount = _mm_popcnt_u32(ltMask);
         RT0 = _mm256_permutevar8x32_epi32(RT0, Tp::get_perm(rtMask));
         LT0 = _mm256_permutevar8x32_epi32(LT0, Tp::get_perm(ltMask));
-        _mm256_storeu_si256((__m256i *) tmpRight, RT0);
-        _mm256_storeu_si256((__m256i *) tmpLeft, LT0);
+        Tp::store_vec((TV*) tmpRight, RT0);
+        Tp::store_vec((TV*) tmpLeft, LT0);
 
         auto rai = ~((rightAlign - 1) >> 31);
         auto lai = leftAlign >> 31;
@@ -476,14 +487,14 @@ private:
         rtPopCount = N - rtPopCount;
         readRight += (rightAlign - N) & rai;
 
-        _mm256_storeu_si256((__m256i *) tmpRight, LT0);
+        Tp::store_vec((TV*) tmpRight, LT0);
         tmpRight -= ltPopCount & lai;
         ltPopCount = N - ltPopCount;
         tmpLeft += ltPopCount & lai;
         tmpStartLeft += -leftAlign & lai;
         readLeft += (leftAlign + N) & lai;
 
-        _mm256_storeu_si256((__m256i *) tmpLeft, RT0);
+        Tp::store_vec((TV*) tmpLeft, RT0);
         tmpLeft += rtPopCount & rai;
         tmpStartRight -= rightAlign & rai;
 
@@ -502,49 +513,56 @@ private:
         assert(((size_t)readLeft & ALIGN_MASK) == 0);
         assert(((size_t)readRight & ALIGN_MASK) == 0);
 
-        assert((((uint8_t*)readRight - (uint8_t*)readLeft) % ALIGN) == 0);
+        assert((((size_t)readRight - (size_t)readLeft) % ALIGN) == 0);
         assert((readRight - readLeft) >= InnerUnroll * 2);
 
-        //readRight -= N;
+        // From now on, we are fully aligned
+        // and all reading is done in full vector units
+        auto readLeftV = (TV*) readLeft;
+        auto readRightV = (TV*) readRight;
+        #ifndef NDEBUG
+        readLeft = nullptr;
+        readRight = nullptr;
+        #endif
 
         for (auto u = 0; u < InnerUnroll; u++) {
-            auto dl = Tp::load_vec((__m256t *) readLeft + u);
-            auto dr = Tp::load_vec((__m256t *) readRight - (u + 1));
+            auto dl = Tp::load_vec(readLeftV + u);
+            auto dr = Tp::load_vec(readRightV - (u + 1));
             partition_block(dl, P, tmpLeft, tmpRight);
             partition_block(dr, P, tmpLeft, tmpRight);
         }
 
         tmpRight += N;
         // Adjust for the reading that was made above
-        readLeft  += InnerUnroll*N;
-        readRight -= InnerUnroll*N*2;
-        T* nextPtr;
+        readLeftV  += InnerUnroll;
+        readRightV -= InnerUnroll*2;
+        TV* nextPtr;
 
-        while (readLeft < readRight) {
-            if (writeRight - readRight < (2 * (InnerUnroll * N) - N)) {
-                nextPtr = readRight;
-                readRight -= N * InnerUnroll;
+        while (readLeftV < readRightV) {
+            if (writeRight - ((T *) readRightV) < (2 * (InnerUnroll * N) - N)) {
+                nextPtr = readRightV;
+                readRightV -= InnerUnroll;
             } else {
                 mess_up_cmov();
-                nextPtr = readLeft;
-                readLeft += N * InnerUnroll;
+                nextPtr = readLeftV;
+                readLeftV += InnerUnroll;
             }
 
-            __m256t d01, d02, d03, d04, d05, d06, d07, d08, d09, d10, d11, d12;
+            TV d01, d02, d03, d04, d05, d06, d07, d08, d09, d10, d11, d12;
 
             switch (InnerUnroll) {
-                case 12: d12 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll - 12);
-                case 11: d11 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll - 11);
-                case 10: d10 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll - 10);
-                case  9: d09 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll -  9);
-                case  8: d08 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll -  8);
-                case  7: d07 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll -  7);
-                case  6: d06 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll -  6);
-                case  5: d05 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll -  5);
-                case  4: d04 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll -  4);
-                case  3: d03 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll -  3);
-                case  2: d02 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll -  2);
-                case  1: d01 = Tp::load_vec((__m256t *) nextPtr + InnerUnroll -  1);
+                case 12: d12 = Tp::load_vec(nextPtr + InnerUnroll - 12);
+                case 11: d11 = Tp::load_vec(nextPtr + InnerUnroll - 11);
+                case 10: d10 = Tp::load_vec(nextPtr + InnerUnroll - 10);
+                case  9: d09 = Tp::load_vec(nextPtr + InnerUnroll -  9);
+                case  8: d08 = Tp::load_vec(nextPtr + InnerUnroll -  8);
+                case  7: d07 = Tp::load_vec(nextPtr + InnerUnroll -  7);
+                case  6: d06 = Tp::load_vec(nextPtr + InnerUnroll -  6);
+                case  5: d05 = Tp::load_vec(nextPtr + InnerUnroll -  5);
+                case  4: d04 = Tp::load_vec(nextPtr + InnerUnroll -  4);
+                case  3: d03 = Tp::load_vec(nextPtr + InnerUnroll -  3);
+                case  2: d02 = Tp::load_vec(nextPtr + InnerUnroll -  2);
+                case  1: d01 = Tp::load_vec(nextPtr + InnerUnroll -  1);
             }
 
             switch (InnerUnroll) {
@@ -563,20 +581,19 @@ private:
             }
         }
 
-        readRight += (N * InnerUnroll) - N;
+        readRightV += (InnerUnroll - 1);
 
-        while (readLeft <= readRight) {
-            T *nextPtr;
-          if (writeRight - readRight < N) {
-                nextPtr = readRight;
-                readRight -= N;
+        while (readLeftV <= readRightV) {
+          if (writeRight - (T *) readRightV < N) {
+                nextPtr = readRightV;
+                readRightV -= 1;
             } else {
                 mess_up_cmov();
-                nextPtr = readLeft;
-                readLeft += N;
+                nextPtr = readLeftV;
+                readLeftV += 1;
             }
 
-            auto d = Tp::load_vec((__m256t *) nextPtr);
+            auto d = Tp::load_vec(nextPtr);
             partition_block(d, P, writeLeft, writeRight);
         }
 
@@ -597,7 +614,7 @@ private:
         return writeLeft;
     }
 public:
-    void sort(T* left, T* right) {        
+    NOINLINE void sort(T* left, T* right) {
         reset(left, right);
         auto depthLimit = 2 * floor_log2_plus_one(right + 1 - left);
         sort(left, right, alignment_hint(), depthLimit);
