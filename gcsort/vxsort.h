@@ -372,18 +372,16 @@ private:
 
     static INLINE void partition_block(__m256t& dataVec,
                                        const __m256t& P,
-                                       T*& writeLeft,
-                                       T*& writeRight) {
+                                       T*& left,
+                                       T*& right) {
         auto mask = Tp::get_cmpgt_mask(dataVec, P);
         dataVec = _mm256_permutevar8x32_epi32(dataVec, Tp::get_perm(mask));
-        _mm256_storeu_si256(reinterpret_cast<__m256i*>(writeLeft), dataVec);
-        _mm256_storeu_si256(reinterpret_cast<__m256i*>(writeRight), dataVec);
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(left), dataVec);
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(right), dataVec);
         auto popCount = -_mm_popcnt_u64(mask);
-        writeRight += popCount;
-        writeLeft += popCount + N;
+        right += popCount;
+        left += popCount + N;
     }
-
-
 
     template<int InnerUnroll>
     T* vectorized_partition(T* left, T* right, alignment_hint hint) {
@@ -460,8 +458,8 @@ private:
         auto preAlignedRight = right + rightAlign - N;
 
         // Read overlapped data from right (includes re-reading the pivot)
-        auto RT0 = (__m256t) _mm256_lddqu_si256((__m256i*)preAlignedRight);
-        auto LT0 = (__m256t) _mm256_lddqu_si256((__m256i*)preAlignedLeft);
+        auto RT0 = Tp::load_vec((__m256t *) preAlignedRight);
+        auto LT0 = Tp::load_vec((__m256t *) preAlignedLeft);
         auto rtMask = Tp::get_cmpgt_mask(RT0, P);
         auto ltMask = Tp::get_cmpgt_mask(LT0, P);
         auto rtPopCount = std::max(_mm_popcnt_u32(rtMask), rightAlign);
@@ -510,20 +508,20 @@ private:
         //readRight -= N;
 
         for (auto u = 0; u < InnerUnroll; u++) {
-          auto dl = Tp::load_vec((__m256t *) readLeft + u * N);
-          auto dr = Tp::load_vec((__m256t *) readRight - (u + 1) * N);
-          partition_block(dl, P, tmpLeft, tmpRight);
-          partition_block(dr, P, tmpLeft, tmpRight);
+            auto dl = Tp::load_vec((__m256t *) readLeft + u);
+            auto dr = Tp::load_vec((__m256t *) readRight - (u + 1));
+            partition_block(dl, P, tmpLeft, tmpRight);
+            partition_block(dr, P, tmpLeft, tmpRight);
         }
 
         tmpRight += N;
         // Adjust for the reading that was made above
         readLeft  += InnerUnroll*N;
         readRight -= InnerUnroll*N*2;
+        T* nextPtr;
 
         while (readLeft < readRight) {
-            T* nextPtr;
-          if (writeRight - readRight < (2 * SLACK_PER_SIDE_IN_ELEMENTS - N)) {
+            if (writeRight - readRight < (2 * (InnerUnroll * N) - N)) {
                 nextPtr = readRight;
                 readRight -= N * InnerUnroll;
             } else {
