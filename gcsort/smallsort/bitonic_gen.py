@@ -388,10 +388,6 @@ def generate_per_type(f, type):
 #ifndef BITONIC_SORT_{type.upper()}_H
 #define BITONIC_SORT_{type.upper()}_H
 
-#pragma clang diagnostic push
-#pragma ide diagnostic ignored "cppcoreguidelines-narrowing-conversions"
-#pragma ide diagnostic ignored "portability-simd-intrinsics"
-
 #include <immintrin.h>
 #include "bitonic_sort.h"
 
