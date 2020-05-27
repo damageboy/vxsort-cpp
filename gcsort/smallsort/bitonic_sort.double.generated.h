@@ -2,10 +2,6 @@
 #ifndef BITONIC_SORT_DOUBLE_H
 #define BITONIC_SORT_DOUBLE_H
 
-#pragma clang diagnostic push
-#pragma ide diagnostic ignored "cppcoreguidelines-narrowing-conversions"
-#pragma ide diagnostic ignored "portability-simd-intrinsics"
-
 #include <immintrin.h>
 #include "bitonic_sort.h"
 

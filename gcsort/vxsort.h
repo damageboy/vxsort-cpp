@@ -370,20 +370,6 @@ private:
         _depth--;
     }
 
-    static INLINE void partition_block(T* dataPtr,
-                                       const __m256t & P,
-                                       T*& writeLeft,
-                                       T*& writeRight) {
-        auto dataVec = _mm256_load_si256((__m256i*)dataPtr);
-        auto mask = Tp::get_cmpgt_mask(dataVec, P);
-        dataVec = _mm256_permutevar8x32_epi32(dataVec, Tp::get_perm(mask));
-        _mm256_storeu_si256(reinterpret_cast<__m256i*>(writeLeft), dataVec);
-        _mm256_storeu_si256(reinterpret_cast<__m256i*>(writeRight), dataVec);
-        auto popCount = -_mm_popcnt_u64(mask);
-        writeRight += popCount;
-        writeLeft += popCount + N;
-    }
-
     static INLINE void partition_block(__m256t& dataVec,
                                        const __m256t& P,
                                        T*& writeLeft,
@@ -524,8 +510,10 @@ private:
         //readRight -= N;
 
         for (auto u = 0; u < InnerUnroll; u++) {
-            partition_block(readLeft  + u*N, P, tmpLeft, tmpRight);
-            partition_block(readRight - (u+1)*N, P, tmpLeft, tmpRight);
+          auto dl = Tp::load_vec((__m256t *) readLeft + u * N);
+          auto dr = Tp::load_vec((__m256t *) readRight - (u + 1) * N);
+          partition_block(dl, P, tmpLeft, tmpRight);
+          partition_block(dr, P, tmpLeft, tmpRight);
         }
 
         tmpRight += N;
@@ -590,7 +578,8 @@ private:
                 readLeft += N;
             }
 
-            partition_block(nextPtr, P, writeLeft, writeRight);
+            auto d = Tp::load_vec((__m256t *) nextPtr);
+            partition_block(d, P, writeLeft, writeRight);
         }
 
         // 3. Copy-back the 4 registers + remainder we partitioned in the beginning
