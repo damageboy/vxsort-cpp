@@ -5,8 +5,7 @@ set(TARGET_NAME ${CMAKE_PROJECT_NAME}_tests)
 file(GLOB test_SRC *.cpp)
 file(GLOB test_HEADERS *.h)
 
-add_executable(${TARGET_NAME} ${test_SRC} ${test_HEADERS}
-)
+add_executable(${TARGET_NAME} ${test_SRC} ${test_HEADERS})
 
 target_link_libraries(${TARGET_NAME}
         gcsort_lib

@@ -16,10 +16,8 @@ namespace gcsort_tests {
 using testing::ElementsAreArray;
 using testing::ValuesIn;
 using testing::WhenSorted;
+using testing::Types;
 
-
-
-// A new one of these is create for each test
 template<typename T>
 struct SortTest : public testing::TestWithParam<int> {
  protected:
@@ -41,10 +39,13 @@ struct PrintValue {
   }
 };
 
+
+
 struct SmallSortTest_i32 : public SortTest<int32_t> {};
 struct SmallSortTest_i64 : public SortTest<int64_t> {};
 struct SmallSortTest_float : public SortTest<float> {};
 struct SmallSortTest_double : public SortTest<double> {};
+
 
 INSTANTIATE_TEST_SUITE_P(BitonicSizes,
                          SmallSortTest_i64,

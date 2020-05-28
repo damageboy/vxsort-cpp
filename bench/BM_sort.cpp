@@ -1,5 +1,6 @@
 #include <random>
 #include <algorithm>
+#include <thread>
 #include <benchmark/benchmark.h>
 
 #include <introsort.h>
@@ -8,9 +9,15 @@
 #include <vxsort.h>
 #include "util.h"
 
+const auto processor_count = std::thread::hardware_concurrency() / 2;
+
+static const int MIN_SORT = 65536;
+static const int MAX_SORT = 1 << 20;
+
 benchmark::Counter make_time_per_n_counter(int64_t n) {
   return benchmark::Counter(
       (double) n,
+      benchmark::Counter::kAvgThreadsRate |
       benchmark::Counter::kIsIterationInvariantRate |
       benchmark::Counter::kInvert,
       benchmark::Counter::kIs1000);
@@ -39,10 +46,8 @@ static void BM_full_introsort(benchmark::State &state) {
   state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
 }
 
-static const int MIN_SORT = 4096;
-static const int MAX_SORT = 1 << 20;
 
-BENCHMARK(BM_full_introsort)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_full_introsort)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
 
 template <class Q, int U> static void BM_full_vxsort(benchmark::State &state) {
     auto n = state.range(0);
@@ -59,6 +64,7 @@ template <class Q, int U> static void BM_full_vxsort(benchmark::State &state) {
     auto sorter = gcsort::vxsort<Q, U>();
 
     for (auto _ : state) {
+
         state.PauseTiming();
         refresh_copies(copies, v);
         state.ResumeTiming();
@@ -69,14 +75,14 @@ template <class Q, int U> static void BM_full_vxsort(benchmark::State &state) {
 
     state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
 }
-BENCHMARK_TEMPLATE(BM_full_vxsort, int64_t, 1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond);
-BENCHMARK_TEMPLATE(BM_full_vxsort, int64_t, 4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond);
-BENCHMARK_TEMPLATE(BM_full_vxsort, int64_t, 8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond);
-BENCHMARK_TEMPLATE(BM_full_vxsort, int64_t, 12)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond);
+BENCHMARK_TEMPLATE(BM_full_vxsort, int64_t, 1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, int64_t, 4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, int64_t, 8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, int64_t, 12)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
 
-BENCHMARK_TEMPLATE(BM_full_vxsort, int32_t, 1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond);
-BENCHMARK_TEMPLATE(BM_full_vxsort, int32_t, 4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond);
-BENCHMARK_TEMPLATE(BM_full_vxsort, int32_t, 8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond);
+BENCHMARK_TEMPLATE(BM_full_vxsort, int32_t, 1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, int32_t, 4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, int32_t, 8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
 
 static void BM_insertionsort(benchmark::State &state) {
   static const int ITERATIONS = 1024;
