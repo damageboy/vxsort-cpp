@@ -53,7 +53,6 @@ struct alignment_hint {
         int right_align : 8;
 };
 
-
 template <typename T>
 //using Tv = __m256;
 struct vxsort_partition_traits {
@@ -124,7 +123,6 @@ public:
         return _mm256_movemask_ps(_mm256_castsi256_ps(_mm256_cmpgt_epi32(a, b)));
     }
 };
-
 
 template <typename T, int Unroll=1>
 class vxsort {
@@ -222,7 +220,6 @@ private:
         _startPtr = start;
         _endPtr = end;
     }
-
 
     T* _startPtr = nullptr;
     T* _endPtr = nullptr;
@@ -337,22 +334,19 @@ private:
             // * Calculate pre-alignment on the left
             // * See it would cause us an out-of bounds read
             // * Since we'd like to avoid that, we adjust for post-alignment
-            // * There are no branches since we do branch->arithmetic
-            auto preAlignedLeft = (T*) ((size_t)left & ~ALIGN_MASK);
+            // * No branches since we do branch->arithmetic
+            auto preAlignedLeft = reinterpret_cast<T*>(reinterpret_cast<size_t>(left) & ~ALIGN_MASK);
             auto cannotPreAlignLeft = (preAlignedLeft - _startPtr) >> 63;
             realignHint.left_align = (preAlignedLeft - left) + (N & cannotPreAlignLeft);
             assert(alignment_hint::is_aligned(left + realignHint.left_align));
         }
 
         if (realignHint.right_align == alignment_hint::REALIGN) {
+            // Same as above, but in addition:
             // right is pointing just PAST the last element we intend to partition
-            // (where we also store the pivot) So we calculate alignment based on
-            // right - 1, and YES: I am casting to ulong before doing the -1, this is
-            // intentional since the whole thing is either aligned to 32 bytes or not,
-            // so decrementing the POINTER value by 1 is sufficient for the alignment,
-            // an the JIT sucks at this anyway
-            auto preAlignedRight =
-                    (T*) (((size_t)(right - 1) & ~ALIGN_MASK) + ALIGN);
+            // (it's pointing to where we will store the pivot!) So we calculate alignment based on
+            // right - 1
+            auto preAlignedRight = reinterpret_cast<T*>((reinterpret_cast<size_t>(right) - 1 & ~ALIGN_MASK) + ALIGN);
             auto cannotPreAlignRight = (_endPtr - preAlignedRight) >> 63;
             realignHint.right_align = (preAlignedRight - right - (N & cannotPreAlignRight));
             assert(alignment_hint::is_aligned(right + realignHint.right_align));
@@ -440,7 +434,7 @@ private:
         *right = std::numeric_limits<T>::max();
 
         // Broadcast the selected pivot
-        const TV P = Tp::get_vec_pivot(pivot);//_mm256_set1_epi64x(pivot);
+        const TV P = Tp::get_vec_pivot(pivot);
 
         auto readLeft = left;
         auto readRight = right;
@@ -451,7 +445,6 @@ private:
         auto tmpLeft = tmpStartLeft;
         auto tmpStartRight = _temp + PARTITION_TMP_SIZE_IN_ELEMENTS;
         auto tmpRight = tmpStartRight;
-
 
         tmpRight -= N;
 
@@ -510,6 +503,7 @@ private:
                     align_right_scalar_uncommon(readRight, pivot, tmpLeft, tmpRight);
             tmpRight -= N;
         }
+
         assert(((size_t)readLeft & ALIGN_MASK) == 0);
         assert(((size_t)readRight & ALIGN_MASK) == 0);
 

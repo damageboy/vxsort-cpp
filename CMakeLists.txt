@@ -32,7 +32,7 @@ if (CLR_CMAKE_HOST_WIN32)
 endif (CLR_CMAKE_HOST_WIN32)
 
 if(MSVC)
-    add_compile_options(/Zi /FC /Zc:strictStrings /arch:AVX2)
+    add_compile_options(/Zi /FC /Zc:strictStrings /arch:AVX2 /EHs)
 
     set(CMAKE_CXX_FLAGS_RELEASE "/O2b2y- -DNDEBUG")
 
