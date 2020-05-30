@@ -7,12 +7,6 @@
 #include "gtest/gtest.h"
 #include "util.h"
 
-#include <introsort.h>
-#include <vxsort.h>
-#include <smallsort/bitonic_sort.h>
-#include <smallsort/bitonic_sort.int32_t.generated.h>
-#include <smallsort/bitonic_sort.int64_t.generated.h>
-
 #include <algorithm>
 #include <iterator>
 #include <random>
@@ -62,8 +56,11 @@ struct SizeAndSlack {
     std::vector<SizeAndSlack> result;
     size_t i = start;
     while ((step > 0) ? (i <= stop) : (i > stop)) {
-      for (auto j : range<int>(-slack, slack, 1))
+      for (auto j : range<int>(-slack, slack, 1)) {
+        if ((int64_t) i + j <= 0)
+          continue;
         result.push_back(SizeAndSlack(i, j));
+      }
       i *= step;
     }
     return result;

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+import argparse
 from datetime import datetime
+from enum import Enum
 
 max_bitonic_sort_verctors = 16
 
@@ -43,16 +45,31 @@ def i2d(v, t):
     if t == "double":
         return v
     elif t == "float":
-        return v
+        return f"s2d({v})"
     return f"i2d({v})"
+
+def i2s(v, t):
+    if t == "double":
+        raise Exception("WTF")
+    elif t == "float":
+        return f"i2s({v})"
+    return v
 
 
 def d2i(v, t):
     if t == "double":
         return v
     elif t == "float":
-        return v
+        return f"d2s({v})"
     return f"d2i({v})"
+
+def s2i(v, t):
+    if t == "double":
+        raise Exception("WTF")
+    elif t == "float":
+        return f"s2i({v})"
+    return v
+
 
 
 def generate_param_list(start, numParams):
@@ -65,21 +82,21 @@ def generate_param_def_list(numParams, nativeType):
 
 def generate_shuffle_X1(v, t):
     if bitonic_size_map[t] == 4:
-        return f"_mm256_shuffle_epi32({v}, 0xB1)"
+        return i2s(f"_mm256_shuffle_epi32({s2i(v, t)}, 0xB1)", t)
     elif bitonic_size_map[t] == 8:
         return d2i(f"_mm256_shuffle_pd({i2d(v, t)}, {i2d(v, t)}, 0x5)", t)
 
 
 def generate_shuffle_X2(v, t):
     if bitonic_size_map[t] == 4:
-        return f"_mm256_shuffle_epi32({v}, 0x4E)"
+        return i2s(f"_mm256_shuffle_epi32({s2i(v, t)}, 0x4E)", t)
     elif bitonic_size_map[t] == 8:
         return d2i(f"_mm256_permute4x64_pd({i2d(v, t)}, 0x4E)", t)
 
 
 def generate_shuffle_XR(v, t):
     if bitonic_size_map[t] == 4:
-        return f"_mm256_shuffle_epi32({v}, 0x1B)"
+        return i2s(f"_mm256_shuffle_epi32({s2i(v, t)}, 0x1B)", t)
     elif bitonic_size_map[t] == 8:
         return d2i(f"_mm256_permute4x64_pd({i2d(v, t)}, 0x1B)", t)
 
@@ -87,9 +104,9 @@ def generate_shuffle_XR(v, t):
 def generate_blend_B1(v1, v2, t, ascending):
     if bitonic_size_map[t] == 4:
         if ascending:
-            return f"_mm256_blend_epi32({v1}, {v2}, 0xAA)"
+            return i2s(f"_mm256_blend_epi32({s2i(v1, t)}, {s2i(v2, t)}, 0xAA)", t)
         else:
-            return f"_mm256_blend_epi32({v2}, {v1}, 0xAA)"
+            return  i2s(f"_mm256_blend_epi32({s2i(v2, t)}, {s2i(v1, t)}, 0xAA)", t)
     elif bitonic_size_map[t] == 8:
         if ascending:
             return d2i(f"_mm256_blend_pd({i2d(v1, t)}, {i2d(v2, t)}, 0xA)", t)
@@ -100,9 +117,9 @@ def generate_blend_B1(v1, v2, t, ascending):
 def generate_blend_B2(v1, v2, t, ascending):
     if bitonic_size_map[t] == 4:
         if ascending:
-            return f"_mm256_blend_epi32({v1}, {v2}, 0xCC)"
+            return i2s(f"_mm256_blend_epi32({s2i(v1, t)}, {s2i(v2, t)}, 0xCC)", t)
         else:
-            return f"_mm256_blend_epi32({v2}, {v1}, 0xCC)"
+            return i2s(f"_mm256_blend_epi32({s2i(v2, t)}, {s2i(v1, t)}, 0xCC)", t)
     elif bitonic_size_map[t] == 8:
         if ascending:
             return d2i(f"_mm256_blend_pd({i2d(v1, t)}, {i2d(v2, t)}, 0xC)", t)
@@ -113,9 +130,9 @@ def generate_blend_B2(v1, v2, t, ascending):
 def generate_blend_B4(v1, v2, t, ascending):
     if bitonic_size_map[t] == 4:
         if ascending:
-            return f"_mm256_blend_epi32({v1}, {v2}, 0xF0)"
+            return i2s(f"_mm256_blend_epi32({s2i(v1, t)}, {s2i(v2, t)}, 0xF0)", t)
         else:
-            return f"_mm256_blend_epi32({v2}, {v1}, 0xF0)"
+            return i2s(f"_mm256_blend_epi32({s2i(v2, t)}, {s2i(v1, t)}, 0xF0)", t)
     elif bitonic_size_map[t] == 8:
         raise Exception("WTF")
 
@@ -129,8 +146,8 @@ def generate_cross(v, t):
 
 def generate_reverse(v, t):
     if bitonic_size_map[t] == 4:
-        v = f"_mm256_shuffle_epi32({v}, 0x1B)"
-        return d2i(f"_mm256_permute4x64_pd({i2d(v, t)}, 0x4E)", t)
+        v = f"_mm256_shuffle_epi32({s2i(v, t)}, 0x1B)"
+        return d2i(f"_mm256_permute4x64_pd({i2d(v, 'int32_t')}, 0x4E)", t)
     elif bitonic_size_map[t] == 8:
         return d2i(f"_mm256_permute4x64_pd({i2d(v, t)}, 0x1B)", t)
 
@@ -257,7 +274,7 @@ def generate_1v_merge_sorters(f, type, ascending):
         d01 = {generate_blend_B1("min", "max", type, ascending)};"""
 
     print(s, file=f)
-    print("}", file=f)
+    print("    }", file=f)
 
 
 def generate_1v_sorters(f, type, ascending):
@@ -298,7 +315,7 @@ def generate_compounded_sorters(f, width, type, ascending):
     sort_{w1:02d}v_merge_{suffix}({generate_param_list(1, w1)});
     sort_{w2:02d}v_merge_{suffix}({generate_param_list(w1 + 1, w2)});"""
     print(s, file=f)
-    print("}", file=f)
+    print("    }", file=f)
 
 
 def generate_compounded_mergers(f, width, type, ascending):
@@ -330,23 +347,23 @@ def generate_compounded_mergers(f, width, type, ascending):
     sort_{w1:02d}v_merge_{suffix}({generate_param_list(1, w1)});
     sort_{w2:02d}v_merge_{suffix}({generate_param_list(w1 + 1, w2)});"""
     print(s, file=f)
-    print("}", file=f)
+    print("    }", file=f)
 
 
-def get_load_intrinsic(type):
+def get_load_intrinsic(type, v, offset):
     if type == "double":
-        return f"_mm256_loadu_pd(({type} const *)"
+        return f"_mm256_loadu_pd(({type} const *) ((__m256d const *) {v} + {offset}))"
     if type == "float":
-        return f"_mm256_loadu_ps(({type} const *)"
-    return "_mm256_lddqu_si256((__m256i const *)"
+        return f"_mm256_loadu_ps(({type} const *) ((__m256 const *) {v} + {offset}))"
+    return f"_mm256_lddqu_si256((__m256i const *) {v} + {offset});"
 
 
-def get_store_intrinsic(type):
+def get_store_intrinsic(type, ptr, offset, value):
     if type == "double":
-        return f"_mm256_storeu_pd(({type} *)"
+        return f"_mm256_storeu_pd(({type} *) ((__m256d *)  {ptr} + {offset}), {value})"
     if type == "float":
-        return f"_mm256_storeu_ps(({type} *)"
-    return f"_mm256_storeu_si256((__m256i *)"
+        return f"_mm256_storeu_ps(({type} *) ((__m256 *)  {ptr} + {offset}), {value})"
+    return f"_mm256_storeu_si256((__m256i *) {ptr} + {offset}, {value})"
 
 
 def generate_entry_points(f, type):
@@ -356,14 +373,14 @@ static NOINLINE void sort_{m:02d}v({type} *ptr) {{"""
         print(s, file=f)
 
         for l in range(0, m):
-            s = f"    {bitonic_type_map[type]} d{l + 1:02d} = {get_load_intrinsic(type)} ptr + {l});"
+            s = f"    {bitonic_type_map[type]} d{l + 1:02d} = {get_load_intrinsic(type, 'ptr', l)};"
             print(s, file=f)
 
         s = f"    sort_{m:02d}v_ascending({generate_param_list(1, m)});"
         print(s, file=f)
 
         for l in range(0, m):
-            s = f"    {get_store_intrinsic(type)} ptr + {l}, d{l + 1:02d});"
+            s = f"    {get_store_intrinsic(type, 'ptr', l, f'd{l + 1:02d}')};"
             print(s, file=f)
 
         print("}", file=f)
@@ -394,15 +411,16 @@ def autogenerated_blabber():
 /////////////////////////////////////////////////////////////////////////////"""
 
 
-def generate_per_type(f, type):
+def generate_per_type(f, type, opts):
     s = f"""{autogenerated_blabber()}
 
-#ifndef BITONIC_SORT_{type.upper()}_H
-#define BITONIC_SORT_{type.upper()}_H
+#ifndef BITONIC_SORT_{str(opts.vector_isa).upper()}_{type.upper()}_H
+#define BITONIC_SORT_{str
+    (opts.vector_isa).upper()}_{type.upper()}_H
 
 #include <immintrin.h>
 #include "bitonic_sort.h"
-
+                                                                                                                                                                                                                                                                                                                          
 #ifdef _MSC_VER
     // MSVC
 	#define INLINE __forceinline
@@ -415,6 +433,10 @@ def generate_per_type(f, type):
 
 #define i2d _mm256_castsi256_pd
 #define d2i _mm256_castpd_si256
+#define i2s _mm256_castsi256_ps
+#define s2i _mm256_castps_si256
+#define s2d _mm256_castps_pd
+#define d2s _mm256_castpd_ps
 
 namespace gcsort {{
 namespace smallsort {{
@@ -436,10 +458,33 @@ public:
     print("};\n}\n}\n#endif", file=f)
 
 
+class Language(Enum):
+    csharp = 'csharp'
+    cpp = 'cpp'
+    rust = 'rust'
+
+    def __str__(self):
+        return self.value
+
+class VectorISA(Enum):
+    AVX2 = 'AVX2'
+    AVX512 = 'AVX512'
+    SVE = 'SVE'
+
+    def __str__(self):
+        return self.value
+
+
 def generate_all_types():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--language", type=Language, choices=list(Language), help="select output language: csharp/cpp/rust")
+    parser.add_argument("--vector-isa", type=VectorISA, choices=list(VectorISA), help="select vector isa: AVX2/AVX512/SVE")
+
+    opts = parser.parse_args()
+
     for type in bitonic_types:
-        with open(f"bitonic_sort.{type}.generated.h", "w") as f:
-            generate_per_type(f, type)
+        with open(f"bitonic_sort.{opts.vector_isa}.{type}.generated.h", "w") as f:
+            generate_per_type(f, type, opts)
 
 
 if __name__ == '__main__':

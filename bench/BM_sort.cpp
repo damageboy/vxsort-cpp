@@ -4,12 +4,15 @@
 #include <benchmark/benchmark.h>
 
 #include <introsort.h>
-#include <smallsort/bitonic_sort.int32_t.generated.h>
-#include <smallsort/bitonic_sort.int64_t.generated.h>
+#include <smallsort/bitonic_sort.AVX2.int32_t.generated.h>
+#include <smallsort/bitonic_sort.AVX2.int64_t.generated.h>
 #include <vxsort.h>
 #include "util.h"
 
-const auto processor_count = std::thread::hardware_concurrency() / 2;
+using gcsort::vector_machine;
+
+//const auto processor_count = std::thread::hardware_concurrency() / 2;
+const auto processor_count = 1;
 
 static const int MIN_SORT = 65536;
 static const int MAX_SORT = 1 << 20;
@@ -31,7 +34,7 @@ static void BM_full_introsort(benchmark::State &state) {
     auto copies = generate_copies(ITERATIONS, n, v);
     auto begins = generate_array_beginnings(copies);
     auto ends = generate_array_beginnings(copies);
-    for (auto i = 0; i < copies.size(); i++)
+    for (size_t i = 0; i < copies.size(); i++)
         ends[i] = begins[i] + n - 1;
 
     for (auto _ : state) {
@@ -49,7 +52,7 @@ static void BM_full_introsort(benchmark::State &state) {
 
 BENCHMARK(BM_full_introsort)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
 
-template <class Q, int U> static void BM_full_vxsort(benchmark::State &state) {
+template <class Q, gcsort::vector_machine M, int U> static void BM_full_vxsort(benchmark::State &state) {
     auto n = state.range(0);
     auto v = std::vector<Q>(n);
     const auto ITERATIONS = 10;
@@ -58,10 +61,10 @@ template <class Q, int U> static void BM_full_vxsort(benchmark::State &state) {
     auto copies = generate_copies(ITERATIONS, n, v);
     auto begins = generate_array_beginnings(copies);
     auto ends = generate_array_beginnings(copies);
-    for (auto i = 0; i < copies.size(); i++)
+    for (size_t i = 0; i < copies.size(); i++)
         ends[i] = begins[i] + n - 1;
 
-    auto sorter = gcsort::vxsort<Q, U>();
+    auto sorter = gcsort::vxsort<Q, M, U>();
 
     for (auto _ : state) {
 
@@ -75,14 +78,35 @@ template <class Q, int U> static void BM_full_vxsort(benchmark::State &state) {
 
     state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
 }
-BENCHMARK_TEMPLATE(BM_full_vxsort, int64_t, 1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_full_vxsort, int64_t, 4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_full_vxsort, int64_t, 8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_full_vxsort, int64_t, 12)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, int64_t, vector_machine::AVX2, 1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, int64_t, vector_machine::AVX2, 4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, int64_t, vector_machine::AVX2, 8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, int64_t, vector_machine::AVX2, 12)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
 
-BENCHMARK_TEMPLATE(BM_full_vxsort, int32_t, 1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_full_vxsort, int32_t, 4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_full_vxsort, int32_t, 8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, uint64_t, vector_machine::AVX2, 1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, uint64_t, vector_machine::AVX2, 4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, uint64_t, vector_machine::AVX2, 8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, uint64_t, vector_machine::AVX2, 12)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+
+BENCHMARK_TEMPLATE(BM_full_vxsort, double, vector_machine::AVX2, 1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, double, vector_machine::AVX2, 4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, double, vector_machine::AVX2, 8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, double, vector_machine::AVX2, 12)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+
+BENCHMARK_TEMPLATE(BM_full_vxsort, int32_t, vector_machine::AVX2, 1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, int32_t, vector_machine::AVX2, 4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, int32_t, vector_machine::AVX2, 8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, int32_t, vector_machine::AVX2, 12)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+
+BENCHMARK_TEMPLATE(BM_full_vxsort, uint32_t, vector_machine::AVX2, 1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, uint32_t, vector_machine::AVX2, 4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, uint32_t, vector_machine::AVX2, 8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, uint32_t, vector_machine::AVX2, 12)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+
+BENCHMARK_TEMPLATE(BM_full_vxsort, float, vector_machine::AVX2, 1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, float, vector_machine::AVX2, 4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, float, vector_machine::AVX2, 8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_full_vxsort, float, vector_machine::AVX2, 12)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
 
 static void BM_insertionsort(benchmark::State &state) {
   static const int ITERATIONS = 1024;
@@ -93,7 +117,7 @@ static void BM_insertionsort(benchmark::State &state) {
   auto copies = generate_copies(ITERATIONS, n, v);
   auto begins = generate_array_beginnings(copies);
   auto ends = generate_array_beginnings(copies);
-  for (auto i = 0; i < copies.size(); i++)
+  for (size_t i = 0; i < copies.size(); i++)
     ends[i] = begins[i] + n - 1;
 
   for (auto _ : state) {
@@ -104,7 +128,7 @@ static void BM_insertionsort(benchmark::State &state) {
       sort_insertionsort((uint8_t **) begins[i], (uint8_t **) ends[i]);
   }
 
-  delete_copies(copies);
+  //delete_copies(copies);
 
   state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
 }
@@ -128,9 +152,6 @@ static void BM_bitonic_sort_int64(benchmark::State &state) {
       gcsort::smallsort::bitonic<int64_t>::sort(begins[i], n);
   }
 
-
-  delete_copies(copies);
-
   state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
 }
 BENCHMARK(BM_bitonic_sort_int64)->DenseRange(4, 64, 4)->Unit(benchmark::kNanosecond);
@@ -152,8 +173,6 @@ static void BM_bitonic_sort_int32(benchmark::State &state) {
     for (auto i = 0; i < ITERATIONS; i++)
       gcsort::smallsort::bitonic<int32_t>::sort(begins[i], n);
   }
-
-  delete_copies(copies);
 
   state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
 }
