@@ -388,7 +388,7 @@ private:
     }
 
     template<int InnerUnroll>
-    T* vectorized_partition(T* left, T* right, alignment_hint hint) {
+    T* vectorized_partition(T* const left, T* const right, const alignment_hint hint) {
         assert(right - left >= SMALL_SORT_THRESHOLD_ELEMENTS);
         assert((reinterpret_cast<size_t>(left) & ELEMENT_ALIGN) == 0);
         assert((reinterpret_cast<size_t>(right) & ELEMENT_ALIGN) == 0);
@@ -438,8 +438,6 @@ private:
 
         auto readLeft = left;
         auto readRight = right;
-        auto writeLeft = left;
-        auto writeRight = right - N;
 
         auto tmpStartLeft = _temp;
         auto tmpLeft = tmpStartLeft;
@@ -531,6 +529,9 @@ private:
         readLeftV  += InnerUnroll;
         readRightV -= InnerUnroll*2;
         TV* nextPtr;
+
+        auto writeLeft = left;
+        auto writeRight = right - N;
 
         while (readLeftV < readRightV) {
             if (writeRight - ((T *) readRightV) < (2 * (InnerUnroll * N) - N)) {
