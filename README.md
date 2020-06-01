@@ -1,5 +1,7 @@
 # gcsort
 
+![GitHub Workflow Status](https://img.shields.io/github/workflow/status/damageboy/gcsort/Build%20and%20Test?style=plastic)
+
 ## What
 
 This is a port of the C# [VxSort](https://github.com/damageboy/VxSort/) to high-perf C++.
