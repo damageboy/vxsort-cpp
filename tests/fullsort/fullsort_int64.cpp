@@ -1,14 +1,11 @@
-#include "gmock/gmock.h"
 #include "gtest/gtest.h"
-#include "fixtures.h"
+#include "../fixtures.h"
+#include "fullsort.h"
 
-#include <introsort.h>
-#include <vxsort.h>
-#include <smallsort/bitonic_sort.h>
-#include <smallsort/bitonic_sort.AVX2.int64_t.generated.h>
+#include "vxsort_targets_enable.h"
 
-#include <algorithm>
-#include <iterator>
+#include <vxsort.int64_t.h>
+
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -19,9 +16,7 @@ using testing::ValuesIn;
 using testing::WhenSorted;
 using testing::Types;
 
-using gcsort::vxsort;
 using gcsort::vector_machine;
-
 
 static int64_t peters_pointers_of_doom[] = {
 /* 1a8ff59e050 */ 0x1a8df0f4bf8, 0x1a8df0f4c60, 0x1a8df7bfb68, 0x1a8df7c0440, 0x1a8df7c0d00, 0x1a8df7bbdf8, 0x1a8df7bc6d0, 0x1a8df7bcf90, 0x1a8df7bd850, 0x1a8df7be128, 0x1a8df7be9e8, 0x1a8df7bf2a8,
@@ -76,20 +71,6 @@ TEST(PetersCrash, Crash2) {
 }
 #endif
 
-struct SmallSortTest_i64 : public SortTest<int64_t> {};
-
-
-INSTANTIATE_TEST_SUITE_P(BitonicSizes,
-                         SmallSortTest_i64,
-                         ValuesIn(range(4, 64, 4)),
-                         PrintValue());
-
-TEST_P(SmallSortTest_i64, BitonicSort) {
-  auto begin = V.data();
-  gcsort::smallsort::bitonic<int64_t>::sort(begin, GetParam());
-  EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
-}
-
 struct FullSortTest_i64 : public SortWithSlackTest<int64_t> {};
 
 INSTANTIATE_TEST_SUITE_P(FullSortSizes,
@@ -97,62 +78,18 @@ INSTANTIATE_TEST_SUITE_P(FullSortSizes,
                          ValuesIn(SizeAndSlack::generate(10, 1000000, 10, FullSortTest_i64::VectorElements*2)),
                          PrintSizeAndSlack());
 
-TEST_P(FullSortTest_i64, IntroSort) {
-      auto begin = (uint8_t **)V.data();
-      auto end = (uint8_t **)V.data() + V.size() - 1;
+TEST_P(FullSortTest_i64, VxSortAVX2_1)  { perform_vxsort_test<int64_t,  1, vector_machine::AVX2>(V); }
+TEST_P(FullSortTest_i64, VxSortAVX2_2)  { perform_vxsort_test<int64_t,  2, vector_machine::AVX2>(V); }
+TEST_P(FullSortTest_i64, VxSortAVX2_4)  { perform_vxsort_test<int64_t,  4, vector_machine::AVX2>(V); }
+TEST_P(FullSortTest_i64, VxSortAVX2_8)  { perform_vxsort_test<int64_t,  8, vector_machine::AVX2>(V); }
+TEST_P(FullSortTest_i64, VxSortAVX2_12) { perform_vxsort_test<int64_t, 12, vector_machine::AVX2>(V); }
 
-      sort_introsort(begin, end);
-      EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
-}
-
-TEST_P(FullSortTest_i64, VxSort) {
-      auto begin = V.data();
-      auto end = V.data() + V.size() - 1;
-
-      auto sorter = gcsort::vxsort<int64_t, vector_machine::AVX2>();
-      sorter.sort(begin, end);
-
-      EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
-}
-
-TEST_P(FullSortTest_i64, VxSort_Unroll2) {
-        auto begin = V.data();
-        auto end = V.data() + V.size() - 1;
-
-        auto sorter = gcsort::vxsort<int64_t, vector_machine::AVX2, 2>();
-        sorter.sort(begin, end);
-
-        EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
-}
-
-TEST_P(FullSortTest_i64, VxSort_Unroll4) {
-    auto begin = V.data();
-    auto end = V.data() + V.size() - 1;
-
-    auto sorter = gcsort::vxsort<int64_t, vector_machine::AVX2, 4>();
-    sorter.sort(begin, end);
-
-    EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
-}
-
-TEST_P(FullSortTest_i64, VxSort_Unroll8) {
-    auto begin = V.data();
-    auto end = V.data() + V.size() - 1;
-
-    auto sorter = gcsort::vxsort<int64_t, vector_machine::AVX2, 8>();
-    sorter.sort(begin, end);
-
-    EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
-}
-
-TEST_P(FullSortTest_i64, VxSort_Unroll12) {
-    auto begin = V.data();
-    auto end = V.data() + V.size() - 1;
-
-    auto sorter = gcsort::vxsort<int64_t, vector_machine::AVX2, 12>();
-    sorter.sort(begin, end);
-
-    EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
-}
+TEST_P(FullSortTest_i64, VxSortAVX512_1)  { perform_vxsort_test<int64_t,  1, vector_machine::AVX512>(V); }
+TEST_P(FullSortTest_i64, VxSortAVX512_2)  { perform_vxsort_test<int64_t,  2, vector_machine::AVX512>(V); }
+TEST_P(FullSortTest_i64, VxSortAVX512_4)  { perform_vxsort_test<int64_t,  4, vector_machine::AVX512>(V); }
+TEST_P(FullSortTest_i64, VxSortAVX512_8)  { perform_vxsort_test<int64_t,  8, vector_machine::AVX512>(V); }
+TEST_P(FullSortTest_i64, VxSortAVX512_12) { perform_vxsort_test<int64_t, 12, vector_machine::AVX512>(V); }
 
 }
+
+#include "vxsort_targets_disable.h"

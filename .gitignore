@@ -1,2 +1,4 @@
 .idea
 build-*
+__pycache__
+.vs

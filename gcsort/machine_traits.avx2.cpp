@@ -1,5 +1,6 @@
-#include "vxsort.h"
-#include <stdint.h>
+#include <cstdint>
+
+#include "machine_traits.avx2.h"
 
 namespace gcsort {
 
