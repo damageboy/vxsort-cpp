@@ -2,10 +2,13 @@
 #define BITONIC_SORT_H
 
 #include <stdint.h>
+#include "../defs.h"
+#include "../machine_traits.h"
+
 namespace gcsort {
 namespace smallsort {
-template <typename T>
-class bitonic {
+template <typename T, vector_machine M>
+struct bitonic {
  public:
   static void sort(T* ptr, size_t length);
 };

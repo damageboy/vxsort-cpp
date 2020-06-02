@@ -1,10 +1,17 @@
 #ifndef GCSORT_BENCH_UTIL_H
 #define GCSORT_BENCH_UTIL_H
 
+#include <benchmark/benchmark.h>
+
 #include <vector>
 #include <algorithm>
 #include <numeric>
 #include <random>
+
+using namespace benchmark;
+
+Counter make_time_per_n_counter(int64_t n);
+
 
 template <typename T>
 extern void generate_unique_ptrs_vec(std::vector<T>& vec, size_t n) {
@@ -42,4 +49,4 @@ extern std::vector<std::vector<T>> generate_copies(size_t num_copies,  int64_t n
   return copies;
 }
 
-#endif
+#endif //GCSORT_BENCH_UTIL_H

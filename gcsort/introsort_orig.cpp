@@ -1,5 +1,4 @@
-#include "introsort.h"
-
+#include "introsort_orig.h"
 
 #ifdef _MSC_VER
     #define NOINLINE __declspec(noinline)
@@ -10,10 +9,10 @@
 
 extern "C" NOINLINE void sort_introsort(uint8_t** begin,
                                         uint8_t** end) {
-  gcsort::introsort::sort(begin, end, 0);
+  gcsort::introsort_orig::sort(begin, end, 0);
 }
 
 extern "C" NOINLINE void sort_insertionsort(uint8_t** begin,
                                             uint8_t** end) {
-  gcsort::introsort::sort(begin, end, 0);
+  gcsort::introsort_orig::sort(begin, end, 0);
 }

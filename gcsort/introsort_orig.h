@@ -1,11 +1,11 @@
-#ifndef GCSORT_INTROSORT_H
-#define GCSORT_INTROSORT_H
+#ifndef GCSORT_INTROSORT_ORIG_H
+#define GCSORT_INTROSORT_ORIG_H
 
 #include <cstddef>
 #include <cstdint>
 
 namespace gcsort {
-class introsort {
+class introsort_orig {
  private:
   static const int size_threshold = 64;
   static const int max_depth = 100;
