@@ -1,6 +1,6 @@
 # vxsort-cpp
 
-![GitHub Workflow Status](https://img.shields.io/github/workflow/status/damageboy/gcsort/Build%20and%20Test?style=plastic)
+![GitHub Workflow Status](https://img.shields.io/github/workflow/status/damageboy/vxsort-cpp/Build%20and%20Test?style=plastic)
 
 ## What
 
