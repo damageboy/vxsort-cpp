@@ -11,6 +11,8 @@
 
 using gcsort::vector_machine;
 
+namespace vxsort_bench {
+
 static void BM_full_introsort(benchmark::State &state) {
     auto n = state.range(0);
     auto v = std::vector<uint8_t*>(n);
@@ -47,5 +49,7 @@ BENCHMARK_TEMPLATE(BM_vxsort, int64_t, vector_machine::AVX512,  1)->RangeMultipl
 BENCHMARK_TEMPLATE(BM_vxsort, int64_t, vector_machine::AVX512,  4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
 BENCHMARK_TEMPLATE(BM_vxsort, int64_t, vector_machine::AVX512,  8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
 BENCHMARK_TEMPLATE(BM_vxsort, int64_t, vector_machine::AVX512, 12)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+
+}
 
 #include "vxsort_targets_disable.h"

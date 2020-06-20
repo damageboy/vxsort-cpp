@@ -16,60 +16,6 @@
 #include <cstring>
 #include <cstdint>
 
-#ifdef ARCH_X64
-//#include "machine_traits.avx2.h"
-//#include "machine_traits.avx512.h"
-//
-// #include "smallsort/bitonic_sort.AVX2.int64_t.generated.h"
-//#include "smallsort/bitonic_sort.AVX2.uint64_t.generated.h"
-//#include "smallsort/bitonic_sort.AVX2.double.generated.h"
-//#include "smallsort/bitonic_sort.AVX2.float.generated.h"
-//#include "smallsort/bitonic_sort.AVX2.uint32_t.generated.h"
-//
-//#include "smallsort/bitonic_sort.AVX512.int64_t.generated.h"
-//#include "smallsort/bitonic_sort.AVX512.uint64_t.generated.h"
-//#include "smallsort/bitonic_sort.AVX512.double.generated.h"
-//#include "smallsort/bitonic_sort.AVX512.float.generated.h"
-//#include "smallsort/bitonic_sort.AVX512.uint32_t.generated.h"
-#endif
-
-#ifdef ARCH_ARM64
-#error "─│─│──╫▓▓▓╫──│─────│─│─│──────╫▓▓╫│──│─│"
-#error "──│─▓███████▓─╫╫╫╫╫╫╫╫╫╫╫╫╫│▓███████╫──"
-#error "───██████████████████████████████████▓─"
-#error "│─████████████│─│─│─│─────▓███████████╫"
-#error "╫█████────│───│─│───│─────│─│─│───╫████▓"
-#error "│████│──│───│───│─│───│───────│─│─│▓███╫"
-#error "─▓███│───────│─▓██───│╫██╫─│─│─│───▓███│"
-#error "──███─│──────╫████▓───█████────────▓███─"
-#error "──╫██──│─│──╫██████│─│██████─│─────▓██─│"
-#error "│─│▓█││─│─││███▓▓██─│─██▓▓███─│─│──▓█─│─"
-#error "────█│─│───███╫▓▓█▓│──█▓▓▓▓██▓─────▓█───"
-#error "│─││█││───▓███╫██▓╫─│─▓▓█▓▓███─────▓█───"
-#error "─│─╫█│─│─│████▓╫▓▓─────█▓╫████▓──│─▓█───"
-#error "│─││█╫│─││███████─│██╫│▓███████─│─│██─│─"
-#error "─│─│█▓╫╫─▓██████╫│─▓█│──▓██████│╫╫│██│─│"
-#error "│─│─██│╫│▓█████╫│───▓───│▓█████╫╫╫╫█▓──"
-#error "─│─│▓█╫││╫████╫│││╫██▓││││▓████│╫─▓█╫│─│"
-#error "│─│─│██│││╫▓▓││╫╫╫╫╫▓╫╫╫╫╫│╫▓▓╫││╫██──│─"
-#error "─│───▓██╫─────││││││─││││││────│▓██│────"
-#error "│─│─│─▓██▓╫╫╫╫╫╫╫╫▓▓▓▓▓╫╫╫╫╫╫╫▓███│────"
-#error "───────╫██████████▓▓▓▓▓██████████│────│"
-#error "│─│─│───▓█████████╫─│─▓█████████│─│─│─│"
-#error "─────────██████████──│█████████╫─│───││"
-#error "│─│─│───│▓█╫███████││▓███████╫█││─│─│─│"
-#error "───────│─██─╫██████▓─███████││█╫───│──│"
-#error "│───│───│██─││█████▓─█████▓─│╫█╫│──────"
-#error "─│─│───│─▓█──│─╫▓██│─▓██▓│─│─▓█│───────"
-#error "│───│─│─│─██────│─│───│─────│██───│─│─│"
-#error "─│─│───│─│▓██╫─│─│─────│─│─▓██││─│───│─│"
-#error "│───────│─│██████████████████▓│─│─│─│─│"
-#error "─│───│─│───│███████▓▓████████│─│───│──│"
-#error "│─│───│─│─│─│██████╫─▓█████▓────│─│─│──"
-#error "─────│─────╫│╫▓████▓─█████▓│╫╫───────│"
-#error "│─│───│───╫─╫╫╫╫███╫╫╫██▓╫│╫╫╫│─│─────"
-#endif
-
 namespace gcsort {
 using gcsort::smallsort::bitonic;
 
@@ -106,7 +52,6 @@ class vxsort {
     static_assert(Unroll <= 12, "Unroll can be in the range 1..12");
 
 private:
-    //using Tv2 = Tp::TV;
     using Tp = vxsort_machine_traits<T, M>;
     typedef typename Tp::TV TV;
     typedef alignment_hint<sizeof(TV)> AH;

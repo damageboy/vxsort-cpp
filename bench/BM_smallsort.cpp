@@ -18,6 +18,8 @@
 
 using gcsort::vector_machine;
 
+namespace vxsort_bench {
+
 const auto processor_count = std::thread::hardware_concurrency();
 
 static void BM_insertionsort(benchmark::State &state) {
@@ -80,4 +82,5 @@ BENCHMARK_TEMPLATE(BM_bitonic_sort, int64_t,  vector_machine::AVX512)->DenseRang
 BENCHMARK_TEMPLATE(BM_bitonic_sort, uint64_t, vector_machine::AVX512)->DenseRange( 8, 128,  8)->Unit(benchmark::kNanosecond);
 BENCHMARK_TEMPLATE(BM_bitonic_sort, double,   vector_machine::AVX512)->DenseRange( 8, 128,  8)->Unit(benchmark::kNanosecond);
 
+}
 
