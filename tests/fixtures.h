@@ -8,9 +8,11 @@
 #include "util.h"
 
 
+#include <array>
 #include <algorithm>
 #include <iterator>
 #include <random>
+#include <stdlib.h>
 
 namespace gcsort_tests {
 using testing::ElementsAreArray;
@@ -18,7 +20,7 @@ using testing::ValuesIn;
 using testing::WhenSorted;
 using testing::Types;
 
-template <typename T>
+template <typename T, int AlignTo=0>
 struct SortTest : public testing::TestWithParam<int> {
  protected:
   std::vector<T> V;
@@ -26,10 +28,14 @@ struct SortTest : public testing::TestWithParam<int> {
  public:
   static constexpr int VectorElements = 32 / sizeof(T);
   virtual void SetUp() {
-    V = std::vector<T>(GetParam());
+    const auto align_to = AlignTo == 0 ? sizeof(T) : AlignTo;
+    auto aligned_ptr = (T *) aligned_alloc(align_to, GetParam() * sizeof(T));
+    V = std::vector<T>(aligned_ptr, aligned_ptr + GetParam());
     generate_unique_ptrs_vec(V);
   }
-  virtual void TearDown() {}
+  virtual void TearDown() {
+    free(V.data());
+  }
 };
 
 struct PrintValue {
@@ -68,7 +74,7 @@ struct SizeAndSlack {
   }
 };
 
-template <typename T>
+template <typename T, int AlignTo=0>
 struct SortWithSlackTest : public testing::TestWithParam<SizeAndSlack> {
  protected:
   std::vector<T> V;

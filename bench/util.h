@@ -10,7 +10,11 @@
 
 using namespace benchmark;
 
+namespace vxsort_bench {
+
 Counter make_time_per_n_counter(int64_t n);
+
+Counter make_cycle_per_n_counter(double n);
 
 
 template <typename T>
@@ -47,6 +51,8 @@ extern std::vector<std::vector<T>> generate_copies(size_t num_copies,  int64_t n
     copies[i] = std::vector<T>(n);
   refresh_copies(copies, orig);
   return copies;
+}
+
 }
 
 #endif //GCSORT_BENCH_UTIL_H
