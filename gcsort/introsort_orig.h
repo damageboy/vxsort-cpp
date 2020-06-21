@@ -1,10 +1,10 @@
-#ifndef GCSORT_INTROSORT_ORIG_H
-#define GCSORT_INTROSORT_ORIG_H
+#ifndef VXSORT_INTROSORT_ORIG_H
+#define VXSORT_INTROSORT_ORIG_H
 
 #include <cstddef>
 #include <cstdint>
 
-namespace gcsort {
+namespace vxsort {
 class introsort_orig {
  private:
   static const int size_threshold = 64;

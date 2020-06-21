@@ -8,7 +8,7 @@ file(GLOB_RECURSE bench_headers *.h)
 add_executable(${CMAKE_PROJECT_NAME}_bench ${bench_sources} ${bench_headers} BM_fullsort.h)
 
 target_link_libraries(${TARGET_NAME}
-        gcsort_lib
+        ${CMAKE_PROJECT_NAME}_lib
         benchmark
         ${CMAKE_THREAD_LIBS_INIT})
 

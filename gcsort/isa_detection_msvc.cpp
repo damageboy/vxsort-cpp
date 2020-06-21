@@ -7,7 +7,7 @@
 #include <string>
 #include <intrin.h>
 
-namespace gcsort {
+namespace vxsort {
 class InstructionSet {
   // forward declarations
   class InstructionSet_Internal;
@@ -188,16 +188,24 @@ class InstructionSet {
 
 // Initialize static member data
 const InstructionSet::InstructionSet_Internal InstructionSet::CPU_Rep;
+bool init_isa_detection() { return true; }
 
-extern void init_isa_detection() {
-}
-extern bool __builtin_has_cpufeature_avx2() {
-  return InstructionSet::AVX2();
-}
-extern bool __builtin_has_cpufeature_avx512f() {
-  return InstructionSet::AVX512F();
+extern bool supports_vector_machine(vector_machine m)
+{
+  switch (m) {
+    case NONE:
+      return true;
+    case AVX2:
+      return InstructionSet::AVX2();;
+    case AVX512:
+      return InstructionSet::AVX512F();
+      break;
+    case SVE:
+      return false;
+  }
+  return false;
 }
 
 
-}  // namespace gcsort
+}  // namespace vxsort
 #endif

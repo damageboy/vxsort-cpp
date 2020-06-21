@@ -1,8 +1,8 @@
 #include "bitonic_sort.AVX512.float.generated.h"
 
-using namespace gcsort;
+using namespace vxsort;
 
-void gcsort::smallsort::bitonic<float, vector_machine::AVX512 >::sort(float *ptr, size_t length) {
+void vxsort::smallsort::bitonic<float, vector_machine::AVX512 >::sort(float *ptr, size_t length) {
     const int N = 16;
 
     switch(length / N) {

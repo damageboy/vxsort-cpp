@@ -5,7 +5,7 @@
 #include "../defs.h"
 #include "../machine_traits.h"
 
-namespace gcsort {
+namespace vxsort {
 namespace smallsort {
 template <typename T, vector_machine M>
 struct bitonic {

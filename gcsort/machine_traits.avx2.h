@@ -2,8 +2,8 @@
 // Created by dans on 6/1/20.
 //
 
-#ifndef GCSORT_MACHINE_TRAITS_AVX2_H
-#define GCSORT_MACHINE_TRAITS_AVX2_H
+#ifndef VXSORT_MACHINE_TRAITS_AVX2_H
+#define VXSORT_MACHINE_TRAITS_AVX2_H
 
 #ifdef __GNUC__
 #ifdef __clang__
@@ -29,7 +29,7 @@
 #define s2d _mm256_castps_pd
 #define d2s _mm256_castpd_ps
 
-namespace gcsort {
+namespace vxsort {
 extern const int8_t perm_table_64[128];
 extern const int8_t perm_table_32[2048];
 
@@ -243,4 +243,4 @@ class vxsort_machine_traits<double, AVX2> {
 #include "vxsort_targets_disable.h"
 
 
-#endif  // GCSORT_VXSORT_AVX2_H
+#endif  // VXSORT_VXSORT_AVX2_H

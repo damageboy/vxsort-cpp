@@ -2,13 +2,13 @@
 // Created by dans on 6/1/20.
 //
 
-#ifndef GCSORT_MACHINE_TRAITS_H
-#define GCSORT_MACHINE_TRAITS_H
+#ifndef VXSORT_MACHINE_TRAITS_H
+#define VXSORT_MACHINE_TRAITS_H
 
 #include <immintrin.h>
 #include <cstdint>
 
-namespace gcsort {
+namespace vxsort {
 
 enum vector_machine {
   NONE,
@@ -35,4 +35,4 @@ struct vxsort_machine_traits {
 };
 }
 
-#endif  // GCSORT_MACHINE_TRAITS_H
+#endif  // VXSORT_MACHINE_TRAITS_H

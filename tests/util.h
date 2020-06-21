@@ -1,5 +1,5 @@
-#ifndef GCSORT_TEST_UTIL_H
-#define GCSORT_TEST_UTIL_H
+#ifndef VXSORT_TEST_UTIL_H
+#define VXSORT_TEST_UTIL_H
 
 #include <vector>
 #include <algorithm>

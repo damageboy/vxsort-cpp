@@ -9,10 +9,10 @@
 
 extern "C" NOINLINE void sort_introsort(uint8_t** begin,
                                         uint8_t** end) {
-  gcsort::introsort_orig::sort(begin, end, 0);
+  vxsort::introsort_orig::sort(begin, end, 0);
 }
 
 extern "C" NOINLINE void sort_insertionsort(uint8_t** begin,
                                             uint8_t** end) {
-  gcsort::introsort_orig::sort(begin, end, 0);
+  vxsort::introsort_orig::sort(begin, end, 0);
 }

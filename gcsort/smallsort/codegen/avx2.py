@@ -240,7 +240,7 @@ class AVX2BitonicISA(BitonicISA):
 #define s2d _mm256_castps_pd
 #define d2s _mm256_castpd_ps
 
-namespace gcsort {{
+namespace vxsort {{
 namespace smallsort {{
 template<> struct bitonic<{t}, AVX2> {{
 public:
@@ -461,7 +461,7 @@ public:
         basename = os.path.basename(f_header.name)
         s = f"""#include "{basename}"
 
-using namespace gcsort;
+using namespace vxsort;
 """
         print(s, file=f_src)
 
@@ -471,7 +471,7 @@ using namespace gcsort;
         s = f"""    static void sort({t} *ptr, size_t length);"""
         print(s, file=f_header)
 
-        s = f"""void gcsort::smallsort::bitonic<{t}, vector_machine::AVX2 >::sort({t} *ptr, size_t length) {{
+        s = f"""void vxsort::smallsort::bitonic<{t}, vector_machine::AVX2 >::sort({t} *ptr, size_t length) {{
     const int N = {g.vector_size()};
 
     switch(length / N) {{"""

@@ -1,8 +1,8 @@
 #include "bitonic_sort.AVX2.int32_t.generated.h"
 
-using namespace gcsort;
+using namespace vxsort;
 
-void gcsort::smallsort::bitonic<int32_t, vector_machine::AVX2 >::sort(int32_t *ptr, size_t length) {
+void vxsort::smallsort::bitonic<int32_t, vector_machine::AVX2 >::sort(int32_t *ptr, size_t length) {
     const int N = 8;
 
     switch(length / N) {
