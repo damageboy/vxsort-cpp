@@ -31,7 +31,7 @@ static void BM_stdsort(benchmark::State& state) {
   for (size_t i = 0; i < copies.size(); i++)
     ends[i] = begins[i] + n - 1;
 
-  uint64_t cycle_counter = 0;
+  uint64_t total_cycles = 0;
   for (auto _ : state) {
     state.PauseTiming();
     refresh_copies(copies, v);
@@ -40,11 +40,11 @@ static void BM_stdsort(benchmark::State& state) {
     for (auto i = 0; i < ITERATIONS; i++) {
       std::sort(begins[i], ends[i]);
     }
-    cycle_counter += (cycleclock::Now() - start);
+    total_cycles += (cycleclock::Now() - start);
   }
 
   state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
-  //state.counters["cycles/N"] = make_cycle_per_n_counter((double)  cycle_counter / (double) (n*ITERATIONS));
+  state.counters["Cycles/N"] = make_cycle_per_n_counter((double) total_cycles / (double) (n * ITERATIONS * state.iterations()));
 }
 
 template <class Q, gcsort::vector_machine M, int U>
@@ -62,7 +62,7 @@ static void BM_vxsort(benchmark::State& state) {
 
   auto sorter = gcsort::vxsort<Q, M, U>();
 
-  uint64_t cycle_counter = 0;
+  uint64_t total_cycles = 0;
   for (auto _ : state) {
     state.PauseTiming();
     refresh_copies(copies, v);
@@ -71,11 +71,11 @@ static void BM_vxsort(benchmark::State& state) {
     for (auto i = 0; i < ITERATIONS; i++) {
       sorter.sort(begins[i], ends[i]);
     }
-    cycle_counter += (cycleclock::Now() - start);
+    total_cycles += (cycleclock::Now() - start);
   }
 
   state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
-  //state.counters["cycles/N"] = make_cycle_per_n_counter((double)  cycle_counter / (double) (n*ITERATIONS));
+  state.counters["Cycles/N"] = make_cycle_per_n_counter((double) total_cycles / (double) (n * ITERATIONS * state.iterations()));
 }
 }
 

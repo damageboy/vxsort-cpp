@@ -13,7 +13,7 @@ Counter make_time_per_n_counter(int64_t n) {
 
 Counter make_cycle_per_n_counter(double n) {
   return benchmark::Counter(n,
-                            Counter::kIsRate,
+                            Counter::kDefaults,
                             Counter::kIs1000);
 }
 
