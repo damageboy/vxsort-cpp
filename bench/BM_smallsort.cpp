@@ -15,6 +15,7 @@
 #include <smallsort/bitonic_sort.AVX512.uint32_t.generated.h>
 
 #include "util.h"
+#include "stolen-cycleclock.h"
 
 using gcsort::vector_machine;
 
@@ -57,15 +58,19 @@ static void BM_bitonic_sort(benchmark::State &state) {
   auto copies = generate_copies(ITERATIONS, n, v);
   auto begins = generate_array_beginnings(copies);
 
+  uint64_t total_cycles = 0;
   for (auto _ : state) {
     state.PauseTiming();
     refresh_copies(copies, v);
     state.ResumeTiming();
+    auto start = cycleclock::Now();
     for (auto i = 0; i < ITERATIONS; i++)
       gcsort::smallsort::bitonic<Q, M>::sort(begins[i], n);
+    total_cycles += cycleclock::Now() - start;
   }
 
   state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
+  state.counters["Cycles/N"] = make_cycle_per_n_counter((double) total_cycles / (double) (n * ITERATIONS * state.iterations()));
 }
 
 BENCHMARK_TEMPLATE(BM_bitonic_sort, int32_t,  vector_machine::AVX2)->DenseRange(8, 128, 8)->Unit(benchmark::kNanosecond);
