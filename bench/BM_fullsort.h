@@ -15,7 +15,7 @@ using gcsort::vector_machine;
 namespace vxsort_bench {
 const auto processor_count = 1;
 
-static const int MIN_SORT = 65536;
+static const int MIN_SORT = 256;
 static const int MAX_SORT = 1 << 20;
 
 template <class Q>
@@ -31,17 +31,20 @@ static void BM_stdsort(benchmark::State& state) {
   for (size_t i = 0; i < copies.size(); i++)
     ends[i] = begins[i] + n - 1;
 
+  uint64_t cycle_counter = 0;
   for (auto _ : state) {
     state.PauseTiming();
     refresh_copies(copies, v);
     state.ResumeTiming();
+    auto start = cycleclock::Now();
     for (auto i = 0; i < ITERATIONS; i++) {
       std::sort(begins[i], ends[i]);
     }
+    cycle_counter += (cycleclock::Now() - start);
   }
 
   state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
-  //state.counters["cycle/N"] = make_time_per_n_counter(n * ITERATIONS);
+  //state.counters["cycles/N"] = make_cycle_per_n_counter((double)  cycle_counter / (double) (n*ITERATIONS));
 }
 
 template <class Q, gcsort::vector_machine M, int U>
@@ -64,11 +67,11 @@ static void BM_vxsort(benchmark::State& state) {
     state.PauseTiming();
     refresh_copies(copies, v);
     state.ResumeTiming();
-    auto _start = cycleclock::Now();
+    auto start = cycleclock::Now();
     for (auto i = 0; i < ITERATIONS; i++) {
       sorter.sort(begins[i], ends[i]);
     }
-    cycle_counter += cycle_counter;
+    cycle_counter += (cycleclock::Now() - start);
   }
 
   state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
