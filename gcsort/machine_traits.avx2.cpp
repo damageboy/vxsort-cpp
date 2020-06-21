@@ -2,7 +2,7 @@
 
 #include "machine_traits.avx2.h"
 
-namespace gcsort {
+namespace vxsort {
 
 alignas(128) const int8_t perm_table_64[128] = {
         0, 1, 2, 3, 4, 5, 6, 7,  // 0b0000 (0)

@@ -1,7 +1,5 @@
-#ifndef GCSORT_VXSORT_H
-#define GCSORT_VXSORT_H
-
-#include "vxsort_targets_enable.h"
+#ifndef VXSORT_VXSORT_H
+#define VXSORT_VXSORT_H
 
 #include <assert.h>
 #include <immintrin.h>
@@ -16,8 +14,8 @@
 #include <cstring>
 #include <cstdint>
 
-namespace gcsort {
-using gcsort::smallsort::bitonic;
+namespace vxsort {
+using vxsort::smallsort::bitonic;
 
 template <int N>
 struct alignment_hint {
@@ -611,8 +609,5 @@ private:
 };
 
 }  // namespace gcsort
-
-
-#include "vxsort_targets_disable.h"
 
 #endif

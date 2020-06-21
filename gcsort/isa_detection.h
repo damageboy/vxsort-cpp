@@ -1,12 +1,11 @@
-#ifndef GCSORT_ISA_DETECTION_H
-#define GCSORT_ISA_DETECTION_H
+#ifndef VXSORT_ISA_DETECTION_H
+#define VXSORT_ISA_DETECTION_H
 
 #include "machine_traits.h"
 
-namespace gcsort {
-  extern void init_isa_detection();
-  extern bool __builtin_has_cpufeature_avx2();
-  extern bool __builtin_has_cpufeature_avx512f();
+namespace vxsort {
+  extern bool init_isa_detection();
+  extern bool supports_vector_machine(vector_machine m);
 }
 
-#endif  // GCSORT_ISA_DETECTION_H
+#endif  // VXSORT_ISA_DETECTION_H

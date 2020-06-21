@@ -8,7 +8,7 @@ file(GLOB_RECURSE test_HEADERS *.h)
 add_executable(${TARGET_NAME} ${test_SRC} ${test_HEADERS})
 
 target_link_libraries(${TARGET_NAME}
-        gcsort_lib
+        ${CMAKE_PROJECT_NAME}_lib
         gtest
         gmock
         gmock_main)

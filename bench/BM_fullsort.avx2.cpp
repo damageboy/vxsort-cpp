@@ -1,0 +1,62 @@
+#include <random>
+#include <benchmark/benchmark.h>
+
+#include "vxsort_targets_enable_avx2.h"
+
+#include "BM_fullsort.h"
+
+#include "machine_traits.avx2.h"
+#include "smallsort/bitonic_sort.AVX2.int32_t.generated.h"
+#include "smallsort/bitonic_sort.AVX2.uint32_t.generated.h"
+#include "smallsort/bitonic_sort.AVX2.float.generated.h"
+#include "smallsort/bitonic_sort.AVX2.int64_t.generated.h"
+#include "smallsort/bitonic_sort.AVX2.uint64_t.generated.h"
+#include "smallsort/bitonic_sort.AVX2.double.generated.h"
+
+using vxsort::vector_machine;
+
+namespace vxsort_bench {
+
+
+BENCHMARK_TEMPLATE(BM_stdsort, int32_t )->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_stdsort, uint32_t)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_stdsort, float   )->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_stdsort, int64_t )->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_stdsort, uint64_t)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_stdsort, double  )->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+
+BENCHMARK_TEMPLATE(BM_vxsort, int32_t, vector_machine::AVX2,  1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_vxsort, int32_t, vector_machine::AVX2,  4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_vxsort, int32_t, vector_machine::AVX2,  8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_vxsort, int32_t, vector_machine::AVX2, 12)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+
+BENCHMARK_TEMPLATE(BM_vxsort, uint32_t, vector_machine::AVX2,  1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_vxsort, uint32_t, vector_machine::AVX2,  4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_vxsort, uint32_t, vector_machine::AVX2,  8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_vxsort, uint32_t, vector_machine::AVX2, 12)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+
+
+BENCHMARK_TEMPLATE(BM_vxsort, int64_t, vector_machine::AVX2,  1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_vxsort, int64_t, vector_machine::AVX2,  4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_vxsort, int64_t, vector_machine::AVX2,  8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_vxsort, int64_t, vector_machine::AVX2, 12)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+
+BENCHMARK_TEMPLATE(BM_vxsort, uint64_t, vector_machine::AVX2,  1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_vxsort, uint64_t, vector_machine::AVX2,  4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_vxsort, uint64_t, vector_machine::AVX2,  8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_vxsort, uint64_t, vector_machine::AVX2, 12)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+
+
+BENCHMARK_TEMPLATE(BM_vxsort, float, vector_machine::AVX2,  1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_vxsort, float, vector_machine::AVX2,  4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_vxsort, float, vector_machine::AVX2,  8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_vxsort, float, vector_machine::AVX2, 12)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+
+BENCHMARK_TEMPLATE(BM_vxsort, double, vector_machine::AVX2,  1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_vxsort, double, vector_machine::AVX2,  4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_vxsort, double, vector_machine::AVX2,  8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+BENCHMARK_TEMPLATE(BM_vxsort, double, vector_machine::AVX2, 12)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
+
+}
+
+#include "vxsort_targets_disable.h"

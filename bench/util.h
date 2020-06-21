@@ -1,5 +1,5 @@
-#ifndef GCSORT_BENCH_UTIL_H
-#define GCSORT_BENCH_UTIL_H
+#ifndef VXSORT_BENCH_UTIL_H
+#define VXSORT_BENCH_UTIL_H
 
 #include <benchmark/benchmark.h>
 
@@ -55,4 +55,4 @@ extern std::vector<std::vector<T>> generate_copies(size_t num_copies,  int64_t n
 
 }
 
-#endif //GCSORT_BENCH_UTIL_H
+#endif //VXSORT_BENCH_UTIL_H

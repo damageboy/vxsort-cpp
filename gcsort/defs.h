@@ -1,5 +1,5 @@
-#ifndef GCSORT_DEFS_H
-#define GCSORT_DEFS_H
+#ifndef VXSORT_DEFS_H
+#define VXSORT_DEFS_H
 
 #if _MSC_VER
 #ifdef _M_X86
@@ -42,4 +42,4 @@
 #define NOINLINE __attribute__((noinline))
 #endif
 
-#endif  // GCSORT_DEFS_H
+#endif  // VXSORT_DEFS_H

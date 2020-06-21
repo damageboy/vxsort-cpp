@@ -2,8 +2,8 @@
 // Created by dans on 6/1/20.
 //
 
-#ifndef GCSORT_MACHINE_TRAITS_AVX512_H
-#define GCSORT_MACHINE_TRAITS_AVX512_H
+#ifndef VXSORT_MACHINE_TRAITS_AVX512_H
+#define VXSORT_MACHINE_TRAITS_AVX512_H
 
 #ifdef __GNUC__
 #ifdef __clang__
@@ -19,7 +19,7 @@
 #include "defs.h"
 #include "machine_traits.h"
 
-namespace gcsort {
+namespace vxsort {
 template <>
 class vxsort_machine_traits<int32_t, AVX512> {
  public:
@@ -222,4 +222,4 @@ class vxsort_machine_traits<double, AVX512> {
 
 #include "vxsort_targets_disable.h"
 
-#endif  // GCSORT_VXSORT_AVX512_H
+#endif  // VXSORT_VXSORT_AVX512_H

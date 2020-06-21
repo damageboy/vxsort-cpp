@@ -1,5 +1,5 @@
-#ifndef GCSORT_FULLSORT_H
-#define GCSORT_FULLSORT_H
+#ifndef VXSORT_FULLSORT_TEST_H
+#define VXSORT_FULLSORT_TEST_H
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -7,22 +7,28 @@
 
 #include <vector>
 #include <vxsort.h>
+#include <isa_detection.h>
 
-namespace gcsort_tests {
+namespace vxsort_tests {
 using testing::ElementsAreArray;
 using testing::ValuesIn;
 using testing::WhenSorted;
 using testing::Types;
 
-using gcsort::vector_machine;
+using vxsort::vector_machine;
 
 
 template <class T, int Unroll, vector_machine M>
 void perform_vxsort_test(std::vector<T> V) {
+  if (!vxsort::supports_vector_machine(M)) {
+    GTEST_SKIP_(
+        "Current CPU does not support the minimal features for this test");
+    return;
+  }
   auto begin = V.data();
   auto end = V.data() + V.size() - 1;
 
-  auto sorter = gcsort::vxsort<T, M, Unroll>();
+  auto sorter = vxsort::vxsort<T, M, Unroll>();
   sorter.sort(begin, end);
 
   EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
@@ -30,4 +36,4 @@ void perform_vxsort_test(std::vector<T> V) {
 
 }
 
-#endif  // GCSORT_FULLSORT_H
+#endif  // VXSORT_FULLSORT_TEST_H

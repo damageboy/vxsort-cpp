@@ -1,22 +1,23 @@
 #include "gtest/gtest.h"
 #include "../fixtures.h"
-#include "fullsort.h"
 
-#include "vxsort_targets_enable.h"
+#include "vxsort_targets_enable_avx2.h"
 
-#include <vxsort.int64_t.h>
+#include "vxsort.h"
+#include "machine_traits.avx2.h"
+#include "smallsort/bitonic_sort.AVX512.int64_t.generated.h"
 
 #ifdef _WIN32
 #include <windows.h>
 #endif
 
-namespace gcsort_tests {
+namespace vxsort_tests {
 using testing::ElementsAreArray;
 using testing::ValuesIn;
 using testing::WhenSorted;
 using testing::Types;
 
-using gcsort::vector_machine;
+using vxsort::vector_machine;
 
 static int64_t peters_pointers_of_doom[] = {
 /* 1a8ff59e050 */ 0x1a8df0f4bf8, 0x1a8df0f4c60, 0x1a8df7bfb68, 0x1a8df7c0440, 0x1a8df7c0d00, 0x1a8df7bbdf8, 0x1a8df7bc6d0, 0x1a8df7bcf90, 0x1a8df7bd850, 0x1a8df7be128, 0x1a8df7be9e8, 0x1a8df7bf2a8,
@@ -44,7 +45,7 @@ TEST(PetersCrash, Crash1) {
     const auto n = sizeof(peters_pointers_of_doom) / sizeof(int64_t);
     auto begin = peters_pointers_of_doom;
     auto end = begin + n - 1;
-    auto sorter = gcsort::vxsort<int64_t, vector_machine::AVX2>();
+    auto sorter = vxsort::vxsort<int64_t, vector_machine::AVX2>();
     sorter.sort(begin, end);
 
     EXPECT_THAT(peters_pointers_of_doom, WhenSorted(ElementsAreArray(peters_pointers_of_doom)));
@@ -61,7 +62,7 @@ TEST(PetersCrash, Crash2) {
   const auto n = sizeof(peters_pointers_of_doom) / sizeof(int64_t);
   auto begin = reinterpret_cast<int64_t*>(desired_pointer);
   auto end = begin + n - 1;
-  auto sorter = gcsort::vxsort<int64_t, vector_machine::AVX2>();
+  auto sorter = vxsort::vxsort<int64_t, vector_machine::AVX2>();
   sorter.sort(begin, end);
 
   auto result = std::vector<int64_t>(begin, end+1);
@@ -71,24 +72,9 @@ TEST(PetersCrash, Crash2) {
 }
 #endif
 
-struct FullSortTest_i64 : public SortWithSlackTest<int64_t> {};
 
-INSTANTIATE_TEST_SUITE_P(FullSortSizes,
-                         FullSortTest_i64,
-                         ValuesIn(SizeAndSlack::generate(10, 1000000, 10, FullSortTest_i64::VectorElements*2)),
-                         PrintSizeAndSlack());
 
-TEST_P(FullSortTest_i64, VxSortAVX2_1)  { perform_vxsort_test<int64_t,  1, vector_machine::AVX2>(V); }
-TEST_P(FullSortTest_i64, VxSortAVX2_2)  { perform_vxsort_test<int64_t,  2, vector_machine::AVX2>(V); }
-TEST_P(FullSortTest_i64, VxSortAVX2_4)  { perform_vxsort_test<int64_t,  4, vector_machine::AVX2>(V); }
-TEST_P(FullSortTest_i64, VxSortAVX2_8)  { perform_vxsort_test<int64_t,  8, vector_machine::AVX2>(V); }
-TEST_P(FullSortTest_i64, VxSortAVX2_12) { perform_vxsort_test<int64_t, 12, vector_machine::AVX2>(V); }
 
-TEST_P(FullSortTest_i64, VxSortAVX512_1)  { perform_vxsort_test<int64_t,  1, vector_machine::AVX512>(V); }
-TEST_P(FullSortTest_i64, VxSortAVX512_2)  { perform_vxsort_test<int64_t,  2, vector_machine::AVX512>(V); }
-TEST_P(FullSortTest_i64, VxSortAVX512_4)  { perform_vxsort_test<int64_t,  4, vector_machine::AVX512>(V); }
-TEST_P(FullSortTest_i64, VxSortAVX512_8)  { perform_vxsort_test<int64_t,  8, vector_machine::AVX512>(V); }
-TEST_P(FullSortTest_i64, VxSortAVX512_12) { perform_vxsort_test<int64_t, 12, vector_machine::AVX512>(V); }
 
 }
 

@@ -1,5 +1,5 @@
-#ifndef GCSORT_FIXTURES_H
-#define GCSORT_FIXTURES_H
+#ifndef VXSORT_FIXTURES_H
+#define VXSORT_FIXTURES_H
 
 #include "util.h"
 
@@ -14,7 +14,7 @@
 #include <random>
 #include <stdlib.h>
 
-namespace gcsort_tests {
+namespace vxsort_tests {
 using testing::ElementsAreArray;
 using testing::ValuesIn;
 using testing::WhenSorted;
@@ -28,13 +28,14 @@ struct SortTest : public testing::TestWithParam<int> {
  public:
   static constexpr int VectorElements = 32 / sizeof(T);
   virtual void SetUp() {
-    const auto align_to = AlignTo == 0 ? sizeof(T) : AlignTo;
-    auto aligned_ptr = (T *) aligned_alloc(align_to, GetParam() * sizeof(T));
-    V = std::vector<T>(aligned_ptr, aligned_ptr + GetParam());
+    //const auto align_to = AlignTo == 0 ? sizeof(T) : AlignTo;
+    //auto aligned_ptr = (T *) aligned_alloc(align_to, GetParam() * sizeof(T));
+    //V = std::vector<T>(aligned_ptr, aligned_ptr + GetParam());
+    V = std::vector<T>(GetParam());
     generate_unique_ptrs_vec(V);
   }
   virtual void TearDown() {
-    free(V.data());
+    //free(V.data());
   }
 };
 
@@ -97,4 +98,4 @@ struct PrintSizeAndSlack {
 };
 }
 
-#endif  // GCSORT_FIXTURES_H
+#endif  // VXSORT_FIXTURES_H
