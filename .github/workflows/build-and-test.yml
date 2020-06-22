@@ -195,7 +195,7 @@ jobs:
         ProcessorCount(N)
         set(ENV{CTEST_OUTPUT_ON_FAILURE} "ON")
         execute_process(
-          COMMAND ./tests/gcsort_tests
+          COMMAND ./tests/vxsort_tests
           WORKING_DIRECTORY build
           RESULT_VARIABLE result
         )
