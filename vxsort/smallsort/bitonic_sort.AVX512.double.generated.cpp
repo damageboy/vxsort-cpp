@@ -22,21 +22,5 @@ void vxsort::smallsort::bitonic<double, vector_machine::AVX512 >::sort(double *p
         case 14: sort_14v(ptr); break;
         case 15: sort_15v(ptr); break;
         case 16: sort_16v(ptr); break;
-        case 17: sort_17v(ptr); break;
-        case 18: sort_18v(ptr); break;
-        case 19: sort_19v(ptr); break;
-        case 20: sort_20v(ptr); break;
-        case 21: sort_21v(ptr); break;
-        case 22: sort_22v(ptr); break;
-        case 23: sort_23v(ptr); break;
-        case 24: sort_24v(ptr); break;
-        case 25: sort_25v(ptr); break;
-        case 26: sort_26v(ptr); break;
-        case 27: sort_27v(ptr); break;
-        case 28: sort_28v(ptr); break;
-        case 29: sort_29v(ptr); break;
-        case 30: sort_30v(ptr); break;
-        case 31: sort_31v(ptr); break;
-        case 32: sort_32v(ptr); break;
     }
 }

@@ -5,15 +5,7 @@
 #ifndef VXSORT_MACHINE_TRAITS_AVX2_H
 #define VXSORT_MACHINE_TRAITS_AVX2_H
 
-#ifdef __GNUC__
-#ifdef __clang__
-#pragma clang attribute push (__attribute__((target("avx2"))), apply_to = any(function))
-#else
-#pragma GCC push_options
-#pragma GCC target("avx2")
-#endif
-#endif
-
+#include "vxsort_targets_enable_avx2.h"
 
 #include <immintrin.h>
 #include <stdexcept>
