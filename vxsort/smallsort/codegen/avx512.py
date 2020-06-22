@@ -26,7 +26,7 @@ class AVX512BitonicISA(BitonicISA):
         }
 
     def max_bitonic_sort_vectors(self):
-        return 32
+        return 16
 
     def vector_size(self):
         return self.bitonic_size_map[self.type]

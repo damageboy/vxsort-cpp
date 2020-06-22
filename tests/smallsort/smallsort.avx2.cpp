@@ -25,15 +25,15 @@ struct BitonicAVX2_i64 : public SortTest<int64_t> {};
 struct BitonicAVX2_ui64 : public SortTest<uint64_t> {};
 struct BitonicAVX2_double : public SortTest<double> {};
 
-auto values_avx2_32 = ValuesIn(range(8, 128, 8));
-auto values_avx2_64 = ValuesIn(range(4, 64, 4));
+auto bitonic_values_avx2_32 = ValuesIn(range(8, 128, 8));
+auto bitonic_values_avx2_64 = ValuesIn(range(4, 64, 4));
 
-INSTANTIATE_TEST_SUITE_P(Bitonic, BitonicAVX2_i32,    values_avx2_32, PrintValue());
-INSTANTIATE_TEST_SUITE_P(Bitonic, BitonicAVX2_ui32,   values_avx2_32, PrintValue());
-INSTANTIATE_TEST_SUITE_P(Bitonic, BitonicAVX2_float,  values_avx2_32, PrintValue());
-INSTANTIATE_TEST_SUITE_P(Bitonic, BitonicAVX2_i64,    values_avx2_64, PrintValue());
-INSTANTIATE_TEST_SUITE_P(Bitonic, BitonicAVX2_ui64,   values_avx2_64, PrintValue());
-INSTANTIATE_TEST_SUITE_P(Bitonic, BitonicAVX2_double, values_avx2_64, PrintValue());
+INSTANTIATE_TEST_SUITE_P(BitonicAVX2, BitonicAVX2_i32,    bitonic_values_avx2_32, PrintValue());
+INSTANTIATE_TEST_SUITE_P(BitonicAVX2, BitonicAVX2_ui32,   bitonic_values_avx2_32, PrintValue());
+INSTANTIATE_TEST_SUITE_P(BitonicAVX2, BitonicAVX2_float,  bitonic_values_avx2_32, PrintValue());
+INSTANTIATE_TEST_SUITE_P(BitonicAVX2, BitonicAVX2_i64,    bitonic_values_avx2_64, PrintValue());
+INSTANTIATE_TEST_SUITE_P(BitonicAVX2, BitonicAVX2_ui64,   bitonic_values_avx2_64, PrintValue());
+INSTANTIATE_TEST_SUITE_P(BitonicAVX2, BitonicAVX2_double, bitonic_values_avx2_64, PrintValue());
 
 TEST_P(BitonicAVX2_i32,    BitonicSortAVX2) { perform_bitonic_sort_test<int32_t,  vector_machine::AVX2>(V); }
 TEST_P(BitonicAVX2_ui32,   BitonicSortAVX2) { perform_bitonic_sort_test<uint32_t, vector_machine::AVX2>(V); }

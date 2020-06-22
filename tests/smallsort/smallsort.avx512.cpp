@@ -15,9 +15,6 @@
 #include <smallsort/bitonic_sort.AVX512.double.generated.h>
 
 namespace vxsort_tests {
-using testing::ElementsAreArray;
-using testing::ValuesIn;
-using testing::WhenSorted;
 using testing::Types;
 
 using vxsort::vector_machine;
@@ -30,16 +27,16 @@ struct BitonicAVX512_ui64 : public SortTest<uint64_t> {};
 struct BitonicAVX512_double : public SortTest<double> {};
 
 
-auto values_avx512_32 = ValuesIn(range(16, 256, 16));
-auto values_avx512_64 = ValuesIn(range(8, 128, 8));
+auto bitonic_values_avx512_32 = ValuesIn(range(16, 256, 16));
+auto bitonic_values_avx512_64 = ValuesIn(range(8, 128, 8));
 
 
-INSTANTIATE_TEST_SUITE_P(Bitonic, BitonicAVX512_i32,    values_avx512_32, PrintValue());
-INSTANTIATE_TEST_SUITE_P(Bitonic, BitonicAVX512_ui32,   values_avx512_32, PrintValue());
-INSTANTIATE_TEST_SUITE_P(Bitonic, BitonicAVX512_float,  values_avx512_32, PrintValue());
-INSTANTIATE_TEST_SUITE_P(Bitonic, BitonicAVX512_i64,    values_avx512_64, PrintValue());
-INSTANTIATE_TEST_SUITE_P(Bitonic, BitonicAVX512_ui64,   values_avx512_64, PrintValue());
-INSTANTIATE_TEST_SUITE_P(Bitonic, BitonicAVX512_double, values_avx512_64, PrintValue());
+INSTANTIATE_TEST_SUITE_P(BitonicAVX512, BitonicAVX512_i32,    bitonic_values_avx512_32, PrintValue());
+INSTANTIATE_TEST_SUITE_P(BitonicAVX512, BitonicAVX512_ui32,   bitonic_values_avx512_32, PrintValue());
+INSTANTIATE_TEST_SUITE_P(BitonicAVX512, BitonicAVX512_float,  bitonic_values_avx512_32, PrintValue());
+INSTANTIATE_TEST_SUITE_P(BitonicAVX512, BitonicAVX512_i64,    bitonic_values_avx512_64, PrintValue());
+INSTANTIATE_TEST_SUITE_P(BitonicAVX512, BitonicAVX512_ui64,   bitonic_values_avx512_64, PrintValue());
+INSTANTIATE_TEST_SUITE_P(BitonicAVX512, BitonicAVX512_double, bitonic_values_avx512_64, PrintValue());
 
 TEST_P(BitonicAVX512_i32,    BitonicSortAVX512) { perform_bitonic_sort_test<int32_t,  vector_machine::AVX512>(V); }
 TEST_P(BitonicAVX512_ui32,   BitonicSortAVX512) { perform_bitonic_sort_test<uint32_t, vector_machine::AVX512>(V); }
