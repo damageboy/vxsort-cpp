@@ -7,10 +7,10 @@ using namespace std;
 
 #include "isa_detection.h"
 
-namespace vxsort_demo {
+using vxsort::vector_machine;
 
 template <typename T>
-extern void generate_unique_ptrs_vec(std::vector<T>& vec, size_t n) {
+extern void generate_unique_ptrs_vec(std::vector<T>& vec) {
   std::iota(vec.begin(), vec.end(), (T)0x1000);
 
   std::random_device rd;
@@ -19,17 +19,8 @@ extern void generate_unique_ptrs_vec(std::vector<T>& vec, size_t n) {
   std::shuffle(vec.begin(), vec.end(), g);
 }
 
-
-using vxsort::vector_machine;
-
-template <class T, int Unroll, vector_machine M>
-void perform_vxsort_test(std::vector<T> V) {
-
-}
-
-extern void do_avx2(std::vector<int>& V);
-extern void do_avx512(std::vector<int>& V);
-}
+extern void do_avx2(int *begin, int *end);
+extern void do_avx512(int *begin, int *end);
 
 int main(int argc, char** argv)
 {
@@ -39,15 +30,19 @@ int main(int argc, char** argv)
   }
 
   size_t vector_size = atoi(argv[1]);
-  auto data = std::vector<int>(vector_size);
+  auto V = std::vector<int>(vector_size);
+  generate_unique_ptrs_vec(V);
+  auto begin = V.data();
+  auto end = V.data() + V.size() - 1;
+
 
   if (vxsort::supports_vector_machine(vxsort::vector_machine::AVX512)) {
     fprintf(stderr, "Sorting with AVX512...");
-    vxsort_demo::do_avx512(data);
+    do_avx512(begin, end);
     fprintf(stderr, "...done!\n");
   } else if (vxsort::supports_vector_machine(vxsort::vector_machine::AVX2)) {
     fprintf(stderr, "Sorting with AVX2...");
-    vxsort_demo::do_avx2(data);
+    do_avx2(begin, end);
     fprintf(stderr, "...done!\n");
   } else {
     fprintf(stderr, "CPU doesn't seem to support any vectorized ISA, bye-bye\n");
