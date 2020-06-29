@@ -13,6 +13,6 @@ echo Suspending "$(echo "$hogs" | wc -w)" procs before running bench
 
 SCRIPT_DIR="$(cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
-"$SCRIPT_DIR"/gcsort_bench --benchmark_counters_tabular "$@"
+"$SCRIPT_DIR"/vxsort_bench --benchmark_counters_tabular "$@"
 trap '' SIGINT
 resume

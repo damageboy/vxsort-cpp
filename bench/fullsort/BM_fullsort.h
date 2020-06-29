@@ -1,12 +1,12 @@
 #ifndef VXSORT_BM_FULLSORT_H
 #define VXSORT_BM_FULLSORT_H
 
-#include <random>
-#include <algorithm>
-#include <thread>
 #include <benchmark/benchmark.h>
-#include "stolen-cycleclock.h"
-#include "util.h"
+#include <algorithm>
+#include <random>
+#include <thread>
+#include "../stolen-cycleclock.h"
+#include "../util.h"
 
 #include <vxsort.h>
 
@@ -24,7 +24,7 @@ static void BM_stdsort(benchmark::State& state) {
   auto v = std::vector<Q>(n);
   const auto ITERATIONS = 10;
 
-  generate_unique_ptrs_vec(v, n);
+  generate_unique_ptrs_vec(v, (Q) 0x1000, (Q) 8);
   auto copies = generate_copies(ITERATIONS, n, v);
   auto begins = generate_array_beginnings(copies);
   auto ends = generate_array_beginnings(copies);
@@ -59,7 +59,7 @@ static void BM_vxsort(benchmark::State& state) {
   auto v = std::vector<Q>(n);
   const auto ITERATIONS = 10;
 
-  generate_unique_ptrs_vec(v, n);
+  generate_unique_ptrs_vec(v, (Q) 0x1000, (Q) 0x8);
   auto copies = generate_copies(ITERATIONS, n, v);
   auto begins = generate_array_beginnings(copies);
   auto ends = generate_array_beginnings(copies);

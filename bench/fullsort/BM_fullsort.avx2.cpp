@@ -1,17 +1,17 @@
+#include "vxsort_targets_enable_avx2.h"
+
 #include <random>
 #include <benchmark/benchmark.h>
 
-#include "vxsort_targets_enable_avx2.h"
+#include <machine_traits.avx2.h>
+#include <smallsort/bitonic_sort.AVX2.int32_t.generated.h>
+#include <smallsort/bitonic_sort.AVX2.uint32_t.generated.h>
+#include <smallsort/bitonic_sort.AVX2.float.generated.h>
+#include <smallsort/bitonic_sort.AVX2.int64_t.generated.h>
+#include <smallsort/bitonic_sort.AVX2.uint64_t.generated.h>
+#include <smallsort/bitonic_sort.AVX2.double.generated.h>
 
 #include "BM_fullsort.h"
-
-#include "machine_traits.avx2.h"
-#include "smallsort/bitonic_sort.AVX2.int32_t.generated.h"
-#include "smallsort/bitonic_sort.AVX2.uint32_t.generated.h"
-#include "smallsort/bitonic_sort.AVX2.float.generated.h"
-#include "smallsort/bitonic_sort.AVX2.int64_t.generated.h"
-#include "smallsort/bitonic_sort.AVX2.uint64_t.generated.h"
-#include "smallsort/bitonic_sort.AVX2.double.generated.h"
 
 using vxsort::vector_machine;
 

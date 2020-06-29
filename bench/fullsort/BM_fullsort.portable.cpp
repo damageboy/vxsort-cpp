@@ -13,9 +13,9 @@ namespace vxsort_bench {
 
 static void BM_full_introsort(benchmark::State &state) {
   auto n = state.range(0);
-  auto v = std::vector<uint8_t*>(n);
+  auto v = std::vector<int64_t>(n);
   const auto ITERATIONS = 10;
-  generate_unique_ptrs_vec(v, n);
+  generate_unique_ptrs_vec(v, (int64_t) 0x1000, (int64_t) 8);
   auto copies = generate_copies(ITERATIONS, n, v);
   auto begins = generate_array_beginnings(copies);
   auto ends = generate_array_beginnings(copies);
@@ -29,7 +29,7 @@ static void BM_full_introsort(benchmark::State &state) {
     state.ResumeTiming();
     auto start = cycleclock::Now();
     for (auto i = 0; i < ITERATIONS; i++) {
-      sort_introsort(begins[i], ends[i]);
+      sort_introsort((uint8_t **) begins[i], (uint8_t **) ends[i]);
     }
     total_cycles += (cycleclock::Now() - start);
 

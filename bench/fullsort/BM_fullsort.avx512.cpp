@@ -1,17 +1,18 @@
+#include "vxsort_targets_enable_avx512.h"
+
 #include <random>
 #include <benchmark/benchmark.h>
 
-#include "vxsort_targets_enable_avx512.h"
+
+#include <machine_traits.avx512.h>
+#include <smallsort/bitonic_sort.AVX512.int32_t.generated.h>
+#include <smallsort/bitonic_sort.AVX512.uint32_t.generated.h>
+#include <smallsort/bitonic_sort.AVX512.float.generated.h>
+#include <smallsort/bitonic_sort.AVX512.int64_t.generated.h>
+#include <smallsort/bitonic_sort.AVX512.uint64_t.generated.h>
+#include <smallsort/bitonic_sort.AVX512.double.generated.h>
 
 #include "BM_fullsort.h"
-
-#include "machine_traits.avx512.h"
-#include "smallsort/bitonic_sort.AVX512.int32_t.generated.h"
-#include "smallsort/bitonic_sort.AVX512.uint32_t.generated.h"
-#include "smallsort/bitonic_sort.AVX512.float.generated.h"
-#include "smallsort/bitonic_sort.AVX512.int64_t.generated.h"
-#include "smallsort/bitonic_sort.AVX512.uint64_t.generated.h"
-#include "smallsort/bitonic_sort.AVX512.double.generated.h"
 
 using vxsort::vector_machine;
 

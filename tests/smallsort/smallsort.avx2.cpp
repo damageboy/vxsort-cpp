@@ -1,9 +1,8 @@
+#include "vxsort_targets_enable_avx2.h"
+
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "../fixtures.h"
-
-
-#include "vxsort_targets_enable_avx2.h"
 
 #include "smallsort_test.h"
 

@@ -16,10 +16,12 @@ Counter make_time_per_n_counter(int64_t n);
 
 Counter make_cycle_per_n_counter(double n);
 
-
 template <typename T>
-extern void generate_unique_ptrs_vec(std::vector<T>& vec, size_t n) {
-  std::iota(vec.begin(), vec.end(), (T) 0x1000);
+extern void generate_unique_ptrs_vec(std::vector<T>& vec, T start, T stride) {
+
+    for (size_t i = 0; i < vec.size(); i++, start += stride)
+        vec[i] = start;
+
 
   std::random_device rd;
   std::mt19937 g(rd());
@@ -27,12 +29,12 @@ extern void generate_unique_ptrs_vec(std::vector<T>& vec, size_t n) {
   std::shuffle(vec.begin(), vec.end(), g);
 }
 
-template <typename T>
-extern std::vector<T *> generate_array_beginnings(std::vector<std::vector<T>> &copies) {
+template <typename T, typename U=T>
+extern std::vector<U *> generate_array_beginnings(std::vector<std::vector<T>> &copies) {
   const auto num_copies = copies.size();
-  std::vector<T *> begins(num_copies);
+  std::vector<U *> begins(num_copies);
   for (size_t i = 0; i < num_copies; i++)
-    begins[i] = copies[i].data();
+    begins[i] = (U *) copies[i].data();
   return begins;
 }
 template <typename T>

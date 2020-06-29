@@ -7,8 +7,14 @@
 #include <random>
 
 template <typename T>
-void generate_unique_ptrs_vec(std::vector<T>& vec) {
-  std::iota(vec.begin(), vec.end(), (T)0x1000);
+void generate_unique_ptrs_vec(std::vector<T>& vec, T start, T stride=0x1, bool randomize = true) {
+  for (size_t i = 0; i < vec.size(); i++) {
+    vec[i] = start;
+    start += stride;
+  }
+
+  if (!randomize)
+    return;
 
   std::random_device rd;
   std::mt19937 g(rd());

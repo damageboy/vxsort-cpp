@@ -32,7 +32,7 @@ struct SortTest : public testing::TestWithParam<int> {
     //auto aligned_ptr = (T *) aligned_alloc(align_to, GetParam() * sizeof(T));
     //V = std::vector<T>(aligned_ptr, aligned_ptr + GetParam());
     V = std::vector<T>(GetParam());
-    generate_unique_ptrs_vec(V);
+    generate_unique_ptrs_vec(V, (T) 0x1000, (T) 0x1);
   }
   virtual void TearDown() {
     //free(V.data());
@@ -47,16 +47,30 @@ struct PrintValue {
   }
 };
 
+template <typename T>
 struct SizeAndSlack {
  public:
   size_t Size;
   int Slack;
+  T FirstValue;
+  T ValueStride;
+  bool Randomize;
 
-  SizeAndSlack(size_t size, int slack) : Size(size), Slack(slack) {}
+  SizeAndSlack(size_t size, int slack, T first_value, T value_stride, bool randomize) :
+        Size(size),
+        Slack(slack),
+        FirstValue(first_value),
+        ValueStride(value_stride),
+        Randomize(randomize)
+  {}
+
   static std::vector<SizeAndSlack> generate(size_t start,
                                             size_t stop,
                                             size_t step,
-                                            int slack) {
+                                            int slack,
+                                            T first_value,
+                                            T value_stride,
+                                            bool randomize = true) {
     if (step == 0) {
       throw std::invalid_argument("step for range must be non-zero");
     }
@@ -67,7 +81,7 @@ struct SizeAndSlack {
       for (auto j : range<int>(-slack, slack, 1)) {
         if ((int64_t) i + j <= 0)
           continue;
-        result.push_back(SizeAndSlack(i, j));
+        result.push_back(SizeAndSlack(i, j, first_value, value_stride, randomize));
       }
       i *= step;
     }
@@ -76,23 +90,23 @@ struct SizeAndSlack {
 };
 
 template <typename T, int AlignTo=0>
-struct SortWithSlackTest : public testing::TestWithParam<SizeAndSlack> {
+struct SortWithSlackTest : public testing::TestWithParam<SizeAndSlack<T> > {
  protected:
   std::vector<T> V;
 
  public:
-  static constexpr int VectorElements = 32 / sizeof(T);
   virtual void SetUp() {
-    auto p = GetParam();
+    auto p = this->GetParam();
     V = std::vector<T>(p.Size + p.Slack);
-    generate_unique_ptrs_vec(V);
+    generate_unique_ptrs_vec(V, p.FirstValue, p.ValueStride, p.Randomize);
   }
   virtual void TearDown() {}
 };
 
+template <typename T>
 struct PrintSizeAndSlack {
   std::string operator()(
-      const testing::TestParamInfo<SizeAndSlack>& info) const {
+      const testing::TestParamInfo<SizeAndSlack<T>>& info) const {
     return std::to_string(info.param.Size + info.param.Slack);
   }
 };

@@ -1,11 +1,11 @@
+#include "vxsort_targets_enable_avx2.h"
+
 #include "gtest/gtest.h"
 #include "../fixtures.h"
 
-#include "vxsort_targets_enable_avx2.h"
-
-#include "vxsort.h"
-#include "machine_traits.avx2.h"
-#include "smallsort/bitonic_sort.AVX512.int64_t.generated.h"
+#include <vxsort.h>
+#include <machine_traits.avx2.h>
+#include <smallsort/bitonic_sort.AVX512.int64_t.generated.h>
 
 #ifdef _WIN32
 #include <windows.h>

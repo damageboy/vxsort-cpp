@@ -1,8 +1,6 @@
 #ifndef VXSORT_SMALLSORT_TEST_H
 #define VXSORT_SMALLSORT_TEST_H
 
-
-
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "../fixtures.h"

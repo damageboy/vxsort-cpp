@@ -4,10 +4,10 @@
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
-
 #include <vector>
-#include <vxsort.h>
 #include <isa_detection.h>
+#include <vxsort.h>
+
 
 namespace vxsort_tests {
 using testing::ElementsAreArray;
