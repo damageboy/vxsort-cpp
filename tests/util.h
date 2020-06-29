@@ -7,45 +7,52 @@
 #include <random>
 
 template <typename T>
-void generate_unique_ptrs_vec(std::vector<T>& vec) {
-  std::iota(vec.begin(), vec.end(), (T)0x1000);
+void generate_unique_values_vec(std::vector<T>& vec, T start, T stride= 0x1, bool randomize = true) {
+    for (size_t i = 0; i < vec.size(); i++) {
+        vec[i] = start;
+        start += stride;
+    }
 
-  std::random_device rd;
-  std::mt19937 g(rd());
+    if (!randomize)
+        return;
 
-  std::shuffle(vec.begin(), vec.end(), g);
+    std::random_device rd;
+    // std::mt19937 g(rd());
+    std::mt19937 g(666);
+
+    std::shuffle(vec.begin(), vec.end(), g);
 }
 
 template <typename IntType>
 std::vector<IntType> range(IntType start, IntType stop, IntType step) {
-  if (step == IntType(0)) {
-    throw std::invalid_argument("step for range must be non-zero");
-  }
+    if (step == IntType(0)) {
+        throw std::invalid_argument("step for range must be non-zero");
+    }
 
-  std::vector<IntType> result;
-  IntType i = start;
-  while ((step > 0) ? (i <= stop) : (i > stop)) {
-    result.push_back(i);
-    i += step;
-  }
+    std::vector<IntType> result;
+    IntType i = start;
+    while ((step > 0) ? (i <= stop) : (i > stop)) {
+        result.push_back(i);
+        i += step;
+    }
 
-  return result;
+    return result;
 }
 
 template <typename IntType>
 std::vector<IntType> multiply_range(IntType start, IntType stop, IntType step) {
-  if (step == IntType(0)) {
-    throw std::invalid_argument("step for range must be non-zero");
-  }
+    if (step == IntType(0)) {
+        throw std::invalid_argument("step for range must be non-zero");
+    }
 
-  std::vector<IntType> result;
-  IntType i = start;
-  while ((step > 0) ? (i <= stop) : (i > stop)) {
-    result.push_back(i);
-    i *= step;
-  }
+    std::vector<IntType> result;
+    IntType i = start;
+    while ((step > 0) ? (i <= stop) : (i > stop)) {
+        result.push_back(i);
+        i *= step;
+    }
 
-  return result;
+    return result;
 }
 
 #endif

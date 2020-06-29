@@ -1,5 +1,5 @@
-#ifndef VXSORT_BENC_INTERNAL_MACROS_H_
-#define VXSORT_BENC_INTERNAL_MACROS_H_
+#ifndef VXSORT_BENCH_INTERNAL_MACROS_H_
+#define VXSORT_BENCH_INTERNAL_MACROS_H_
 
 #include "benchmark/benchmark.h"
 
@@ -91,4 +91,4 @@
 
 // clang-format on
 
-#endif  // BENCHMARK_INTERNAL_MACROS_H_
+#endif  // VXSORT_BENCH_INTERNAL_MACROS_H_
