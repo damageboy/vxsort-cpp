@@ -14,7 +14,7 @@ class BitonicISA(ABC, metaclass=ABCMeta):
         pass
 
     def largest_merge_variant_needed(self):
-        return next_power_of_2(self.max_bitonic_sort_vectors()) / 2;
+        return next_power_of_2(self.max_bitonic_sort_vectors());
 
     @abstractmethod
     def vector_size(self):
@@ -30,38 +30,46 @@ class BitonicISA(ABC, metaclass=ABCMeta):
         pass
 
     @abstractmethod
-    def generate_prologue(self, f):
+    def generate_prologue(self):
         pass
 
     @abstractmethod
-    def generate_epilogue(self, f):
+    def generate_epilogue(self):
         pass
 
 
     @abstractmethod
-    def generate_1v_basic_sorters(self, f, ascending):
+    def generate_1v_basic_sorters(self, ascending: bool):
         pass
 
     @abstractmethod
-    def generate_1v_merge_sorters(self, f, ascending):
+    def generate_1v_merge_sorters(self, ascending: bool):
         pass
 
-    def generate_1v_sorters(self, f, ascending):
-        self.generate_1v_basic_sorters(f, ascending)
-        self.generate_1v_merge_sorters(f, ascending)
+    def generate_1v_sorters(self, ascending: bool):
+        self.generate_1v_basic_sorters(ascending)
+        self.generate_1v_merge_sorters(ascending)
 
     @abstractmethod
-    def generate_compounded_sorter(self, f, width, ascending, inline):
-        pass
-
-    @abstractmethod
-    def generate_compounded_merger(self, f, width, ascending, inline):
+    def generate_compounded_sorter(self, width: int, ascending: bool, inline: int):
         pass
 
     @abstractmethod
-    def generate_entry_points(self, f):
+    def generate_compounded_merger(self, width: int, ascending: bool, inline: int):
         pass
 
     @abstractmethod
-    def generate_master_entry_point(self, f):
+    def generate_entry_points_full_vectors(self, ascending : bool):
+        pass
+
+    @abstractmethod
+    def generate_master_entry_point_full(self, ascending : bool):
+        pass
+
+    @abstractmethod
+    def generate_cross_min_max(self):
+        pass
+
+    @abstractmethod
+    def generate_strided_min_max(self):
         pass

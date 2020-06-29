@@ -1,6 +1,14 @@
 set(TARGET_NAME ${CMAKE_PROJECT_NAME}_demo)
 
-file(GLOB_RECURSE demo_sources *.cpp)
-add_executable(${CMAKE_PROJECT_NAME}_demo ${demo_sources})
+set(demo_SOURCES
+        demo.cpp)
+
+if (${PROCESSOR_IS_X86})
+    list(APPEND demo_SOURCES
+            do_avx2.cpp
+            do_avx512.cpp)
+endif()
+
+add_executable(${CMAKE_PROJECT_NAME}_demo ${demo_SOURCES})
 
 target_link_libraries(${TARGET_NAME} ${CMAKE_PROJECT_NAME}_lib)

@@ -1,7 +1,8 @@
-#include <vector>
 #include <algorithm>
 #include <numeric>
 #include <random>
+#include <fcntl.h>
+#include <ctime>
 
 using namespace std;
 
@@ -9,47 +10,53 @@ using namespace std;
 
 using vxsort::vector_machine;
 
-template <typename T>
-extern void generate_unique_ptrs_vec(std::vector<T>& vec) {
-  std::iota(vec.begin(), vec.end(), (T)0x1000);
-
-  std::random_device rd;
-  std::mt19937 g(rd());
-
-  std::shuffle(vec.begin(), vec.end(), g);
-}
-
 extern void do_avx2(int *begin, int *end);
 extern void do_avx512(int *begin, int *end);
 
-int main(int argc, char** argv)
-{
-  if (argc != 2) {
-    fprintf(stderr, "demo array size must be sepcificied\n");
-    return -1;
-  }
+std::vector<int> generate_random_garbage(const size_t size) {
 
-  size_t vector_size = atoi(argv[1]);
-  auto V = std::vector<int>(vector_size);
-  generate_unique_ptrs_vec(V);
-  auto begin = V.data();
-  auto end = V.data() + V.size() - 1;
+    auto vec = std::vector<int>(size);
+    std::iota(vec.begin(), vec.end(), 666);
 
+    std::random_device rd;
+    std::mt19937 g(rd());
 
-  if (vxsort::supports_vector_machine(vxsort::vector_machine::AVX512)) {
-    fprintf(stderr, "Sorting with AVX512...");
-    do_avx512(begin, end);
-    fprintf(stderr, "...done!\n");
-  } else if (vxsort::supports_vector_machine(vxsort::vector_machine::AVX2)) {
-    fprintf(stderr, "Sorting with AVX2...");
-    do_avx2(begin, end);
-    fprintf(stderr, "...done!\n");
-  } else {
-    fprintf(stderr, "CPU doesn't seem to support any vectorized ISA, bye-bye\n");
-    return -2;
-  }
-
-  return 0;
+    std::shuffle(vec.begin(), vec.end(), g);
+    return vec;
 }
 
+int main(int argc, char** argv) {
+    if (argc != 2) {
+        fprintf(stderr, "demo array size must be specified\n");
+        return -1;
+    }
 
+    const size_t vector_size = atoi(argv[1]);
+    auto v = generate_random_garbage(vector_size);
+
+    const auto begin = v.data();
+    const auto end = begin + vector_size - 1;
+
+#if defined(CPU_FEATURES_ARCH_X86)
+    if (vxsort::supports_vector_machine(vxsort::vector_machine::AVX512)) {
+        fprintf(stderr, "Sorting with AVX512...");
+        do_avx512(begin, end);
+        fprintf(stderr, "...done!\n");
+    } else if (vxsort::supports_vector_machine(vxsort::vector_machine::AVX2)) {
+        fprintf(stderr, "Sorting with AVX2...");
+        do_avx2(begin, end);
+        fprintf(stderr, "...done!\n");
+    } else
+#endif
+#if defined(CPU_FEATURES_ARCH_AARCH64)
+    if (vxsort::supports_vector_machine(vxsort::vector_machine::NEON)) {
+    } else
+#endif
+
+    {
+        fprintf(stderr, "CPU doesn't seem to support any vectorized ISA, bye-bye\n");
+        return -2;
+    }
+
+    return 0;
+}

@@ -1,4 +1,9 @@
 ﻿---
 BasedOnStyle: Chromium
 
+---
+Language: Cpp
+ColumnLimit: 160
+IndentWidth: 4
+
 ...

@@ -21,7 +21,7 @@ make -j 4
 ## Testing
 
 ```bash
-./test/gcsort_test
+./test/vxsort_test
 ```
 
 ## Benchmarking
@@ -34,7 +34,7 @@ make -j 4
 ```bash
 # This script will kill -STOP a bunch of CPU hogs like chrome,
 # Then executes
-# ./bench/gcsort_bench --benchmark_counters_tabular
+# ./bench/vxsort_bench --benchmark_counters_tabular
 # and resume them after it's done
 ./bench/run.sh
 ```
