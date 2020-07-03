@@ -52,6 +52,7 @@ def generate_per_type(f_header, f_src, type, vector_isa, break_inline):
             g.generate_compounded_merger(f_header, width, ascending=False, inline=inline)
 
     g.generate_entry_points(f_header)
+    g.generate_entry_points_alt(f_header)
     g.generate_master_entry_point(f_header, f_src)
     g.generate_epilogue(f_header)
 

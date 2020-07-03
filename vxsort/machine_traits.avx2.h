@@ -42,7 +42,7 @@ class vxsort_machine_traits<int32_t, AVX2> {
     static INLINE TV partition_vector(TV v, int mask) {
         assert(mask >= 0);
         assert(mask <= 255);
-        return s2i(_mm256_permutevar8x32_ps(i2s(v), _mm256_cvtepu8_epi32(_mm_loadu_si128((__m128i*)(perm_table_32 + mask * 8)))));
+        return s2i(_mm256_permutevar8x32_ps(i2s(v), _mm256_cvtepi8_epi32(_mm_loadu_si128((__m128i*)(perm_table_32 + mask * 8)))));
     }
 
     static INLINE TV broadcast(int32_t pivot) { return _mm256_set1_epi32(pivot); }
