@@ -75,6 +75,16 @@ TEST_P(FullSortTestAVX2_double, VxSortAVX2_4)  { perform_vxsort_test<double,  4,
 TEST_P(FullSortTestAVX2_double, VxSortAVX2_8)  { perform_vxsort_test<double,  8, vector_machine::AVX2>(V); }
 TEST_P(FullSortTestAVX2_double, VxSortAVX2_12) { perform_vxsort_test<double, 12, vector_machine::AVX2>(V); }
 
+struct FullSortStridedTestAVX2_i64 : public SortWithStrideTest<int64_t> {};
+auto vxsort_int64_stride_params_avx2  = ValuesIn(SizeAndStride<int64_t>::generate(1000000, 0x8L, 0x4000000L, 0x80000000L));
+INSTANTIATE_TEST_SUITE_P(FullSort, FullSortStridedTestAVX2_i64, vxsort_int64_stride_params_avx2, PrintSizeAndStride<int64_t>());
+
+TEST_P(FullSortStridedTestAVX2_i64, VxSortStridedAVX2_1)  { perform_vxsort_hinted_test<int64_t,  1, 3, vector_machine::AVX2>(V, MinValue, MaxValue); }
+TEST_P(FullSortStridedTestAVX2_i64, VxSortStridedAVX2_2)  { perform_vxsort_hinted_test<int64_t,  2, 3, vector_machine::AVX2>(V, MinValue, MaxValue); }
+TEST_P(FullSortStridedTestAVX2_i64, VxSortStridedAVX2_4)  { perform_vxsort_hinted_test<int64_t,  4, 3, vector_machine::AVX2>(V, MinValue, MaxValue); }
+TEST_P(FullSortStridedTestAVX2_i64, VxSortStridedAVX2_8)  { perform_vxsort_hinted_test<int64_t,  8, 3, vector_machine::AVX2>(V, MinValue, MaxValue); }
+TEST_P(FullSortStridedTestAVX2_i64, VxSortStridedAVX2_12) { perform_vxsort_hinted_test<int64_t, 12, 3, vector_machine::AVX2>(V, MinValue, MaxValue); }
+
 }
 
 #include "vxsort_targets_disable.h"

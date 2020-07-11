@@ -3,7 +3,7 @@
 #include <thread>
 #include <benchmark/benchmark.h>
 
-#include <introsort_orig.h>
+#include "../reference/introsort/introsort_orig.h"
 #include <isa_detection.h>
 #include <smallsort/bitonic_sort.h>
 

@@ -5,7 +5,7 @@
 
 #include "BM_fullsort.h"
 
-#include <introsort_orig.h>
+#include "../reference/introsort/introsort_orig.h"
 
 using vxsort::vector_machine;
 

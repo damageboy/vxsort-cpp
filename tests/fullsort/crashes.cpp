@@ -2,6 +2,7 @@
 
 #include "gtest/gtest.h"
 #include "../fixtures.h"
+#include <vector>
 
 #include <vxsort.h>
 #include <machine_traits.avx2.h>
@@ -41,6 +42,8 @@ static int64_t peters_pointers_of_doom[] = {
 /* 1a8ff59e710 */ 0x1a8df0f3e50, 0x1a8df0f3ed8, 0x1a8df0f3fd8, 0x1a8df0f4040, 0x1a8df0f40e8, 0x1a8df0f4178, 0x1a8df0f41c8, 0x1a8df0f4238, 0x1a8df0f48d0, 0x1a8df0f4920, 0x1a8df0f49a0, 0x1a8df0f4ba0,
 /* 1a8ff59e770 */ 0x1a8df0e1860, 0x1a8df0e1888, 0x1a8df0e18b0, 0x1a8df0e18d8, 0x1a8df0f2d30, 0x1a8df0f4a50, 0x1a8df0f4a90, };
 
+
+
 TEST(PetersCrash, Crash1) {
     const auto n = sizeof(peters_pointers_of_doom) / sizeof(int64_t);
     auto begin = peters_pointers_of_doom;
@@ -71,10 +74,6 @@ TEST(PetersCrash, Crash2) {
               WhenSorted(ElementsAreArray(result)));
 }
 #endif
-
-
-
-
 
 }
 

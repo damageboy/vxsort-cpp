@@ -18,12 +18,12 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
       STRING "Choose the type of build." FORCE)
   # Set the possible values of build type for cmake-gui
 
-    set(CMAKE_CONFIGURATION_TYPES "Debug;Release;RelWithDebInfo" CACHE STRING
-            "Available build-types: Debug, Release")
+    set(CMAKE_CONFIGURATION_TYPES "Debug;Release;RelWithDebInfo;Stats" CACHE STRING
+            "Available build-types: Debug, Release, RelWithDebInfo, Stats")
 
 
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
-    "Debug" "Release" "RelWithDebInfo")
+    "Debug" "Release" "RelWithDebInfo" "Stats")
 endif()
 
 if (CLR_CMAKE_HOST_WIN32)
@@ -66,7 +66,22 @@ else()
     set(CMAKE_CXX_FLAGS_RELEASE "-O2 -fomit-frame-pointer -DNDEBUG")
 endif()
 
-
+SET(CMAKE_CXX_FLAGS_STATS
+        "${CMAKE_CXX_FLAGS_RELEASE} -DVXSORT_STATS"
+        CACHE STRING "Flags used by the C++ compiler during stats builds."
+        FORCE )
+SET(CMAKE_C_FLAGS_STATS
+        "${CMAKE_C_FLAGS_RELEASE} -DVXSORT_STATS"
+        CACHE STRING "Flags used by the C++ compiler during stats builds."
+        FORCE )
+SET(CMAKE_EXE_LINKER_FLAGS_STATS
+        "${CMAKE_EXE_LINKER_FLAGS_RELEASE}"
+        CACHE STRING "Flags used for linking binaries during coverage builds."
+        FORCE )
+SET(CMAKE_SHARED_LINKER_FLAGS_STATS
+        "${CMAKE_SHARED_LINKER_FLAGS_RELEASE}"
+        CACHE STRING "Flags used by the shared libraries linker during coverage builds."
+        FORCE )
 
 # Location of additional cmake modules
 #

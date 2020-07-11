@@ -22,31 +22,11 @@ class packer {
 
     using MT = vxsort_machine_traits<TFrom, M>;
     typedef typename MT::TV TV;
-    typedef typename std::make_unsigned<TFrom>::type TU;
     static const int N = sizeof(TV) / sizeof(TFrom);
     typedef alignment_hint<sizeof(TV)> AH;
 
     static const size_t ALIGN = AH::ALIGN;
     static const size_t ALIGN_MASK = ALIGN - 1;
-
-    static INLINE void pack_scalar(const TFrom offset, TFrom *&mem_read, TTo *&mem_write) {
-        auto d = *(mem_read++);
-        if (Shift > 0)
-            d >>= Shift;
-        d -= offset;
-        *(mem_write++) = (TTo) d;
-    }
-
-    static INLINE void unpack_scalar(const TFrom offset, TTo *&mem_read, TFrom *&mem_write) {
-        TFrom d = *(--mem_read);
-
-        d += offset;
-
-        if (Shift > 0)
-            d = (TFrom) (((TU) d) << Shift);
-
-        *(--mem_write) = d;
-    }
 
 
     static INLINE TV pack_vectorized(const TV baseVec, TV d01, TV d02) {
@@ -78,7 +58,7 @@ class packer {
    public:
 
     static void pack(TFrom *mem, std::size_t len, TFrom base) {
-        TFrom offset = (base >> Shift) - std::numeric_limits<TTo>::min();
+        TFrom offset = MT::template shift_n_sub<Shift>(base, (TFrom) std::numeric_limits<TTo>::min());
         auto baseVec = MT::broadcast(offset);
 
         auto pre_aligned_mem = reinterpret_cast<TFrom *>(reinterpret_cast<size_t>(mem) & ~ALIGN_MASK);
@@ -90,7 +70,7 @@ class packer {
         // passes
         if (MinLength < N && len < N) {
             while (len--) {
-                pack_scalar(offset, mem_read, mem_write);
+                *(mem_write++) = (TTo) MT::template  shift_n_sub<Shift>(*(mem_read++), offset);
             }
             return;
         }
@@ -103,7 +83,7 @@ class packer {
             const auto alignment_point = pre_aligned_mem + N;
             len -= (alignment_point - mem_read);
             while (mem_read < alignment_point) {
-                pack_scalar(offset, mem_read, mem_write);
+                *(mem_write++) = (TTo) MT::template shift_n_sub<Shift>(*(mem_read++), offset);
             }
         }
 
@@ -172,13 +152,13 @@ class packer {
         mem_write = (TTo *) memv_write;
 
         while (len-- > 0) {
-            pack_scalar(offset, mem_read, mem_write);
+            *(mem_write++) = (TTo) MT::template shift_n_sub<Shift>(*(mem_read++), offset);
         }
     }
 
 
     static void unpack(TTo *mem, std::size_t len, TFrom base) {
-        TFrom offset = (base >> Shift) - std::numeric_limits<TTo>::min();
+        TFrom offset = MT::template shift_n_sub<Shift>(base, (TFrom) std::numeric_limits<TTo>::min());
         auto baseVec = MT::broadcast(offset);
 
         auto mem_read = mem + len;
@@ -189,7 +169,7 @@ class packer {
         // passers
         if (MinLength < 2 * N && len < 2 * N) {
             while (len--) {
-                unpack_scalar(offset, mem_read, mem_write);
+                *(--mem_write) = MT::template unshift_and_add<Shift>(*(--mem_read), offset);
             }
             return;
         }
@@ -199,7 +179,7 @@ class packer {
         if (pre_aligned_mem < mem_read) {
             len -= (mem_read - pre_aligned_mem);
             while (mem_read > pre_aligned_mem) {
-                unpack_scalar(offset, mem_read, mem_write);
+                *(--mem_write) = MT::template unshift_and_add<Shift>(*(--mem_read), offset);
             }
         }
 
@@ -274,7 +254,7 @@ class packer {
         mem_write = (TFrom *) (memv_write + 2);
 
         while (len-- > 0) {
-            unpack_scalar(offset, mem_read, mem_write);
+            *(--mem_write) = MT::template unshift_and_add<Shift>(*(--mem_read), offset);
         }
     }
 

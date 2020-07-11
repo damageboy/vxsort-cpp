@@ -13,6 +13,7 @@ namespace vxsort_tests {
 using vxsort::vector_machine;
 
 struct PackUnpackPositiveTestAVX2_i64 : public SortWithSlackTest<int64_t> {};
+struct PackUnpackPositive2TestAVX2_i64 : public SortWithSlackTest<int64_t> {};
 
 struct PackUnpackFullTestAVX2_i64 : public SortWithSlackTest<int64_t> {};
 
