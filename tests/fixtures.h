@@ -132,7 +132,7 @@ struct SortWithStrideTest : public testing::TestWithParam<SizeAndStride<T>> {
 
    public:
     virtual void SetUp() {
-        testing::TestWithParam<SizeAndSlack<T>>::SetUp();
+        testing::TestWithParam<SizeAndStride<T>>::SetUp();
         auto p = this->GetParam();
         V = std::vector<T>(p.Size);
         generate_unique_ptrs_vec(V, p.FirstValue, p.ValueStride, p.Randomize);

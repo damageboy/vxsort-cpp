@@ -489,12 +489,12 @@ public:
         print("    }", file=f)
 
 
-    def generate_entry_points(self, f):
+    def generate_entry_points_old(self, f):
         type = self.type
         g = self
         for m in range(1, g.max_bitonic_sort_vectors() + 1):
             s = f"""
-        static NOINLINE void sort_{m:02d}v({type} *ptr) {{"""
+        static NOINLINE void sort_{m:02d}v_old({type} *ptr) {{"""
             print(s, file=f)
 
             for l in range(0, m):
@@ -510,7 +510,7 @@ public:
 
             print("    }", file=f)
 
-    def generate_entry_points_alt(self, f):
+    def generate_entry_points(self, f):
         type = self.type
         g = self
         for m in range(1, g.max_bitonic_sort_vectors() + 1):
@@ -549,24 +549,24 @@ using namespace vxsort;
         t = self.type
         g = self
 
+        # s = f"""    static void sort_old({t} *ptr, size_t length);"""
+        # print(s, file=f_header)
+
         s = f"""    static void sort({t} *ptr, size_t length);"""
         print(s, file=f_header)
 
-        s = f"""    static void sort_alt({t} *ptr, size_t length);"""
-        print(s, file=f_header)
 
+    #     s = f"""void vxsort::smallsort::bitonic<{t}, vector_machine::AVX2 >::sort({t} *ptr, size_t length) {{
+    # switch(length / N) {{"""
+    #     print(s, file=f_src)
+    #
+    #     for m in range(1, self.max_bitonic_sort_vectors() + 1):
+    #         s = f"        case {m}: sort_{m:02d}v(ptr); break;"
+    #         print(s, file=f_src)
+    #     print("    }", file=f_src)
+    #     print("}", file=f_src)
 
         s = f"""void vxsort::smallsort::bitonic<{t}, vector_machine::AVX2 >::sort({t} *ptr, size_t length) {{
-    switch(length / N) {{"""
-        print(s, file=f_src)
-
-        for m in range(1, self.max_bitonic_sort_vectors() + 1):
-            s = f"        case {m}: sort_{m:02d}v(ptr); break;"
-            print(s, file=f_src)
-        print("    }", file=f_src)
-        print("}", file=f_src)
-
-        s = f"""void vxsort::smallsort::bitonic<{t}, vector_machine::AVX2 >::sort_alt({t} *ptr, size_t length) {{
     const auto fullvlength = length / N;
     const int remainder = (int) (length - fullvlength * N);
     const auto v = fullvlength + ((remainder > 0) ? 1 : 0);

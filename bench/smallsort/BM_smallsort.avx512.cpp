@@ -13,12 +13,12 @@ namespace vxsort_bench {
 
 BENCHMARK(BM_insertionsort)->DenseRange(4, 64, 4)->Unit(benchmark::kNanosecond);
 
-BENCHMARK_TEMPLATE(BM_bitonic_sort, int32_t,  vector_machine::AVX512)->DenseRange(16, 256, 16)->Unit(benchmark::kNanosecond);
-BENCHMARK_TEMPLATE(BM_bitonic_sort, uint32_t, vector_machine::AVX512)->DenseRange(16, 256, 16)->Unit(benchmark::kNanosecond);
-BENCHMARK_TEMPLATE(BM_bitonic_sort, float,    vector_machine::AVX512)->DenseRange(16, 256, 16)->Unit(benchmark::kNanosecond);
-BENCHMARK_TEMPLATE(BM_bitonic_sort, int64_t,  vector_machine::AVX512)->DenseRange( 8, 128,  8)->Unit(benchmark::kNanosecond);
-BENCHMARK_TEMPLATE(BM_bitonic_sort, uint64_t, vector_machine::AVX512)->DenseRange( 8, 128,  8)->Unit(benchmark::kNanosecond);
-BENCHMARK_TEMPLATE(BM_bitonic_sort, double,   vector_machine::AVX512)->DenseRange( 8, 128,  8)->Unit(benchmark::kNanosecond);
+BENCHMARK_TEMPLATE(BM_bitonic_sort, int32_t,  vector_machine::AVX512)->DenseRange(2, 256, 4)->Unit(benchmark::kNanosecond);
+BENCHMARK_TEMPLATE(BM_bitonic_sort, uint32_t, vector_machine::AVX512)->DenseRange(2, 256, 4)->Unit(benchmark::kNanosecond);
+BENCHMARK_TEMPLATE(BM_bitonic_sort, float,    vector_machine::AVX512)->DenseRange(2, 256, 4)->Unit(benchmark::kNanosecond);
+BENCHMARK_TEMPLATE(BM_bitonic_sort, int64_t,  vector_machine::AVX512)->DenseRange(2, 128, 2)->Unit(benchmark::kNanosecond);
+BENCHMARK_TEMPLATE(BM_bitonic_sort, uint64_t, vector_machine::AVX512)->DenseRange(2, 128, 2)->Unit(benchmark::kNanosecond);
+BENCHMARK_TEMPLATE(BM_bitonic_sort, double,   vector_machine::AVX512)->DenseRange(2, 128, 2)->Unit(benchmark::kNanosecond);
 
 }
 

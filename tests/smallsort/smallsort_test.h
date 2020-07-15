@@ -31,20 +31,6 @@ void perform_bitonic_sort_test(std::vector<T> V) {
   EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
 }
 
-template <class T, vector_machine M>
-void perform_bitonic_alt_sort_test(std::vector<T> V) {
-
-    if (!vxsort::supports_vector_machine(M)) {
-        GTEST_SKIP_(
-            "Current CPU does not support the minimal features for this test");
-        return;
-    }
-    auto begin = V.data();
-    vxsort::smallsort::bitonic<T, M>::sort_alt(begin, V.size());
-    EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
-}
-
-
 }
 
 #endif  // VXSORT_SMALLSORT_TEST_H

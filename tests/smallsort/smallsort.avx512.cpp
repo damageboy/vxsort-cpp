@@ -31,25 +31,15 @@ struct BitonicALTAVX512_i64 : public SortTest<int64_t> {};
 struct BitonicALTAVX512_ui64 : public SortTest<uint64_t> {};
 struct BitonicALTAVX512_double : public SortTest<double> {};
 
-auto bitonic_values_avx512_32 = ValuesIn(range(16, 256, 16));
-auto bitonic_values_avx512_64 = ValuesIn(range(8, 128, 8));
-
 auto bitonic_allvalues_avx512_32 = ValuesIn(range(1, 256, 1));
 auto bitonic_allvalues_avx512_64 = ValuesIn(range(1, 128, 1));
 
-INSTANTIATE_TEST_SUITE_P(BitonicAVX512, BitonicAVX512_i32,    bitonic_values_avx512_32, PrintValue());
-INSTANTIATE_TEST_SUITE_P(BitonicAVX512, BitonicAVX512_ui32,   bitonic_values_avx512_32, PrintValue());
-INSTANTIATE_TEST_SUITE_P(BitonicAVX512, BitonicAVX512_float,  bitonic_values_avx512_32, PrintValue());
-INSTANTIATE_TEST_SUITE_P(BitonicAVX512, BitonicAVX512_i64,    bitonic_values_avx512_64, PrintValue());
-INSTANTIATE_TEST_SUITE_P(BitonicAVX512, BitonicAVX512_ui64,   bitonic_values_avx512_64, PrintValue());
-INSTANTIATE_TEST_SUITE_P(BitonicAVX512, BitonicAVX512_double, bitonic_values_avx512_64, PrintValue());
-
-INSTANTIATE_TEST_SUITE_P(BitonicALTAVX512, BitonicALTAVX512_i32,    bitonic_allvalues_avx512_32, PrintValue());
-INSTANTIATE_TEST_SUITE_P(BitonicALTAVX512, BitonicALTAVX512_ui32,   bitonic_allvalues_avx512_32, PrintValue());
-INSTANTIATE_TEST_SUITE_P(BitonicALTAVX512, BitonicALTAVX512_float,  bitonic_allvalues_avx512_32, PrintValue());
-INSTANTIATE_TEST_SUITE_P(BitonicALTAVX512, BitonicALTAVX512_i64,    bitonic_allvalues_avx512_64, PrintValue());
-INSTANTIATE_TEST_SUITE_P(BitonicALTAVX512, BitonicALTAVX512_ui64,   bitonic_allvalues_avx512_64, PrintValue());
-INSTANTIATE_TEST_SUITE_P(BitonicALTAVX512, BitonicALTAVX512_double, bitonic_allvalues_avx512_64, PrintValue());
+INSTANTIATE_TEST_SUITE_P(BitonicAVX512, BitonicAVX512_i32,    bitonic_allvalues_avx512_32, PrintValue());
+INSTANTIATE_TEST_SUITE_P(BitonicAVX512, BitonicAVX512_ui32,   bitonic_allvalues_avx512_32, PrintValue());
+INSTANTIATE_TEST_SUITE_P(BitonicAVX512, BitonicAVX512_float,  bitonic_allvalues_avx512_32, PrintValue());
+INSTANTIATE_TEST_SUITE_P(BitonicAVX512, BitonicAVX512_i64,    bitonic_allvalues_avx512_64, PrintValue());
+INSTANTIATE_TEST_SUITE_P(BitonicAVX512, BitonicAVX512_ui64,   bitonic_allvalues_avx512_64, PrintValue());
+INSTANTIATE_TEST_SUITE_P(BitonicAVX512, BitonicAVX512_double, bitonic_allvalues_avx512_64, PrintValue());
 
 TEST_P(BitonicAVX512_i32,    BitonicSortAVX512) { perform_bitonic_sort_test<int32_t,  vector_machine::AVX512>(V); }
 TEST_P(BitonicAVX512_ui32,   BitonicSortAVX512) { perform_bitonic_sort_test<uint32_t, vector_machine::AVX512>(V); }
@@ -57,14 +47,6 @@ TEST_P(BitonicAVX512_float,  BitonicSortAVX512) { perform_bitonic_sort_test<floa
 TEST_P(BitonicAVX512_i64,    BitonicSortAVX512) { perform_bitonic_sort_test<int64_t,  vector_machine::AVX512>(V); }
 TEST_P(BitonicAVX512_ui64,   BitonicSortAVX512) { perform_bitonic_sort_test<uint64_t, vector_machine::AVX512>(V); }
 TEST_P(BitonicAVX512_double, BitonicSortAVX512) { perform_bitonic_sort_test<double,   vector_machine::AVX512>(V); }
-
-TEST_P(BitonicALTAVX512_i32,    BitonicSortALTAVX512) { perform_bitonic_alt_sort_test<int32_t,  vector_machine::AVX512>(V); }
-TEST_P(BitonicALTAVX512_ui32,   BitonicSortALTAVX512) { perform_bitonic_alt_sort_test<uint32_t, vector_machine::AVX512>(V); }
-TEST_P(BitonicALTAVX512_float,  BitonicSortALTAVX512) { perform_bitonic_alt_sort_test<float,    vector_machine::AVX512>(V); }
-TEST_P(BitonicALTAVX512_i64,    BitonicSortALTAVX512) { perform_bitonic_alt_sort_test<int64_t,  vector_machine::AVX512>(V); }
-TEST_P(BitonicALTAVX512_ui64,   BitonicSortALTAVX512) { perform_bitonic_alt_sort_test<uint64_t, vector_machine::AVX512>(V); }
-TEST_P(BitonicALTAVX512_double, BitonicSortALTAVX512) { perform_bitonic_alt_sort_test<double,   vector_machine::AVX512>(V); }
-
 
 }
 

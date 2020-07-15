@@ -26,7 +26,7 @@ struct FullSortTestAVX512_double : public SortWithSlackTest<double> {};
 
 auto vxsort_int32_params_avx512 = ValuesIn(SizeAndSlack<int32_t>::generate(10, 1000000, 10, 32, 0x1000, 0x1));
 auto vxsort_uint32_params_avx512 = ValuesIn(SizeAndSlack<uint32_t>::generate(10, 1000000, 10, 32, 0x1000, 0x1));
-auto vxsort_float_params_avx512 = ValuesIn(SizeAndSlack<float>::generate(10, 1000000, 10, 32, 1234.5, 0.1));
+auto vxsort_float_params_avx512 = ValuesIn(SizeAndSlack<float>::generate(10, 1000000, 10, 32, 1234.5, 0.1f));
 auto vxsort_int64_params_avx512 = ValuesIn(SizeAndSlack<int64_t>::generate(10, 1000000, 10, 16, 0x1000, 0x1));
 auto vxsort_uint64_params_avx512 = ValuesIn(SizeAndSlack<uint64_t>::generate(10, 1000000, 10, 16, 0x1000, 0x1));
 auto vxsort_double_params_avx512 = ValuesIn(SizeAndSlack<double>::generate(10, 1000000, 10, 16, 0x1000, 0x1));

@@ -194,7 +194,7 @@ private:
             vxsort_stats<T>::bump_small_sorts();
             vxsort_stats<T>::record_small_sort_size(length);
 #endif
-            bitonic<T, M>::sort_alt(left, length);
+            bitonic<T, M>::sort(left, length);
             return;
         }
 
