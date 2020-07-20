@@ -41,7 +41,7 @@ def generate_per_type(f_header, f_src, type, vector_isa, break_inline):
     for width in range(2, g.max_bitonic_sort_vectors() + 1):
 
         # Allow breaking the inline chain once in a while (configurable)
-        if break_inline == 0 or width & break_inline != 0:
+        if break_inline == 0 or width % break_inline != 0:
             inline = True
         else:
             inline = False
