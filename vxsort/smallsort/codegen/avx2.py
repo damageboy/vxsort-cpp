@@ -291,9 +291,6 @@ class AVX2BitonicISA(BitonicISA):
 namespace vxsort {{
 namespace smallsort {{
 
-extern "C" const uint8_t mask_table_4[16];
-extern "C" const uint8_t mask_table_8[64];
-
 template<> struct bitonic<{t}, AVX2> {{
     static const int N = {self.vector_size()};
     static constexpr {t} MAX = std::numeric_limits<{t}>::max();

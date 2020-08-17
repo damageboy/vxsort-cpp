@@ -4,7 +4,7 @@
 
 namespace vxsort {
 
-alignas(128) const int8_t perm_table_64[128] = {
+alignas(128) const uint8_t perm_table_64[T64_SIZE] = {
         0, 1, 2, 3, 4, 5, 6, 7,  // 0b0000 (0)
         2, 3, 4, 5, 6, 7, 0, 1,  // 0b0001 (1)
         0, 1, 4, 5, 6, 7, 2, 3,  // 0b0010 (2)
@@ -21,9 +21,12 @@ alignas(128) const int8_t perm_table_64[128] = {
         2, 3, 0, 1, 4, 5, 6, 7,  // 0b1101 (13)
         0, 1, 2, 3, 4, 5, 6, 7,  // 0b1110 (14)
         0, 1, 2, 3, 4, 5, 6, 7,  // 0b1111 (15)
+        ////////////////////////////////////////////////// Garbage to make ASAN happy
+        0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, // Garbage to make ASAN happy
+
 };
 
-alignas(2048) const int8_t perm_table_32[2048] = {
+alignas(2048) const uint8_t perm_table_32[T32_SIZE] = {
     0, 1, 2, 3, 4, 5, 6, 7, // 0b00000000 (0)
     1, 2, 3, 4, 5, 6, 7, 0, // 0b00000001 (1)
     0, 2, 3, 4, 5, 6, 7, 1, // 0b00000010 (2)
@@ -280,6 +283,8 @@ alignas(2048) const int8_t perm_table_32[2048] = {
     1, 0, 2, 3, 4, 5, 6, 7, // 0b11111101 (253)
     0, 1, 2, 3, 4, 5, 6, 7, // 0b11111110 (254)
     0, 1, 2, 3, 4, 5, 6, 7, // 0b11111111 (255)
+    ////////////////////////////////////////////////// Garbage to make ASAN happy
+    0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, // Garbage to make ASAN happy
 };
 
 }
