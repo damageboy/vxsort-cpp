@@ -38,41 +38,39 @@ template<> struct bitonic<int32_t, AVX2> {
 public:
 
     static INLINE void sort_01v_ascending(__m256i& d01) {
-            __m256i  min, max, s;
+        __m256i min, max, s;
 
-            s = _mm256_shuffle_epi32(d01, 0xB1);
-            
-            min = _mm256_min_epi32(s, d01);
-            max = _mm256_max_epi32(s, d01);
-            d01 = _mm256_blend_epi32(min, max, 0xAA);
+        s = _mm256_shuffle_epi32(d01, 0b10'11'00'01);
+        min = _mm256_min_epi32(s, d01);
+        max = _mm256_max_epi32(s, d01);
+        d01 = _mm256_blend_epi32(min, max, 0b0'1'1'0'0'1'1'0);
 
-            s = _mm256_shuffle_epi32(d01, 0x1B);
-            
-            min = _mm256_min_epi32(s, d01);
-            max = _mm256_max_epi32(s, d01);
-            d01 = _mm256_blend_epi32(min, max, 0xCC);
+        s = _mm256_shuffle_epi32(d01, 0b01'00'11'10);
+        min = _mm256_min_epi32(s, d01);
+        max = _mm256_max_epi32(s, d01);
+        d01 = _mm256_blend_epi32(min, max, 0b0'0'1'1'1'1'0'0);
 
-            s = _mm256_shuffle_epi32(d01, 0xB1);
-            
-            min = _mm256_min_epi32(s, d01);
-            max = _mm256_max_epi32(s, d01);
-            d01 = _mm256_blend_epi32(min, max, 0xAA);
+        s = _mm256_shuffle_epi32(d01, 0b10'11'00'01);
+        min = _mm256_min_epi32(s, d01);
+        max = _mm256_max_epi32(s, d01);
+        d01 = _mm256_blend_epi32(min, max, 0b0'1'0'1'1'0'1'0);
 
-            s = d2i(_mm256_permute4x64_pd(i2d(_mm256_shuffle_epi32(d01, 0x1B)), 0x4E));
-            min = _mm256_min_epi32(s, d01);
-            max = _mm256_max_epi32(s, d01);
-            d01 = _mm256_blend_epi32(min, max, 0xF0);
+        s = _mm256_permute4x64_epi64(d01, 0b01'00'11'10);
+        min = _mm256_min_epi32(s, d01);
+        max = _mm256_max_epi32(s, d01);
+        d01 = _mm256_blend_epi32(min, max, 0b1'1'1'1'0'0'0'0);
 
-            s = _mm256_shuffle_epi32(d01, 0x4E);
-            min = _mm256_min_epi32(s, d01);
-            max = _mm256_max_epi32(s, d01);
-            d01 = _mm256_blend_epi32(min, max, 0xCC);
+        s = _mm256_shuffle_epi32(d01, 0b01'00'11'10);
+        min = _mm256_min_epi32(s, d01);
+        max = _mm256_max_epi32(s, d01);
+        d01 = _mm256_blend_epi32(min, max, 0b1'1'0'0'1'1'0'0);
 
-            s = _mm256_shuffle_epi32(d01, 0xB1);
-            min = _mm256_min_epi32(s, d01);
-            max = _mm256_max_epi32(s, d01);
-            d01 = _mm256_blend_epi32(min, max, 0xAA);
-}
+        s = _mm256_shuffle_epi32(d01, 0b10'11'00'01);
+        min = _mm256_min_epi32(s, d01);
+        max = _mm256_max_epi32(s, d01);
+        d01 = _mm256_blend_epi32(min, max, 0b1'0'1'0'1'0'1'0);
+    }
+
     static INLINE void sort_01v_merge_ascending(__m256i& d01) {
             __m256i  min, max, s;
 
@@ -96,38 +94,38 @@ public:
     static INLINE void sort_01v_descending(__m256i& d01) {
             __m256i  min, max, s;
 
-            s = _mm256_shuffle_epi32(d01, 0xB1);
+            s = _mm256_shuffle_epi32(d01, 0b10'11'00'01);
             
             min = _mm256_min_epi32(s, d01);
             max = _mm256_max_epi32(s, d01);
-            d01 = _mm256_blend_epi32(max, min, 0xAA);
+            d01 = _mm256_blend_epi32(max, min, 0b0'1'1'0'0'1'1'0);
 
-            s = _mm256_shuffle_epi32(d01, 0x1B);
+            s = _mm256_shuffle_epi32(d01, 0b01'00'11'10);
             
             min = _mm256_min_epi32(s, d01);
             max = _mm256_max_epi32(s, d01);
-            d01 = _mm256_blend_epi32(max, min, 0xCC);
+            d01 = _mm256_blend_epi32(max, min, 0b0'0'1'1'1'1'0'0);
 
-            s = _mm256_shuffle_epi32(d01, 0xB1);
+            s = _mm256_shuffle_epi32(d01, 0b10'11'00'01);
             
             min = _mm256_min_epi32(s, d01);
             max = _mm256_max_epi32(s, d01);
-            d01 = _mm256_blend_epi32(max, min, 0xAA);
+            d01 = _mm256_blend_epi32(max, min, 0b0'1'0'1'1'0'1'0);
 
-            s = d2i(_mm256_permute4x64_pd(i2d(_mm256_shuffle_epi32(d01, 0x1B)), 0x4E));
+            s = _mm256_permute4x64_epi64(d01, 0b01'00'11'10);
             min = _mm256_min_epi32(s, d01);
             max = _mm256_max_epi32(s, d01);
-            d01 = _mm256_blend_epi32(max, min, 0xF0);
+            d01 = _mm256_blend_epi32(max, min, 0b1'1'1'1'0'0'0'0);
 
-            s = _mm256_shuffle_epi32(d01, 0x4E);
+            s = _mm256_shuffle_epi32(d01, 0b01'00'11'10);
             min = _mm256_min_epi32(s, d01);
             max = _mm256_max_epi32(s, d01);
-            d01 = _mm256_blend_epi32(max, min, 0xCC);
+            d01 = _mm256_blend_epi32(max, min, 0b1'1'0'0'1'1'0'0);
 
-            s = _mm256_shuffle_epi32(d01, 0xB1);
+            s = _mm256_shuffle_epi32(d01, 0b10'11'00'01);
             min = _mm256_min_epi32(s, d01);
             max = _mm256_max_epi32(s, d01);
-            d01 = _mm256_blend_epi32(max, min, 0xAA);
+            d01 = _mm256_blend_epi32(max, min, 0b1'0'1'0'1'0'1'0);
 }
     static INLINE void sort_01v_merge_descending(__m256i& d01) {
             __m256i  min, max, s;
