@@ -9,6 +9,8 @@
 
 #include <limits>
 #include <immintrin.h>
+#include <cassert>
+#include <type_traits>
 #include "defs.h"
 #include "machine_traits.h"
 

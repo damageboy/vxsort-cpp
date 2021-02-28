@@ -2,7 +2,6 @@
 #include <numeric>
 #include <random>
 #include <fcntl.h>
-
 #include <ctime>
 
 using namespace std;
@@ -33,6 +32,7 @@ int main(int argc, char** argv) {
     const auto begin = data;
     const auto end = begin + vector_size - 1;
 
+#if defined(CPU_FEATURES_ARCH_X86)
     if (vxsort::supports_vector_machine(vxsort::vector_machine::AVX512)) {
         fprintf(stderr, "Sorting with AVX512...");
         do_avx512(begin, end);
@@ -41,7 +41,14 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Sorting with AVX2...");
         do_avx2(begin, end);
         fprintf(stderr, "...done!\n");
-    } else {
+    } else
+#endif
+#if defined(CPU_FEATURES_ARCH_AARCH64)
+    if (vxsort::supports_vector_machine(vxsort::vector_machine::NEON)) {
+    }
+#endif
+
+    {
         fprintf(stderr, "CPU doesn't seem to support any vectorized ISA, bye-bye\n");
         return -2;
     }

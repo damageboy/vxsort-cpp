@@ -33,12 +33,12 @@ class vxsort_machine_traits<int64_t, AVX2> {
     static void store_compress_vec(TV*, TV, TMASK) { throw std::runtime_error("operation is unsupported"); }
 
     static INLINE TV load_masked_vec(TV *p, TV base, TLOADSTOREMASK mask) {
-        return _mm256_or_si256(_mm256_maskload_epi64((int64_t *) p, mask),
+        return _mm256_or_si256(_mm256_maskload_epi64((const long long *) p, mask),
                                _mm256_andnot_si256(mask, base));
     }
 
     static INLINE  void store_masked_vec(TV *p, TV v, TLOADSTOREMASK mask) {
-        _mm256_maskstore_epi64((int64_t *) p, mask, v);
+        _mm256_maskstore_epi64((long long *) p, mask, v);
     }
 
     static INLINE TV partition_vector(TV v, int mask) {

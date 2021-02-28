@@ -272,7 +272,7 @@ class AVX512BitonicISA(BitonicISA):
 
 #include <limits>
 #include <immintrin.h>
-#include "bitonic_machine.h"
+#include "../bitonic_machine.h"
 
 #define i2d _mm512_castsi512_pd
 #define d2i _mm512_castpd_si512

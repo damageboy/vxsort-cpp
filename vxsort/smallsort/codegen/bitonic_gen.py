@@ -7,10 +7,13 @@ from typing.io import IO
 
 from avx2 import AVX2BitonicISA
 from avx512 import AVX512BitonicISA
+from neon import NeonBitonicISA
 from bitonic_isa import BitonicISA
 
 BitonicISA.register(AVX2BitonicISA)
 BitonicISA.register(AVX512BitonicISA)
+BitonicISA.register(NeonBitonicISA)
+
 
 
 def get_generator_supported_types(vector_isa):
@@ -20,6 +23,8 @@ def get_generator_supported_types(vector_isa):
         return AVX2BitonicISA.supported_types()
     elif vector_isa == VectorISA.AVX512:
         return AVX512BitonicISA.supported_types()
+    elif vector_isa == VectorISA.NEON:
+        return NeonBitonicISA.supported_types()
     else:
         raise Exception(f"Non-supported vector machine-type: {vector_isa}")
 
@@ -31,6 +36,8 @@ def get_generator(vector_isa, type, f_header: IO):
         return AVX2BitonicISA(type, f_header)
     elif vector_isa == VectorISA.AVX512:
         return AVX512BitonicISA(type, f_header)
+    elif vector_isa == VectorISA.NEON:
+        return NeonBitonicISA(type, f_header)
     else:
         raise Exception(f"Non-supported vector machine-type: {vector_isa}")
 
@@ -77,6 +84,7 @@ class Language(Enum):
 class VectorISA(Enum):
     AVX2 = 'AVX2'
     AVX512 = 'AVX512'
+    NEON = 'NEON'
     SVE = 'SVE'
 
     def __str__(self):
@@ -105,7 +113,9 @@ def generate_all_types():
         for t in get_generator_supported_types(isa):
             filename = f"bitonic_machine.{isa}.{t}.generated"
             print(f"Generating {filename}.{{h,.cpp}}")
-            h_filename = os.path.join(opts.output_dir, filename + ".h")
+            dirname = os.path.join(opts.output_dir, isa.lower())
+            os.makedirs(dirname, exist_ok=True)
+            h_filename = os.path.join(dirname, filename + ".h")
             with open(h_filename, "w") as f_header:
                 generate_per_type(f_header, t, isa, opts.break_inline)
 

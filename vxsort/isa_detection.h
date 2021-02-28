@@ -2,6 +2,7 @@
 #define VXSORT_ISA_DETECTION_H
 
 #include "machine_traits.h"
+#include "cpu_features_macros.h"
 
 namespace vxsort {
   extern bool init_isa_detection();

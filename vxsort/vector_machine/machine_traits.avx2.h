@@ -1,5 +1,5 @@
-#ifndef VXSORT_MACHINE_TRAITS_AVX2_H_H
-#define VXSORT_MACHINE_TRAITS_AVX2_H_H
+#ifndef VXSORT_MACHINE_TRAITS_AVX2_H
+#define VXSORT_MACHINE_TRAITS_AVX2_H
 
 #include "vxsort_targets_enable_avx2.h"
 
@@ -7,7 +7,9 @@
 #include <stdexcept>
 #include <limits>
 #include <assert.h>
+#include <string.h>
 #include <inttypes.h>
+#include <type_traits>
 #include "defs.h"
 #include "machine_traits.h"
 
@@ -47,7 +49,6 @@ extern const int8_t perm_table_32[2048];
 #include "avx2/int16_t.h"
 #include "avx2/int32_t.h"
 #include "avx2/int64_t.h"
-#include "avx2/uint16_t.h"
 #include "avx2/uint32_t.h"
 #include "avx2/uint64_t.h"
 }

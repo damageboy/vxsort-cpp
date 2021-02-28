@@ -3,7 +3,7 @@ class vxsort_machine_traits<int16_t, AVX2> {
    public:
     typedef int16_t T;
     typedef __m256i TV;
-    typedef __m256i TLOADSTOREMASK;
+    typedef int TLOADSTOREMASK;
     typedef uint32_t TMASK;
     typedef int32_t TPACK;
     typedef typename std::make_unsigned<T>::type TU;
@@ -21,7 +21,7 @@ class vxsort_machine_traits<int16_t, AVX2> {
         assert(remainder >= 0);
         assert(remainder < N);
 
-        return _mm256_cvtepi8_epi16(_mm_loadu_si128((__m128i*)(mask_table_16 + N * remainder)));
+        return remainder;
     }
 
     static INLINE TV load_vec(TV* p) { return _mm256_lddqu_si256(p); }
@@ -30,13 +30,17 @@ class vxsort_machine_traits<int16_t, AVX2> {
 
     static void store_compress_vec(TV*, TV, TMASK) { throw std::runtime_error("operation is unsupported"); }
 
-    static INLINE TV load_masked_vec(TV *p, TV base, TLOADSTOREMASK mask) {
-        return _mm256_or_si256(_mm256_maskload_epi32((int16_t *) p, mask),
-                               _mm256_andnot_si256(mask, base));
+    static INLINE TV load_masked_vec(TV *p, TV base, TLOADSTOREMASK remainder) {
+        // FML: There is only so much AVX2 stupidity one person can
+        //      take in their entire lifetime, I'm personally over this crap
+        T fml[N] = {std::numeric_limits<T>::max()};
+
+        memcpy(fml, p, sizeof(T) * remainder);
+        return _mm256_lddqu_si256((TV *) fml);
     }
 
-    static INLINE  void store_masked_vec(TV *p, TV v, TLOADSTOREMASK mask) {
-        _mm256_maskstore_epi32((int32_t *) p, mask, v);
+    static INLINE  void store_masked_vec(TV *p, TV v, TLOADSTOREMASK remainder) {
+        memcpy(p, &v, sizeof(T) * remainder);
     }
 
     static INLINE TV partition_vector(TV v, int mask) {

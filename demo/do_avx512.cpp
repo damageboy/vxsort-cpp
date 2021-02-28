@@ -1,6 +1,6 @@
 #include "vxsort_targets_enable_avx512.h"
 
-#include "smallsort/bitonic_machine.AVX512.int32_t.generated.h"
+#include "smallsort/avx512/bitonic_machine.AVX512.int32_t.generated.h"
 #include "vector_machine/machine_traits.avx512.h"
 #include "vxsort.h"
 

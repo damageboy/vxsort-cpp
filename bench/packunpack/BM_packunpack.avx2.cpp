@@ -3,7 +3,7 @@
 #include "BM_packunpack.h"
 
 #include <packer.h>
-#include <vector_machine/machine_traits.avx2.h.h>
+#include <vector_machine/machine_traits.avx2.h>
 
 using vxsort::vector_machine;
 

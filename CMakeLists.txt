@@ -7,7 +7,14 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Location of additional cmake modules
+#
+set(CMAKE_MODULE_PATH
+        ${CMAKE_MODULE_PATH}
+        ${PROJECT_SOURCE_DIR}/cmake)
+
 include(CheckCXXCompilerFlag)
+include(GetHostType)
 
 # Set a default build type if none was specified
 set(default_build_type "Release")
@@ -79,12 +86,6 @@ SET(CMAKE_SHARED_LINKER_FLAGS_STATS
         CACHE STRING "Flags used by the shared libraries linker during coverage builds."
         FORCE )
 
-# Location of additional cmake modules
-#
-set(CMAKE_MODULE_PATH
-    ${CMAKE_MODULE_PATH}
-    ${PROJECT_SOURCE_DIR}/cmake)
-
 # Guard against in-source builds and bad build-type strings
 #
 include(ConfigSafeGuards)
@@ -97,12 +98,17 @@ set(BENCHMARK_ENABLE_TESTING OFF)
 
 # Configure google micro benchmark
 #
-
-
-include(ConfigGBench)
-include(ConfigGTest)
+include(ConfigCPUFeatures)
 
 add_subdirectory(${PROJECT_SOURCE_DIR}/vxsort/)
-add_subdirectory(${PROJECT_SOURCE_DIR}/bench/)
+include(ConfigGTest)
+
+if (${CMAKE_SYSTEM_NAME} MATCHES "Android")
+    MESSAGE("Skipping google-bench related project since building for Android")
+else()
+    include(ConfigGBench)
+    add_subdirectory(${PROJECT_SOURCE_DIR}/bench/)
+endif()
+
 add_subdirectory(${PROJECT_SOURCE_DIR}/demo/)
 add_subdirectory(${PROJECT_SOURCE_DIR}/tests/)

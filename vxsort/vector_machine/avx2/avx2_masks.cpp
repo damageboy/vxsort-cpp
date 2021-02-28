@@ -1,6 +1,6 @@
 #include <cstdint>
 
-#include "../machine_traits.avx2.h.h"
+#include "../machine_traits.avx2.h"
 
 namespace vxsort {
 

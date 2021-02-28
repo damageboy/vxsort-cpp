@@ -10,6 +10,7 @@ enum vector_machine {
     NONE,
     AVX2,
     AVX512,
+    NEON,
     SVE,
 };
 
