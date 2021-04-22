@@ -333,7 +333,7 @@ class AVX2BitonicISA(BitonicISA):
     def generate_x1_epi16_shuffle_vec(self):
         if self.type == "uint16_t" or self.type == "int16_t":
             l1 = 0x0504070601000302
-            l2 = 0x0D0C0F0E09080B0A
+            l2 = l1 + 0x8080000080800000
             return f"const TV x1 = _mm256_set_epi64x(0x{l2:08X}, 0x{l1:08X}, 0x{l2:08X}, 0x{l1:08X})"
 
         return AVX2BitonicISA.REMOVE_ME

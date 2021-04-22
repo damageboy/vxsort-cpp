@@ -27,7 +27,7 @@ class vxsort_machine_traits<double, AVX512> {
     static INLINE void store_vec(TV* ptr, TV v) { _mm512_storeu_pd(ptr, v); }
 
     static INLINE TV load_masked_vec(TV *ptr, TV base, TLOADSTOREMASK mask) {
-        return _mm512_mask_loadu_pd(base, mask, (int64_t const *) ptr);
+        return _mm512_mask_loadu_pd(base, mask, (T const *) ptr);
     }
 
     static INLINE void store_masked_vec(TV * p, TV v, TLOADSTOREMASK mask) {

@@ -20,7 +20,6 @@ namespace vxsort_tests {
 
 using VM = vxsort::vector_machine;
 
-
 struct BitonicMachineAVX2_i16    : public SortTest<int16_t> {};
 struct BitonicMachineAVX2_ui16   : public SortTest<uint16_t> {};
 struct BitonicMachineAVX2_i32    : public SortTest<int32_t> {};
@@ -81,6 +80,8 @@ INSTANTIATE_TEST_SUITE_P(BitonicAVX2, BitonicAVX2_i64,    bitonic_allvalues_avx2
 INSTANTIATE_TEST_SUITE_P(BitonicAVX2, BitonicAVX2_ui64,   bitonic_allvalues_avx2_64, PrintValue());
 INSTANTIATE_TEST_SUITE_P(BitonicAVX2, BitonicAVX2_double, bitonic_allvalues_avx2_64, PrintValue());
 
+TEST_P(BitonicAVX2_i16,    BitonicSortAVX2) { perform_bitonic_sort_test<int16_t,  VM::AVX2>(V); }
+TEST_P(BitonicAVX2_ui16,   BitonicSortAVX2) { perform_bitonic_sort_test<uint16_t, VM::AVX2>(V); }
 TEST_P(BitonicAVX2_i32,    BitonicSortAVX2) { perform_bitonic_sort_test<int32_t,  VM::AVX2>(V); }
 TEST_P(BitonicAVX2_ui32,   BitonicSortAVX2) { perform_bitonic_sort_test<uint32_t, VM::AVX2>(V); }
 TEST_P(BitonicAVX2_float,  BitonicSortAVX2) { perform_bitonic_sort_test<float,    VM::AVX2>(V); }

@@ -3,13 +3,14 @@ from datetime import datetime
 from typing.io import IO
 from utils import native_size_map, next_power_of_2
 from bitonic_isa import BitonicISA
-import os
 
 
 class AVX512BitonicISA(BitonicISA):
     REMOVE_ME = "<<<REMOVE_ME>>>"
 
     bitonic_type_map = {
+        "int16_t":  "__m512i",
+        "uint16_t": "__m512i",
         "int32_t":  "__m512i",
         "uint32_t": "__m512i",
         "float":    "__m512",
@@ -19,6 +20,8 @@ class AVX512BitonicISA(BitonicISA):
     }
 
     bitonic_mask_map = {
+        "int16_t":  "__mmask32",
+        "uint16_t": "__mmask32",
         "int32_t":  "__mmask16",
         "uint32_t": "__mmask16",
         "float":    "__mmask16",
@@ -101,6 +104,8 @@ class AVX512BitonicISA(BitonicISA):
     def generate_shuffle_X1(self, v):
         t = self.type
         size = self.bitonic_size_map[t]
+        if size == 32:
+            return self.i2t(f"_mm512_shuffle_epi8({self.s2i(v)}, x1)")
         if size == 16:
             return self.i2t(f"_mm512_shuffle_epi32({self.s2i(v)}, (_MM_PERM_ENUM)  0b10'11'00'01)")
         elif size == 8:
@@ -109,6 +114,8 @@ class AVX512BitonicISA(BitonicISA):
     def generate_shuffle_X2(self, v):
         t = self.type
         size = self.bitonic_size_map[t]
+        if size == 32:
+            return self.i2t(f"_mm512_shuffle_epi32({self.s2i(v)}, (_MM_PERM_ENUM)  0b10'11'00'01)")
         if size == 16:
             return self.i2t(f"_mm512_shuffle_epi32({self.s2i(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)")
         elif size == 8:
@@ -117,6 +124,8 @@ class AVX512BitonicISA(BitonicISA):
     def generate_shuffle_X4(self, v):
         t = self.type
         size = self.bitonic_size_map[t]
+        if size == 32:
+            return self.i2t(f"_mm512_shuffle_epi32({self.s2i(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)")
         if size == 16:
             return self.i2t(f"_mm512_permutex_epi64({self.s2i(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)")
         elif size == 8:
@@ -125,14 +134,27 @@ class AVX512BitonicISA(BitonicISA):
     def generate_shuffle_X8(self, v):
         t = self.type
         size = self.bitonic_size_map[t]
+        if size == 32:
+            return self.i2t(f"_mm512_permutex_epi64({self.s2i(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)")
         if size == 16:
             return self.i2t(f"_mm512_shuffle_i64x2({self.s2i(v)}, {self.s2i(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)")
         elif size == 8:
             return self.d2i(f"_mm512_shuffle_pd({self.t2d(v)}, {self.t2d(v)}, (_MM_PERM_ENUM) 0xB1)")
 
+    def generate_shuffle_X16(self, v):
+        t = self.type
+        size = self.bitonic_size_map[t]
+        if size == 32:
+            return self.i2t(f"_mm512_shuffle_i64x2({self.s2i(v)}, {self.s2i(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)")
+        raise Exception("WTF")
+
     def generate_min(self, v1, v2):
         t = self.type
-        if t == "int32_t":
+        if t == "int16_t":
+            return f"_mm512_min_epi16({v1}, {v2})"
+        elif t == "uint16_t":
+            return f"_mm512_min_epu16({v1}, {v2})"
+        elif t == "int32_t":
             return f"_mm512_min_epi32({v1}, {v2})"
         elif t == "uint32_t":
             return f"_mm512_min_epu32({v1}, {v2})"
@@ -147,7 +169,11 @@ class AVX512BitonicISA(BitonicISA):
 
     def generate_max(self, v1, v2):
         t = self.type
-        if t == "int32_t":
+        if t == "int16_t":
+            return f"_mm512_max_epi16({v1}, {v2})"
+        elif t == "uint16_t":
+            return f"_mm512_max_epu16({v1}, {v2})"
+        elif t == "int32_t":
             return f"_mm512_max_epi32({v1}, {v2})"
         elif t == "uint32_t":
             return f"_mm512_max_epu32({v1}, {v2})"
@@ -178,7 +204,11 @@ class AVX512BitonicISA(BitonicISA):
     def generate_blended_max(self, src, v1, v2, blend: int, width: int, ascending: bool):
         mask = self.generate_mask(blend, width, ascending)
         t = self.type
-        if t == "int32_t":
+        if t == "int16_t":
+            return f"_mm512_mask_max_epi16({src}, 0b{mask:032b}, {v1}, {v2})"
+        elif t == "uint16_t":
+            return f"_mm512_mask_max_epu16({src}, 0b{mask:032b}, {v1}, {v2})"
+        elif t == "int32_t":
             return f"_mm512_mask_max_epi32({src}, 0b{mask:016b}, {v1}, {v2})"
         elif t == "uint32_t":
             return f"_mm512_mask_max_epu32({src}, 0b{mask:016b}, {v1}, {v2})"
@@ -202,12 +232,17 @@ class AVX512BitonicISA(BitonicISA):
     def get_mask_load_intrinsic(self, v, offset, mask):
         t = self.type
 
+        int_suffix = "bugbugbug"
+        max_value = "bugbugbug"
         if self.vector_size() == 8:
             int_suffix = "epi64"
             max_value = f"_mm512_set1_epi64(MAX)"
         elif self.vector_size() == 16:
             int_suffix = "epi32"
             max_value = f"_mm512_set1_epi32(MAX)"
+        elif self.vector_size() == 32:
+            int_suffix = "epi16"
+            max_value = f"_mm512_set1_epi16(MAX)"
 
         if t == "double":
             return f"""_mm512_mask_loadu_pd(_mm512_set1_pd(MAX),
@@ -233,9 +268,12 @@ class AVX512BitonicISA(BitonicISA):
     def get_mask_store_intrinsic(self, ptr, offset, value, mask):
         t = self.type
 
+        int_suffix = "bugbugbug"
         if self.vector_size() == 8:
             int_suffix = "epi64"
         elif self.vector_size() == 16:
+            int_suffix = "epi32"
+        elif self.vector_size() == 32:
             int_suffix = "epi32"
 
         if t == "double":
@@ -243,6 +281,17 @@ class AVX512BitonicISA(BitonicISA):
         if t == "float":
             return f"_mm512_mask_storeu_ps(({t} *) ((__m512 *)  {ptr} + {offset}), {mask}, {value})"
         return f"_mm512_mask_storeu_{int_suffix}((__m512i *) {ptr} + {offset}, {mask}, {value})"
+
+    def generate_x1_epi16_shuffle_vec(self):
+        if self.type == "uint16_t" or self.type == "int16_t":
+            l = [None]*8
+            l[0] = 0x0504070601000302
+            for i in range(1, 8):
+                l[i] = l[i-1] + 0x0808080808080808
+            return f"const TV x1 = _mm512_set_epi64(0x{l[3]:08X}, 0x{l[2]:08X}, 0x{l[1]:08X}, 0x{l[0]:08X}," "\n" \
+                   f"                               0x{l[7]:08X}, 0x{l[6]:08X}, 0x{l[5]:08X}, 0x{l[4]:08X})"
+
+        return AVX512BitonicISA.REMOVE_ME
 
     def autogenerated_blabber(self):
         return f"""/////////////////////////////////////////////////////////////////////////////
@@ -263,7 +312,7 @@ class AVX512BitonicISA(BitonicISA):
 
 #ifdef __GNUC__
 #ifdef __clang__
-#pragma clang attribute push (__attribute__((target("avx512f"))), apply_to = any(function))
+#pragma clang attribute push (__attribute__((target("avx512f,avx512dq,avx512bw"))), apply_to = any(function))
 #else
 #pragma GCC push_options
 #pragma GCC target("avx512f")
@@ -321,6 +370,7 @@ public:
 
         self.clean_print(f"""    static INLINE void sort_01v_{suffix}({g.generate_param_def_list(1)}) {{
         TV  min, s;
+        {g.generate_x1_epi16_shuffle_vec()};
 
         s = {g.generate_shuffle_X1("d01")};
         min = {g.generate_min("s", "d01")};
@@ -346,23 +396,46 @@ public:
         min = {g.generate_min("s", "d01")};
         d01 = {g.generate_blended_max("min", "s", "d01", 0b0101010110101010, 16, asc)};""")
 
-        if g.vector_size() == 16:
+        if g.vector_size() >= 16:
             self.clean_print(f"""
+        s = {g.generate_shuffle_X8("d01")};
+        min = {g.generate_min("s", "d01")};
+        d01 = {g.generate_blended_max("min", "s", "d01", 0b00000000111111111111111100000000, 32, asc)};
+
+        s = {g.generate_shuffle_X4("d01")};
+        min = {g.generate_min("s", "d01")};
+        d01 = {g.generate_blended_max("min", "s", "d01", 0b00001111000011111111000011110000, 32, asc)};
+
+        s = {g.generate_shuffle_X2("d01")};
+        min = {g.generate_min("s", "d01")};
+        d01 = {g.generate_blended_max("min", "s", "d01", 0b00110011001100111100110011001100, 32, asc)};
+
+        s = {g.generate_shuffle_X1("d01")};
+        min = {g.generate_min("s", "d01")};
+        d01 = {g.generate_blended_max("min", "s", "d01", 0b01010101010101011010101010101010, 32, asc)};""")
+
+        if g.vector_size() >= 32:
+            self.clean_print(f"""
+        s = {g.generate_shuffle_X16("d01")};
+        min = {g.generate_min("s", "d01")};
+        d01 = {g.generate_blended_max("min", "s", "d01", 0b11111111111111110000000000000000, 32, asc)};
+
         s = {g.generate_shuffle_X8("d01")};
         min = {g.generate_min("s", "d01")};
         d01 = {g.generate_blended_max("min", "s", "d01", 0b1111111100000000, 16, asc)};
 
         s = {g.generate_shuffle_X4("d01")};
         min = {g.generate_min("s", "d01")};
-        d01 = {g.generate_blended_max("min", "s", "d01", 0b1111000011110000, 16, asc)};
+        d01 = {g.generate_blended_max("min", "s", "d01", 0b11110000, 8, asc)};
 
         s = {g.generate_shuffle_X2("d01")};
         min = {g.generate_min("s", "d01")};
-        d01 = {g.generate_blended_max("min", "s", "d01", 0b1100110011001100, 16, asc)};
+        d01 = {g.generate_blended_max("min", "s", "d01", 0b1100, 4, asc)};
 
         s = {g.generate_shuffle_X1("d01")};
         min = {g.generate_min("s", "d01")};
-        d01 = {g.generate_blended_max("min", "s", "d01", 0b1010101010101010, 16, asc)};""")
+        d01 = {g.generate_blended_max("min", "s", "d01", 0b10, 2, asc)};""")
+
         self.clean_print("    }")
 
     def generate_1v_merge_sorters(self, asc: bool):
@@ -371,9 +444,16 @@ public:
         suffix = "ascending" if asc else "descending"
 
         g.clean_print(f"""    static INLINE void merge_01v_{suffix}({g.generate_param_def_list(1)}) {{
-        TV  min, s;""")
+        TV  min, s;
+        {g.generate_x1_epi16_shuffle_vec()};""")
 
-        if g.vector_size() == 16:
+        if g.vector_size() >= 32:
+            g.clean_print(f"""
+        s = {g.generate_shuffle_X16("d01")};
+        min = {g.generate_min("s", "d01")};
+        d01 = {g.generate_blended_max("min", "s", "d01", 0b11111111111111110000000000000000, 16, asc)};""")
+
+        if g.vector_size() >= 16:
             g.clean_print(f"""
         s = {g.generate_shuffle_X8("d01")};
         min = {g.generate_min("s", "d01")};
@@ -450,7 +530,10 @@ public:
     def generate_reverse(self, v: str):
         t = self.type
         size = self.bitonic_size_map[t]
-        if size == 16:
+        if size == 32:
+            s1 = f"_mm512_shuffle_epi32({self.s2i(v)}, (_MM_PERM_ENUM) 0b00'01'10'11)"
+            return self.i2t(f"_mm512_shuffle_i64x2({s1}, {s1}, (_MM_PERM_ENUM) 0b00'01'10'11)")
+        elif size == 16:
             s1 = f"_mm512_shuffle_epi32({self.s2i(v)}, (_MM_PERM_ENUM) 0b00'01'10'11)"
             return self.i2t(f"_mm512_shuffle_i64x2({s1}, {s1}, (_MM_PERM_ENUM) 0b00'01'10'11)")
         elif size == 8:
@@ -465,8 +548,8 @@ public:
 
         tmp = {g.generate_reverse("d02")};
         d02 = {g.generate_max("d01", "tmp")};
-        d01 = {g.generate_min("d01", "tmp")};
-        }}""")
+        d01 = {g.generate_min("d01", "tmp")};""")
+        g.clean_print("    }")
 
     def generate_strided_min_max(self):
         g = self
@@ -477,8 +560,8 @@ public:
         
         tmp = d01;
         d01 = {g.generate_min("d02", "d01")};
-        d02 = {g.generate_max("d02", "tmp")};
-    }}""")
+        d02 = {g.generate_max("d02", "tmp")};""")
+        g.clean_print("    }")
 
     def generate_entry_points_full_vectors(self, asc: bool):
         type = self.type

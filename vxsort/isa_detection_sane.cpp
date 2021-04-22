@@ -5,7 +5,7 @@
 using namespace cpu_features;
 static const X86Features features = GetX86Info().features;
 static const bool has_avx2 = CPU_FEATURES_COMPILED_X86_AVX2 || features.avx2;
-static const bool has_avx512 = CPU_FEATURES_COMPILED_X86_AVX2 || features.avx512f;
+static const bool has_avx512 = CPU_FEATURES_COMPILED_X86_AVX2 || (features.avx512f && features.avx512bw);
 #elif defined(CPU_FEATURES_ARCH_ARM)
 #include "cpuinfo_arm.h"
 using namespace cpu_features;

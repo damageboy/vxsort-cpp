@@ -55,7 +55,7 @@ class BitonicISA(ABC, metaclass=ABCMeta):
         pass
 
     @abstractmethod
-    def generate_compounded_merger(self, f, width: int, ascending: bool, inline: int):
+    def generate_compounded_merger(self, width: int, ascending: bool, inline: int):
         pass
 
     @abstractmethod

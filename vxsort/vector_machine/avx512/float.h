@@ -27,7 +27,7 @@ class vxsort_machine_traits<float, AVX512> {
     static INLINE void store_vec(TV* ptr, TV v) { _mm512_storeu_ps(ptr, v); }
 
     static TV load_masked_vec(TV *ptr, TV base, TLOADSTOREMASK mask) {
-        return _mm512_mask_loadu_ps(base, mask, (float const *) ptr);
+        return _mm512_mask_loadu_ps(base, mask, (T const *) ptr);
     }
 
     static INLINE void store_masked_vec(TV * p, TV v, TLOADSTOREMASK mask) {

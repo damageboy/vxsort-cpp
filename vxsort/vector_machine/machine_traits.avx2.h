@@ -49,6 +49,7 @@ extern const int8_t perm_table_32[2048];
 #include "avx2/int16_t.h"
 #include "avx2/int32_t.h"
 #include "avx2/int64_t.h"
+#include "avx2/uint16_t.h"
 #include "avx2/uint32_t.h"
 #include "avx2/uint64_t.h"
 }
