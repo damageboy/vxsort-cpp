@@ -13,23 +13,28 @@ using vxsort::vector_machine;
 extern void do_avx2(int *begin, int *end);
 extern void do_avx512(int *begin, int *end);
 
+std::vector<int> generate_random_garbage(const size_t size) {
+
+    auto vec = std::vector<int>(size);
+    std::iota(vec.begin(), vec.end(), 666);
+
+    std::random_device rd;
+    std::mt19937 g(rd());
+
+    std::shuffle(vec.begin(), vec.end(), g);
+    return vec;
+}
+
 int main(int argc, char** argv) {
-    time_t t;
     if (argc != 2) {
-        fprintf(stderr, "demo array size must be sepcificied\n");
+        fprintf(stderr, "demo array size must be specified\n");
         return -1;
     }
 
     const size_t vector_size = atoi(argv[1]);
-    srand((unsigned)time(&t));
+    auto v = generate_random_garbage(vector_size);
 
-    auto* data = static_cast<int32_t*>(malloc(sizeof(int32_t) * vector_size));
-
-    for (size_t i = 0; i < vector_size; i++) {
-            data[i] = rand();
-    }
-
-    const auto begin = data;
+    const auto begin = v.data();
     const auto end = begin + vector_size - 1;
 
 #if defined(CPU_FEATURES_ARCH_X86)
@@ -45,7 +50,7 @@ int main(int argc, char** argv) {
 #endif
 #if defined(CPU_FEATURES_ARCH_AARCH64)
     if (vxsort::supports_vector_machine(vxsort::vector_machine::NEON)) {
-    }
+    } else
 #endif
 
     {
