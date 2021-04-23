@@ -24,6 +24,7 @@ struct bitonic {
     static constexpr T MAX = std::numeric_limits<T>::max();
     typedef typename VM::TV TV;
     static constexpr int N = sizeof(TV) / sizeof(T);
+    static_assert(is_powerof2(N), "vector-size / element-size must be a power of 2");
 
    private:
 
@@ -44,7 +45,7 @@ struct bitonic {
     auto v = length / N;
     // # elements in the last vector
     const int remainder = static_cast<int>(length - v * N);
-    const auto slack_v = (v % 4) + ((remainder > 0) ? 1 : 0);
+    const auto slack_v = (v % 4) + (remainder ? 1 : 0);
 
     // Load/Store mask for the last vector
     const auto mask = VM::generate_remainder_mask(remainder);

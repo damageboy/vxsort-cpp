@@ -55,8 +55,15 @@ void perform_bitonic_sort_test(std::vector<T> V) {
     }
     auto begin = V.data();
     auto size = V.size();
-    vxsort::smallsort::bitonic<T, M>::sort(begin, size);
-    EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
+    {
+        auto v_copy = V;
+
+        vxsort::smallsort::bitonic<T, M>::sort(begin, size);
+
+        std::sort(v_copy.begin(), v_copy.end());
+
+        EXPECT_THAT(V, ElementsAreArray(v_copy));
+    }
 }
 
 

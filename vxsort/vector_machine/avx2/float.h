@@ -8,9 +8,9 @@ class vxsort_machine_traits<float, AVX2> {
     typedef float TPACK;
 
     static const int N = sizeof(TV) / sizeof(T);
+    static_assert(is_powerof2(N), "vector-size / element-size must be a power of 2");
 
     static constexpr bool supports_compress_writes() { return false; }
-
     static constexpr bool supports_packing() { return false; }
 
     template <int Shift>

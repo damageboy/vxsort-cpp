@@ -1,3 +1,4 @@
+
 template <>
 class vxsort_machine_traits<int16_t, AVX2> {
    public:
@@ -9,9 +10,9 @@ class vxsort_machine_traits<int16_t, AVX2> {
     typedef typename std::make_unsigned<T>::type TU;
 
     static const int N = sizeof(TV) / sizeof(T);
+    static_assert(is_powerof2(N), "vector-size / element-size must be a power of 2");
 
     static constexpr bool supports_compress_writes() { return false; }
-
     static constexpr bool supports_packing() { return false; }
 
     template <int Shift>
@@ -21,7 +22,7 @@ class vxsort_machine_traits<int16_t, AVX2> {
         assert(remainder >= 0);
         assert(remainder < N);
 
-        return remainder;
+        return remainder ? remainder : N;
     }
 
     static INLINE TV load_vec(TV* p) { return _mm256_lddqu_si256(p); }
@@ -30,16 +31,17 @@ class vxsort_machine_traits<int16_t, AVX2> {
 
     static void store_compress_vec(TV*, TV, TMASK) { throw std::runtime_error("operation is unsupported"); }
 
+
     static INLINE TV load_masked_vec(TV *p, TV base, TLOADSTOREMASK remainder) {
         // FML: There is only so much AVX2 stupidity one person can
         //      take in their entire lifetime, I'm personally over this crap
-        T fml[N] = {std::numeric_limits<T>::max()};
-
-        memcpy(fml, p, sizeof(T) * remainder);
-        return _mm256_lddqu_si256((TV *) fml);
+        std::array<T, N> max_vec;
+        max_vec.fill(std::numeric_limits<T>::max());
+        std::copy_n(reinterpret_cast<T *>(p), remainder, max_vec.begin());
+        return _mm256_lddqu_si256((TV *)max_vec.data());
     }
 
-    static INLINE  void store_masked_vec(TV *p, TV v, TLOADSTOREMASK remainder) {
+    static INLINE void store_masked_vec(TV *p, TV v, TLOADSTOREMASK remainder) {
         memcpy(p, &v, sizeof(T) * remainder);
     }
 
@@ -49,7 +51,7 @@ class vxsort_machine_traits<int16_t, AVX2> {
         return s2i(_mm256_permutevar8x32_ps(i2s(v), _mm256_cvtepi8_epi32(_mm_loadu_si128((__m128i*)(perm_table_32 + mask * 8)))));
     }
 
-    static INLINE TV broadcast(T pivot) { return _mm256_set1_epi32(pivot); }
+    static INLINE TV broadcast(T pivot) { return _mm256_set1_epi16(pivot); }
 
     static INLINE TMASK get_cmpgt_mask(TV a, TV b) { return _mm256_movemask_ps(i2s(_mm256_cmpgt_epi32(a, b))); }
 

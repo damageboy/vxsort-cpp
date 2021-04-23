@@ -46,6 +46,10 @@
 namespace vxsort {
     template <class... E>
     constexpr bool always_false = false;
+
+    constexpr bool is_powerof2(int v) {
+        return v && ((v & (v - 1)) == 0);
+    }
 }
 
 #endif  // VXSORT_DEFS_H

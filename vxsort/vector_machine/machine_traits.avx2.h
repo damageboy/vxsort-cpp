@@ -3,13 +3,16 @@
 
 #include "vxsort_targets_enable_avx2.h"
 
-#include <immintrin.h>
 #include <stdexcept>
-#include <limits>
-#include <assert.h>
-#include <string.h>
-#include <inttypes.h>
+#include <array>
+#include <algorithm>
 #include <type_traits>
+#include <limits>
+#include <cassert>
+#include <cstring>
+#include <cinttypes>
+#include <immintrin.h>
+
 #include "defs.h"
 #include "machine_traits.h"
 
@@ -38,11 +41,33 @@ const int M16_SIZE = 256 + 8;
 
 extern const uint8_t mask_table_4[M4_SIZE];
 extern const uint8_t mask_table_8[M8_SIZE];
-extern const uint8_t mask_table_16[M16_SIZE];
 
 
 extern const int8_t perm_table_64[128];
 extern const int8_t perm_table_32[2048];
+
+struct __m256_debug {
+public:
+    union {
+        alignas(32) int8_t          i8[32];
+        alignas(32) int16_t        i16[16];
+        alignas(32) int32_t        i32[8];
+        alignas(32) int64_t        i64[4];
+        alignas(32) uint8_t         u8[32];
+        alignas(32) uint16_t       u16[16];
+        alignas(32) uint32_t       u32[8];
+        alignas(32) uint64_t       u64[4];
+        alignas(32) float          f32[8];
+        alignas(32) double         f64[4];
+        alignas(32) __m256i        m256i;
+    };
+
+    __m256_debug(__m256i v) {
+        m256i = v;
+    }
+};
+
+extern __m256_debug to_m256_dbg(__m256i v);
 
 #include "avx2/double.h"
 #include "avx2/float.h"

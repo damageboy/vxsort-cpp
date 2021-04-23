@@ -9,9 +9,9 @@ class vxsort_machine_traits<uint16_t, AVX2> {
     typedef typename std::make_unsigned<T>::type TU;
 
     static const int N = sizeof(TV) / sizeof(T);
+    static_assert(is_powerof2(N), "vector-size / element-size must be a power of 2");
 
     static constexpr bool supports_compress_writes() { return false; }
-
     static constexpr bool supports_packing() { return false; }
 
     template <int Shift>
@@ -33,14 +33,13 @@ class vxsort_machine_traits<uint16_t, AVX2> {
     static INLINE TV load_masked_vec(TV *p, TV base, TLOADSTOREMASK remainder) {
         // FML: There is only so much AVX2 stupidity one person can
         //      take in their entire lifetime, I'm personally over this crap
-        T fml[N] = {std::numeric_limits<T>::max()};
-
-        memcpy(fml, p, sizeof(T) * remainder);
-        return _mm256_lddqu_si256((TV *) fml);
+        T max_vec[N] = {std::numeric_limits<T>::max()};
+        memcpy(reinterpret_cast<void *>(const_cast<T *>(max_vec)), p, sizeof(T) * remainder);
+        return _mm256_lddqu_si256((TV *)max_vec);
     }
 
     static INLINE  void store_masked_vec(TV *p, TV v, TLOADSTOREMASK remainder) {
-        memcpy(p, &v, sizeof(T) * remainder);
+        memcpy(p, &v, sizeof(T) * (N - remainder));
     }
 
     static INLINE TV partition_vector(TV v, int mask) {

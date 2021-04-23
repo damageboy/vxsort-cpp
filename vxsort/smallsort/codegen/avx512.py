@@ -553,7 +553,6 @@ public:
 
     def generate_strided_min_max(self):
         g = self
-        type = self.type
 
         g.clean_print(f"""    static INLINE void strided_min_max(TV& d01, TV& d02) {{
         TV tmp;

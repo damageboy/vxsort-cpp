@@ -9,9 +9,9 @@ class vxsort_machine_traits<int32_t, AVX512> {
     typedef typename std::make_unsigned<T>::type TU;
 
     static const int N = sizeof(TV) / sizeof(T);
+    static_assert(is_powerof2(N), "vector-size / element-size must be a power of 2");
 
     static constexpr bool supports_compress_writes() { return true; }
-
     static constexpr bool supports_packing() { return false; }
 
     template <int Shift>

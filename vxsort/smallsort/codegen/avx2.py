@@ -196,7 +196,8 @@ class AVX2BitonicISA(BitonicISA):
     def generate_reverse(self, v: str):
         size = self.vector_size()
         if size == 16:
-            v = f"_mm256_shuffle_epi32({self.t2i(v)}, 0b00'01'10'11)"
+            v = f"_mm256_shuffle_epi8({self.t2i(v)}, x1)"
+            v = f"_mm256_shuffle_epi32({v}, 0b00'01'10'11)"
             return self.d2t(f"_mm256_permute4x64_pd(i2d({v}), 0b01'00'11'10)")
         if size == 8:
             v = f"_mm256_shuffle_epi32({self.t2i(v)}, 0b00'01'10'11)"
@@ -333,7 +334,7 @@ class AVX2BitonicISA(BitonicISA):
     def generate_x1_epi16_shuffle_vec(self):
         if self.type == "uint16_t" or self.type == "int16_t":
             l1 = 0x0504070601000302
-            l2 = l1 + 0x8080000080800000
+            l2 = l1 + 0x0808080808080808
             return f"const TV x1 = _mm256_set_epi64x(0x{l2:08X}, 0x{l1:08X}, 0x{l2:08X}, 0x{l1:08X})"
 
         return AVX2BitonicISA.REMOVE_ME
@@ -608,34 +609,34 @@ public:
 
     def generate_cross_min_max(self):
         g = self
-        type = self.type
-        maybe_cmp = lambda: ", cmp" if (type == "int64_t" or type == "uint64_t") else ""
-        maybe_topbit = lambda: f"\n        TV topBit = _mm256_set1_epi64x(1LLU << 63);" if (type == "uint64_t") else ""
 
         g.clean_print(f"""    static INLINE void cross_min_max(TV& d01, TV& d02) {{
-        TV tmp{maybe_cmp()};{maybe_topbit()}
+        TV tmp;
+        {g.generate_cmp_var()};
+        {g.generate_topbit_vec()};
+        {g.generate_x1_epi16_shuffle_vec()};
 
         tmp = {g.generate_reverse("d02")};
         {g.crappity_crap_crap("d01", "tmp")}
         d02 = {g.generate_max("d01", "tmp")};        
-        d01 = {g.generate_min("d01", "tmp")};    
-    }}\n""")
+        d01 = {g.generate_min("d01", "tmp")};""")
+        g.clean_print("    }\n")
 
     def generate_strided_min_max(self):
         g = self
-        type = self.type
-        maybe_cmp = lambda: ", cmp" if (type == "int64_t" or type == "uint64_t") else ""
-        maybe_topbit = lambda: f"\n        TV topBit = _mm256_set1_epi64x(1LLU << 63);" if (type == "uint64_t") else ""
 
         g.clean_print(f"""    static INLINE void strided_min_max(TV& dl, TV& dr) {{
-        TV tmp{maybe_cmp()};{maybe_topbit()}
-        
+        TV tmp;
+        {g.generate_cmp_var()};
+        {g.generate_topbit_vec()};
+
         tmp = dl;
         {g.crappity_crap_crap("dr", "dl")}
         dl = {g.generate_min("dr", "dl")};
         {g.crappity_crap_crap("dr", "tmp")}
-        dr = {g.generate_max("dr", "tmp")};
-    }}\n""")
+        dr = {g.generate_max("dr", "tmp")};""")
+        g.clean_print("    }\n")
+
 
     def generate_entry_points_full_vectors(self, asc: bool):
         type = self.type
