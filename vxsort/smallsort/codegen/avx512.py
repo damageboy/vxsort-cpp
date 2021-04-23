@@ -9,25 +9,25 @@ class AVX512BitonicISA(BitonicISA):
     REMOVE_ME = "<<<REMOVE_ME>>>"
 
     bitonic_type_map = {
-        "int16_t":  "__m512i",
-        "uint16_t": "__m512i",
-        "int32_t":  "__m512i",
-        "uint32_t": "__m512i",
-        "float":    "__m512",
-        "int64_t":  "__m512i",
-        "uint64_t": "__m512i",
-        "double":   "__m512d",
+        "i16": "__m512i",
+        "u16": "__m512i",
+        "i32": "__m512i",
+        "u32": "__m512i",
+        "f32": "__m512",
+        "i64": "__m512i",
+        "u64": "__m512i",
+        "f64": "__m512d",
     }
 
     bitonic_mask_map = {
-        "int16_t":  "__mmask32",
-        "uint16_t": "__mmask32",
-        "int32_t":  "__mmask16",
-        "uint32_t": "__mmask16",
-        "float":    "__mmask16",
-        "int64_t":  "__mmask8",
-        "uint64_t": "__mmask8",
-        "double":   "__mmask8",
+        "i16": "__mmask32",
+        "u16": "__mmask32",
+        "i32": "__mmask16",
+        "u32": "__mmask16",
+        "f32": "__mmask16",
+        "i64": "__mmask8",
+        "u64": "__mmask8",
+        "f64": "__mmask8",
     }
 
     def __init__(self, type: str, f_header: IO):
@@ -64,33 +64,33 @@ class AVX512BitonicISA(BitonicISA):
 
     def t2d(self, v):
         t = self.type
-        if t == "double":
+        if t == "f64":
             return v
-        elif t == "float":
+        elif t == "f32":
             return f"i2s({v})"
         return f"i2d({v})"
 
     def i2t(self, v):
         t = self.type
-        if t == "double":
+        if t == "f64":
             return f"i2d({v})"
-        elif t == "float":
+        elif t == "f32":
             return f"i2s({v})"
         return v
 
     def d2i(self, v):
         t = self.type
-        if t == "double":
+        if t == "f64":
             return v
-        elif t == "float":
+        elif t == "f32":
             raise Exception("WTF")
         return f"d2i({v})"
 
     def s2i(self, v):
         t = self.type
-        if t == "double":
+        if t == "f64":
             raise Exception("WTF")
-        elif t == "float":
+        elif t == "f32":
             return f"s2i({v})"
         return v
 
@@ -150,40 +150,40 @@ class AVX512BitonicISA(BitonicISA):
 
     def generate_min(self, v1, v2):
         t = self.type
-        if t == "int16_t":
+        if t == "i16":
             return f"_mm512_min_epi16({v1}, {v2})"
-        elif t == "uint16_t":
+        elif t == "u16":
             return f"_mm512_min_epu16({v1}, {v2})"
-        elif t == "int32_t":
+        elif t == "i32":
             return f"_mm512_min_epi32({v1}, {v2})"
-        elif t == "uint32_t":
+        elif t == "u32":
             return f"_mm512_min_epu32({v1}, {v2})"
-        elif t == "float":
+        elif t == "f32":
             return f"_mm512_min_ps({v1}, {v2})"
-        elif t == "int64_t":
+        elif t == "i64":
             return f"_mm512_min_epi64({v1}, {v2})"
-        elif t == "uint64_t":
+        elif t == "u64":
             return f"_mm512_min_epu64({v1}, {v2})"
-        elif t == "double":
+        elif t == "f64":
             return f"_mm512_min_pd({v1}, {v2})"
 
     def generate_max(self, v1, v2):
         t = self.type
-        if t == "int16_t":
+        if t == "i16":
             return f"_mm512_max_epi16({v1}, {v2})"
-        elif t == "uint16_t":
+        elif t == "u16":
             return f"_mm512_max_epu16({v1}, {v2})"
-        elif t == "int32_t":
+        elif t == "i32":
             return f"_mm512_max_epi32({v1}, {v2})"
-        elif t == "uint32_t":
+        elif t == "u32":
             return f"_mm512_max_epu32({v1}, {v2})"
-        elif t == "float":
+        elif t == "f32":
             return f"_mm512_max_ps({v1}, {v2})"
-        elif t == "int64_t":
+        elif t == "i64":
             return f"_mm512_max_epi64({v1}, {v2})"
-        elif t == "uint64_t":
+        elif t == "u64":
             return f"_mm512_max_epu64({v1}, {v2})"
-        elif t == "double":
+        elif t == "f64":
             return f"_mm512_max_pd({v1}, {v2})"
 
     def generate_mask(self, blend: int, width: int, ascending: bool):
@@ -204,28 +204,28 @@ class AVX512BitonicISA(BitonicISA):
     def generate_blended_max(self, src, v1, v2, blend: int, width: int, ascending: bool):
         mask = self.generate_mask(blend, width, ascending)
         t = self.type
-        if t == "int16_t":
+        if t == "i16":
             return f"_mm512_mask_max_epi16({src}, 0b{mask:032b}, {v1}, {v2})"
-        elif t == "uint16_t":
+        elif t == "u16":
             return f"_mm512_mask_max_epu16({src}, 0b{mask:032b}, {v1}, {v2})"
-        elif t == "int32_t":
+        elif t == "i32":
             return f"_mm512_mask_max_epi32({src}, 0b{mask:016b}, {v1}, {v2})"
-        elif t == "uint32_t":
+        elif t == "u32":
             return f"_mm512_mask_max_epu32({src}, 0b{mask:016b}, {v1}, {v2})"
-        elif t == "float":
+        elif t == "f32":
             return f"_mm512_mask_max_ps({src}, 0b{mask:016b}, {v1}, {v2})"
-        elif t == "int64_t":
+        elif t == "i64":
             return f"_mm512_mask_max_epi64({src}, 0b{mask:08b}, {v1}, {v2})"
-        elif t == "uint64_t":
+        elif t == "u64":
             return f"_mm512_mask_max_epu64({src}, 0b{mask:08b}, {v1}, {v2})"
-        elif t == "double":
+        elif t == "f64":
             return f"_mm512_mask_max_pd({src}, 0b{mask:08b}, {v1}, {v2})"
 
     def get_load_intrinsic(self, v, offset):
         t = self.type
-        if t == "double":
+        if t == "f64":
             return f"_mm512_loadu_pd(({t} const *) ((__m512d const *) {v} + {offset}))"
-        if t == "float":
+        if t == "f32":
             return f"_mm512_loadu_ps(({t} const *) ((__m512 const *) {v} + {offset}))"
         return f"_mm512_loadu_si512((__m512i const *) {v} + {offset});"
 
@@ -244,11 +244,11 @@ class AVX512BitonicISA(BitonicISA):
             int_suffix = "epi16"
             max_value = f"_mm512_set1_epi16(MAX)"
 
-        if t == "double":
+        if t == "f64":
             return f"""_mm512_mask_loadu_pd(_mm512_set1_pd(MAX),
                                            {mask},
                                            ({t} const *) ((__m512d const *) {v} + {offset}))"""
-        elif t == "float":
+        elif t == "f32":
             return f"""_mm512_mask_loadu_ps(_mm512_set1_ps(MAX),
                                            {mask},
                                            ({t} const *) ((__m512 const *) {v} + {offset}))"""
@@ -259,9 +259,9 @@ class AVX512BitonicISA(BitonicISA):
 
     def get_store_intrinsic(self, ptr, offset, value):
         t = self.type
-        if t == "double":
+        if t == "f64":
             return f"_mm512_storeu_pd(({t} *) ((__m512d *)  {ptr} + {offset}), {value})"
-        if t == "float":
+        if t == "f32":
             return f"_mm512_storeu_ps(({t} *) ((__m512 *)  {ptr} + {offset}), {value})"
         return f"_mm512_storeu_si512((__m512i *) {ptr} + {offset}, {value})"
 
@@ -276,14 +276,14 @@ class AVX512BitonicISA(BitonicISA):
         elif self.vector_size() == 32:
             int_suffix = "epi32"
 
-        if t == "double":
+        if t == "f64":
             return f"_mm512_mask_storeu_pd(({t} *) ((__m512d *)  {ptr} + {offset}), {mask}, {value})"
-        if t == "float":
+        if t == "f32":
             return f"_mm512_mask_storeu_ps(({t} *) ((__m512 *)  {ptr} + {offset}), {mask}, {value})"
         return f"_mm512_mask_storeu_{int_suffix}((__m512i *) {ptr} + {offset}, {mask}, {value})"
 
     def generate_x1_epi16_shuffle_vec(self):
-        if self.type == "uint16_t" or self.type == "int16_t":
+        if self.type == "u16" or self.type == "i16":
             l = [None]*8
             l[0] = 0x0504070601000302
             for i in range(1, 8):

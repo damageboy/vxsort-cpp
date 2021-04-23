@@ -2,14 +2,14 @@
 
 #include "BM_smallsort.h"
 
-#include <smallsort/avx512/bitonic_machine.AVX512.double.generated.h>
-#include <smallsort/avx512/bitonic_machine.AVX512.float.generated.h>
-#include <smallsort/avx512/bitonic_machine.AVX512.int16_t.generated.h>
-#include <smallsort/avx512/bitonic_machine.AVX512.int32_t.generated.h>
-#include <smallsort/avx512/bitonic_machine.AVX512.int64_t.generated.h>
-#include <smallsort/avx512/bitonic_machine.AVX512.uint16_t.generated.h>
-#include <smallsort/avx512/bitonic_machine.AVX512.uint32_t.generated.h>
-#include <smallsort/avx512/bitonic_machine.AVX512.uint64_t.generated.h>
+#include <smallsort/avx512/bitonic_machine.AVX512.f64.generated.h>
+#include <smallsort/avx512/bitonic_machine.AVX512.f32.generated.h>
+#include <smallsort/avx512/bitonic_machine.AVX512.i16.generated.h>
+#include <smallsort/avx512/bitonic_machine.AVX512.i32.generated.h>
+#include <smallsort/avx512/bitonic_machine.AVX512.i64.generated.h>
+#include <smallsort/avx512/bitonic_machine.AVX512.u16.generated.h>
+#include <smallsort/avx512/bitonic_machine.AVX512.u32.generated.h>
+#include <smallsort/avx512/bitonic_machine.AVX512.u64.generated.h>
 #include <vector_machine/machine_traits.avx512.h>
 
 using namespace vxsort;

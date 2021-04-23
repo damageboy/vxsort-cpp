@@ -35,7 +35,7 @@ static void BM_stdsort(benchmark::State& state) {
   for (size_t i = 0; i < copies.size(); i++)
     ends[i] = begins[i] + n - 1;
 
-  uint64_t total_cycles = 0;
+  vxsort::u64 total_cycles = 0;
   for (auto _ : state) {
     state.PauseTiming();
     refresh_copies(copies, v);
@@ -48,12 +48,12 @@ static void BM_stdsort(benchmark::State& state) {
   }
 
   state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
-  state.counters["Cycles/N"] = make_cycle_per_n_counter((double) total_cycles / (double) (n * ITERATIONS * state.iterations()));
+  state.counters["Cycles/N"] = make_cycle_per_n_counter((vxsort::f64) total_cycles / (vxsort::f64) (n * ITERATIONS * state.iterations()));
 }
 
-template <class Q, vxsort::vector_machine M, int U>
+template <class Q, vector_machine M, int U>
 static void BM_vxsort(benchmark::State& state) {
-  if (!vxsort::supports_vector_machine(M)) {
+  if (!supports_vector_machine(M)) {
     state.SkipWithError(
         "Current CPU does not support the minimal features for this test");
     return;
@@ -70,9 +70,9 @@ static void BM_vxsort(benchmark::State& state) {
   for (size_t i = 0; i < copies.size(); i++)
     ends[i] = begins[i] + n - 1;
 
-  auto sorter = vxsort::vxsort<Q, M, U>();
+  auto sorter = ::vxsort::vxsort<Q, M, U>();
 
-  uint64_t total_cycles = 0;
+  vxsort::u64 total_cycles = 0;
   for (auto _ : state) {
     state.PauseTiming();
     refresh_copies(copies, v);
@@ -85,15 +85,15 @@ static void BM_vxsort(benchmark::State& state) {
   }
 
   state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
-  state.counters["Cycles/N"] = make_cycle_per_n_counter((double) total_cycles / (double) (n * ITERATIONS * state.iterations()));
+  state.counters["Cycles/N"] = make_cycle_per_n_counter((vxsort::f64) total_cycles / (vxsort::f64) (n * ITERATIONS * state.iterations()));
 }
 
-const int StridedSortSize = 1000000;
-const int64_t StridedSortMinValue = 0x80000000LL;
+const vxsort::i32 StridedSortSize = 1000000;
+const vxsort::i64 StridedSortMinValue = 0x80000000LL;
 
-template <class Q, vxsort::vector_machine M, int U>
+template <class Q, vector_machine M, int U>
 static void BM_vxsort_strided(benchmark::State& state) {
-    if (!vxsort::supports_vector_machine(M)) {
+    if (!supports_vector_machine(M)) {
         state.SkipWithError(
                 "Current CPU does not support the minimal features for this test");
         return;
@@ -114,9 +114,9 @@ static void BM_vxsort_strided(benchmark::State& state) {
     for (size_t i = 0; i < copies.size(); i++)
         ends[i] = begins[i] + n - 1;
 
-    auto sorter = vxsort::vxsort<Q, M, U, 3>();
+    auto sorter = ::vxsort::vxsort<Q, M, U, 3>();
 
-    uint64_t total_cycles = 0;
+    vxsort::u64 total_cycles = 0;
     for (auto _ : state) {
         state.PauseTiming();
         refresh_copies(copies, v);
@@ -129,9 +129,8 @@ static void BM_vxsort_strided(benchmark::State& state) {
     }
 
     state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
-    state.counters["Cycles/N"] = make_cycle_per_n_counter((double) total_cycles / (double) (n * ITERATIONS * state.iterations()));
+    state.counters["Cycles/N"] = make_cycle_per_n_counter((vxsort::f64) total_cycles / (vxsort::f64) (n * ITERATIONS * state.iterations()));
 }
-
 }
 
 #endif  // VXSORT_BM_FULLSORT_H

@@ -4,8 +4,8 @@
 #include "../fixtures.h"
 #include <vector>
 
-#include <smallsort/avx2/bitonic_machine.AVX2.int32_t.generated.h>
-#include <smallsort/avx2/bitonic_machine.AVX2.int64_t.generated.h>
+#include <smallsort/avx2/bitonic_machine.AVX2.i32.generated.h>
+#include <smallsort/avx2/bitonic_machine.AVX2.i64.generated.h>
 #include <smallsort/bitonic_machine.h>
 #include <smallsort/bitonic_sort.h>
 #include <vector_machine/machine_traits.avx2.h>
@@ -24,7 +24,7 @@ using testing::Types;
 
 using vxsort::vector_machine;
 
-static int64_t peters_pointers_of_doom[] = {
+static i64 peters_pointers_of_doom[] = {
 /* 1a8ff59e050 */ 0x1a8df0f4bf8, 0x1a8df0f4c60, 0x1a8df7bfb68, 0x1a8df7c0440, 0x1a8df7c0d00, 0x1a8df7bbdf8, 0x1a8df7bc6d0, 0x1a8df7bcf90, 0x1a8df7bd850, 0x1a8df7be128, 0x1a8df7be9e8, 0x1a8df7bf2a8,
 /* 1a8ff59e0b0 */ 0x1a8df0f4cc8, 0x1a8df7bfc48, 0x1a8df7c0520, 0x1a8df7c0de0, 0x1a8df7bbed8, 0x1a8df7bc7b0, 0x1a8df7bd070, 0x1a8df7bd930, 0x1a8df7be208, 0x1a8df7beac8, 0x1a8df7bf388, 0x1a8df0f4d30,
 /* 1a8ff59e110 */ 0x1a8df7bfd28, 0x1a8df7c0600, 0x1a8df7c0ec0, 0x1a8df7bbfd0, 0x1a8df7bc890, 0x1a8df7bd150, 0x1a8df7bda10, 0x1a8df7be2e8, 0x1a8df7beba8, 0x1a8df7bf468, 0x1a8df0f4d98, 0x1a8df7bfe08,
@@ -49,10 +49,10 @@ static int64_t peters_pointers_of_doom[] = {
 
 
 TEST(PetersCrash, Crash1) {
-    const auto n = sizeof(peters_pointers_of_doom) / sizeof(int64_t);
+    const auto n = sizeof(peters_pointers_of_doom) / sizeof(i64);
     auto begin = peters_pointers_of_doom;
     auto end = begin + n - 1;
-    auto sorter = vxsort::vxsort<int64_t, vector_machine::AVX2>();
+    auto sorter = vxsort::vxsort<i64, vector_machine::AVX2>();
     sorter.sort(begin, end);
 
     EXPECT_THAT(peters_pointers_of_doom, WhenSorted(ElementsAreArray(peters_pointers_of_doom)));
@@ -66,13 +66,13 @@ TEST(PetersCrash, Crash2) {
                PAGE_READWRITE);
   memcpy((void*)desired_pointer, peters_pointers_of_doom,
          sizeof(peters_pointers_of_doom));
-  const auto n = sizeof(peters_pointers_of_doom) / sizeof(int64_t);
-  auto begin = reinterpret_cast<int64_t*>(desired_pointer);
+  const auto n = sizeof(peters_pointers_of_doom) / sizeof(i64);
+  auto begin = reinterpret_cast<i64*>(desired_pointer);
   auto end = begin + n - 1;
-  auto sorter = vxsort::vxsort<int64_t, vector_machine::AVX2>();
+  auto sorter = vxsort::vxsort<i64, vector_machine::AVX2>();
   sorter.sort(begin, end);
 
-  auto result = std::vector<int64_t>(begin, end+1);
+  auto result = std::vector<i64>(begin, end+1);
 
   EXPECT_THAT(result,
               WhenSorted(ElementsAreArray(result)));

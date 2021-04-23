@@ -8,14 +8,14 @@ from bitonic_isa import BitonicISA
 
 class AVX2BitonicISA(BitonicISA):
     bitonic_type_map = {
-        "int16_t":  "__m256i",
-        "uint16_t": "__m256i",
-        "int32_t":  "__m256i",
-        "uint32_t": "__m256i",
-        "float":    "__m256",
-        "int64_t":  "__m256i",
-        "uint64_t": "__m256i",
-        "double":   "__m256d",
+        "i16": "__m256i",
+        "u16": "__m256i",
+        "i32": "__m256i",
+        "u32": "__m256i",
+        "f32": "__m256",
+        "i64": "__m256i",
+        "u64": "__m256i",
+        "f64": "__m256d",
     }
 
     REMOVE_ME = "<<<REMOVE_ME>>>"
@@ -50,33 +50,33 @@ class AVX2BitonicISA(BitonicISA):
 
     def t2d(self, v: str):
         t = self.type
-        if t == "double":
+        if t == "f64":
             return v
-        elif t == "float":
+        elif t == "f32":
             return f"s2d({v})"
         return f"i2d({v})"
 
     def i2t(self, v: str):
         t = self.type
-        if t == "double":
+        if t == "f64":
             return f"i2d({v})"
-        elif t == "float":
+        elif t == "f32":
             return f"i2s({v})"
         return v
 
     def d2t(self, v: str):
         t = self.type
-        if t == "double":
+        if t == "f64":
             return v
-        elif t == "float":
+        elif t == "f32":
             return f"d2s({v})"
         return f"d2i({v})"
 
     def t2i(self, v: str):
         t = self.type
-        if t == "double":
+        if t == "f64":
             return f"d2i({v})"
-        elif t == "float":
+        elif t == "f32":
             return f"s2i({v})"
         return v
 
@@ -208,58 +208,58 @@ class AVX2BitonicISA(BitonicISA):
 
     def crappity_crap_crap(self, v1: str, v2: str):
         t = self.type
-        if t == "int64_t":
+        if t == "i64":
             return f"cmp = _mm256_cmpgt_epi64({v1}, {v2});"
-        elif t == "uint64_t":
+        elif t == "u64":
             return f"cmp = _mm256_cmpgt_epi64(_mm256_xor_si256(topBit, {v1}), _mm256_xor_si256(topBit, {v2}));"
 
         return AVX2BitonicISA.REMOVE_ME
 
     def generate_min(self, v1: str, v2: str):
         t = self.type
-        if t == "int16_t":
+        if t == "i16":
             return f"_mm256_min_epi16({v1}, {v2})"
-        elif t == "uint16_t":
+        elif t == "u16":
             return f"_mm256_min_epu16({v1}, {v2})"
-        elif t == "int32_t":
+        elif t == "i32":
             return f"_mm256_min_epi32({v1}, {v2})"
-        elif t == "uint32_t":
+        elif t == "u32":
             return f"_mm256_min_epu32({v1}, {v2})"
-        elif t == "float":
+        elif t == "f32":
             return f"_mm256_min_ps({v1}, {v2})"
-        elif t == "int64_t":
+        elif t == "i64":
             return self.d2t(f"_mm256_blendv_pd({self.t2d(v1)}, {self.t2d(v2)}, i2d(cmp))")
-        elif t == "uint64_t":
+        elif t == "u64":
             return self.d2t(f"_mm256_blendv_pd({self.t2d(v1)}, {self.t2d(v2)}, i2d(cmp))")
-        elif t == "double":
+        elif t == "f64":
             return f"_mm256_min_pd({v1}, {v2})"
         raise Exception("WTF")
 
     def generate_max(self, v1: str, v2: str):
         t = self.type
-        if t == "int16_t":
+        if t == "i16":
             return f"_mm256_max_epi16({v1}, {v2})"
-        elif t == "uint16_t":
+        elif t == "u16":
             return f"_mm256_max_epu16({v1}, {v2})"
-        elif t == "int32_t":
+        elif t == "i32":
             return f"_mm256_max_epi32({v1}, {v2})"
-        elif t == "uint32_t":
+        elif t == "u32":
             return f"_mm256_max_epu32({v1}, {v2})"
-        elif t == "float":
+        elif t == "f32":
             return f"_mm256_max_ps({v1}, {v2})"
-        elif t == "int64_t":
+        elif t == "i64":
             return self.d2t(f"_mm256_blendv_pd({self.t2d(v2)}, {self.t2d(v1)}, i2d(cmp))")
-        elif t == "uint64_t":
+        elif t == "u64":
             return self.d2t(f"_mm256_blendv_pd({self.t2d(v2)}, {self.t2d(v1)}, i2d(cmp))")
-        elif t == "double":
+        elif t == "f64":
             return f"_mm256_max_pd({v1}, {v2})"
         raise Exception("WTF")
 
     def get_load_intrinsic(self, v: str, offset: int):
         t = self.type
-        if t == "double":
+        if t == "f64":
             return f"_mm256_loadu_pd(({t} const *) ((__m256d const *) {v} + {offset}))"
-        if t == "float":
+        if t == "f32":
             return f"_mm256_loadu_ps(({t} const *) ((__m256 const *) {v} + {offset}))"
         return f"_mm256_lddqu_si256((__m256i const *) {v} + {offset});"
 
@@ -273,17 +273,17 @@ class AVX2BitonicISA(BitonicISA):
             int_suffix = "epi32"
             max_value = f"_mm256_andnot_si256({mask}, _mm256_set1_epi32(MAX))"
 
-        if t == "double":
+        if t == "f64":
             max_value = f"_mm256_andnot_pd(i2d(mask), _mm256_set1_pd(MAX))"
             load = f"_mm256_maskload_pd(({t} const *) ((__m256d const *) {v} + {offset}), {mask})"
             return f"_mm256_or_pd({load}, {max_value})"
-        if t == "float":
+        if t == "f32":
             max_value = f"_mm256_andnot_ps(i2s(mask), _mm256_set1_ps(MAX))"
             load = f"_mm256_maskload_ps(({t} const *) ((__m256 const *) {v} + {offset}), {mask})"
             return f"_mm256_or_ps({load}, {max_value})"
 
 
-        if t == "int64_t" or t == "uint64_t":
+        if t == "i64" or t == "u64":
             it = "long long"
         else:
             it = t[1:] if t[0] == 'u' else t
@@ -293,9 +293,9 @@ class AVX2BitonicISA(BitonicISA):
 
     def get_store_intrinsic(self, ptr, offset, value):
         t = self.type
-        if t == "double":
+        if t == "f64":
             return f"_mm256_storeu_pd(({t} *) ((__m256d *)  {ptr} + {offset}), {value})"
-        if t == "float":
+        if t == "f32":
             return f"_mm256_storeu_ps(({t} *) ((__m256 *)  {ptr} + {offset}), {value})"
         return f"_mm256_storeu_si256((__m256i *) {ptr} + {offset}, {value})"
 
@@ -307,32 +307,32 @@ class AVX2BitonicISA(BitonicISA):
         elif self.vector_size() == 8:
             int_suffix = "epi32"
 
-        if t == "double":
+        if t == "f64":
             return f"_mm256_maskstore_pd(({t} *) ((__m256d *)  {ptr} + {offset}), {mask}, {value})"
-        if t == "float":
+        if t == "f32":
             return f"_mm256_maskstore_ps(({t} *) ((__m256 *)  {ptr} + {offset}), {mask}, {value})"
 
-        if t == "int64_t" or t == "uint64_t":
+        if t == "i64" or t == "u64":
             it = "long long"
         else:
             it = t[1:] if t[0] == 'u' else t;
         return f"_mm256_maskstore_{int_suffix}(({it} *) ((__m256i *) {ptr} + {offset}), {mask}, {value})"
 
     def generate_cmp_var(self):
-        if self.type == "int64_t" or self.type == "uint64_t":
+        if self.type == "i64" or self.type == "u64":
             return "TV cmp"
 
         return AVX2BitonicISA.REMOVE_ME
 
 
     def generate_topbit_vec(self):
-        if self.type == "uint64_t":
+        if self.type == "u64":
             return "const TV topBit = _mm256_set1_epi64x(1LLU << 63)"
 
         return AVX2BitonicISA.REMOVE_ME
 
     def generate_x1_epi16_shuffle_vec(self):
-        if self.type == "uint16_t" or self.type == "int16_t":
+        if self.type == "u16" or self.type == "i16":
             l1 = 0x0504070601000302
             l2 = l1 + 0x0808080808080808
             return f"const TV x1 = _mm256_set_epi64x(0x{l2:08X}, 0x{l1:08X}, 0x{l2:08X}, 0x{l1:08X})"
@@ -341,7 +341,7 @@ class AVX2BitonicISA(BitonicISA):
 
 
     def generate_x1_epi16_blend_vec(self, asc: bool):
-        if self.type == "uint16_t" or self.type == "int16_t":
+        if self.type == "u16" or self.type == "i16":
             l1 = 0x8080000080800000
             l2 = 0x0000808000008080
             if asc:
@@ -533,9 +533,9 @@ public:
     def generate_compounded_sorter(self, width: int, asc: bool, inline: int):
         type = self.type
         g = self
-        maybe_cmp = lambda: ", cmp" if (type == "int64_t" or type == "uint64_t") else ""
+        maybe_cmp = lambda: ", cmp" if (type == "i64" or type == "u64") else ""
         maybe_topbit = lambda: f"\n        TV topBit = _mm256_set1_epi64x(1LLU << 63);" if (
-                type == "uint64_t") else ""
+                type == "u64") else ""
 
         w1 = int(next_power_of_2(width) / 2)
         w2 = int(width - w1)
@@ -579,9 +579,9 @@ public:
     def generate_compounded_merger(self, width: int, asc: bool, inline: int):
         type = self.type
         g = self
-        maybe_cmp = lambda: ", cmp" if (type == "int64_t" or type == "uint64_t") else ""
+        maybe_cmp = lambda: ", cmp" if (type == "i64" or type == "u64") else ""
         maybe_topbit = lambda: f"\n        TV topBit = _mm256_set1_epi64x(1LLU << 63);" if (
-                type == "uint64_t") else ""
+                type == "u64") else ""
 
         w1 = int(next_power_of_2(width) / 2)
         w2 = int(width - w1)

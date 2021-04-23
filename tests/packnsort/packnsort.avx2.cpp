@@ -3,7 +3,7 @@
 #include "gtest/gtest.h"
 #include "../fixtures.h"
 
-#include <smallsort/avx2/bitonic_machine.AVX2.int32_t.generated.h>
+#include <smallsort/avx2/bitonic_machine.AVX2.i32.generated.h>
 #include <smallsort/bitonic_machine.h>
 #include <smallsort/bitonic_sort.h>
 #include <vector_machine/machine_traits.avx2.h>

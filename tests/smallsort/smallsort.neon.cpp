@@ -6,14 +6,14 @@
 
 #include "smallsort_test.h"
 
-//#include <smallsort/neon/bitonic_machine.NEON.double.generated.h>
-//#include <smallsort/neon/bitonic_machine.NEON.float.generated.h>
-//#include <smallsort/neon/bitonic_machine.NEON.int16_t.generated.h>
-#include <smallsort/neon/bitonic_machine.NEON.int32_t.generated.h>
-//#include <smallsort/neon/bitonic_machine.NEON.int64_t.generated.h>
-//#include <smallsort/neon/bitonic_machine.NEON.uint16_t.generated.h>
-//#include <smallsort/neon/bitonic_machine.NEON.uint32_t.generated.h>
-//#include <smallsort/neon/bitonic_machine.NEON.uint64_t.generated.h>
+//#include <smallsort/neon/bitonic_machine.NEON.f64.generated.h>
+//#include <smallsort/neon/bitonic_machine.NEON.f32.generated.h>
+//#include <smallsort/neon/bitonic_machine.NEON.i16.generated.h>
+#include <smallsort/neon/bitonic_machine.NEON.i32.generated.h>
+//#include <smallsort/neon/bitonic_machine.NEON.i64.generated.h>
+//#include <smallsort/neon/bitonic_machine.NEON.u16.generated.h>
+//#include <smallsort/neon/bitonic_machine.NEON.u32.generated.h>
+//#include <smallsort/neon/bitonic_machine.NEON.u64.generated.h>
 //#include <vector_machine/machine_traits.avx2.h>
 
 namespace vxsort_tests {

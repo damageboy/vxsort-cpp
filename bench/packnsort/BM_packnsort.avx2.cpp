@@ -3,8 +3,8 @@
 #include <random>
 #include <benchmark/benchmark.h>
 
-#include <smallsort/avx2/bitonic_machine.AVX2.int32_t.generated.h>
-#include <smallsort/avx2/bitonic_machine.AVX2.int64_t.generated.h>
+#include <smallsort/avx2/bitonic_machine.AVX2.i32.generated.h>
+#include <smallsort/avx2/bitonic_machine.AVX2.i64.generated.h>
 #include <vector_machine/machine_traits.avx2.h>
 
 #include "BM_packnsort.h"
