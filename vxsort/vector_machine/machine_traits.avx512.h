@@ -15,16 +15,15 @@
 #include "machine_traits.h"
 
 namespace vxsort {
-#include "avx512/double.h"
-#include "avx512/float.h"
-#include "avx512/int16_t.h"
-#include "avx512/int32_t.h"
-#include "avx512/int64_t.h"
-#include "avx512/uint16_t.h"
-#include "avx512/uint32_t.h"
-#include "avx512/uint64_t.h"
+#include "avx512/f64.h"
+#include "avx512/f32.h"
+#include "avx512/i16.h"
+#include "avx512/i32.h"
+#include "avx512/i64.h"
+#include "avx512/u16.h"
+#include "avx512/u32.h"
+#include "avx512/u64.h"
 }
 
 #include "vxsort_targets_disable.h"
-
 #endif  // VXSORT_VXSORT_AVX512_H

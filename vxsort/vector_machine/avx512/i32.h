@@ -1,11 +1,11 @@
 template <>
-class vxsort_machine_traits<uint16_t, AVX512> {
+class vxsort_machine_traits<i32, AVX512> {
    public:
-    typedef uint16_t T;
+    typedef i32 T;
     typedef __m512i TV;
-    typedef __mmask32 TLOADSTOREMASK;
-    typedef __mmask32 TMASK;
-    typedef uint16_t TPACK;
+    typedef __mmask16 TLOADSTOREMASK;
+    typedef __mmask16 TMASK;
+    typedef i32 TPACK;
     typedef typename std::make_unsigned<T>::type TU;
 
     static const int N = sizeof(TV) / sizeof(T);
@@ -19,8 +19,8 @@ class vxsort_machine_traits<uint16_t, AVX512> {
 
     static INLINE TLOADSTOREMASK generate_remainder_mask(int remainder) {
         assert(remainder >= 0);
-        assert(remainder <= 32);
-        return  0xFFFFFFFF >> ((N - remainder) & (N-1));
+        assert(remainder <= 16);
+        return  0xFFFF >> ((N - remainder) & (N-1));
     }
 
     static INLINE TV load_vec(TV* p) { return _mm512_loadu_si512(p); }
@@ -28,24 +28,24 @@ class vxsort_machine_traits<uint16_t, AVX512> {
     static INLINE void store_vec(TV* ptr, TV v) { _mm512_storeu_si512(ptr, v); }
 
     static TV load_masked_vec(TV *ptr, TV base, TLOADSTOREMASK mask) {
-        return _mm512_mask_loadu_epi16(base, mask, (T const *) ptr);
+        return _mm512_mask_loadu_epi32(base, mask, (i32 const *) ptr);
     }
 
     static INLINE void store_masked_vec(TV * p, TV v, TLOADSTOREMASK mask) {
-        _mm512_mask_storeu_epi16(p, mask, v);
+        _mm512_mask_storeu_epi32(p, mask, v);
     }
 
     // Will never be called
     static INLINE TV partition_vector(TV v, int mask) { return v; }
 
-    static void store_compress_vec(TV* ptr, TV v, TMASK mask) { _mm512_mask_compressstoreu_epi16(ptr, mask, v); }
+    static void store_compress_vec(TV* ptr, TV v, TMASK mask) { _mm512_mask_compressstoreu_epi32(ptr, mask, v); }
 
-    static INLINE TV broadcast(uint16_t pivot) { return _mm512_set1_epi16(pivot); }
+    static INLINE TV broadcast(T pivot) { return _mm512_set1_epi32(pivot); }
 
-    static INLINE TMASK get_cmpgt_mask(TV a, TV b) { return _mm512_cmp_epu32_mask(a, b, _MM_CMPINT_GT); }
+    static INLINE TMASK get_cmpgt_mask(TV a, TV b) { return _mm512_cmp_epi32_mask(a, b, _MM_CMPINT_GT); }
 
-    static TV shift_right(TV v, int i) { return _mm512_srli_epi16(v, i); }
-    static TV shift_left(TV v, int i) { return _mm512_slli_epi16(v, i); }
+    static TV shift_right(TV v, int i) { return _mm512_srli_epi32(v, i); }
+    static TV shift_left(TV v, int i) { return _mm512_slli_epi32(v, i); }
 
     static INLINE TV add(TV a, TV b) { return _mm512_add_epi32(a, b); }
     static INLINE TV sub(TV a, TV b) { return _mm512_sub_epi32(a, b); };
@@ -69,5 +69,4 @@ class vxsort_machine_traits<uint16_t, AVX512> {
             add = (T) (((TU) add) << Shift);
         return add;
     }
-
 };

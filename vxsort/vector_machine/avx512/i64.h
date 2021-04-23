@@ -1,11 +1,11 @@
 template <>
-class vxsort_machine_traits<int64_t, AVX512> {
+class vxsort_machine_traits<i64, AVX512> {
    public:
-    typedef int64_t T;
+    typedef i64 T;
     typedef __m512i TV;
     typedef __mmask8 TLOADSTOREMASK;
     typedef __mmask8 TMASK;
-    typedef int32_t TPACK;
+    typedef i32 TPACK;
     typedef typename std::make_unsigned<T>::type TU;
 
     static const int N = sizeof(TV) / sizeof(T);
@@ -16,7 +16,7 @@ class vxsort_machine_traits<int64_t, AVX512> {
 
     template <int Shift>
     static constexpr bool can_pack(T span) {
-        const auto PACK_LIMIT = (((TU) std::numeric_limits<uint32_t>::max() + 1)) << Shift;
+        const auto PACK_LIMIT = (((TU) std::numeric_limits<u32>::max() + 1)) << Shift;
         return ((TU) span) < PACK_LIMIT;
     }
 
@@ -31,7 +31,7 @@ class vxsort_machine_traits<int64_t, AVX512> {
     static INLINE void store_vec(TV* ptr, TV v) { _mm512_storeu_si512(ptr, v); }
 
     static INLINE TV load_masked_vec(TV *ptr, TV base, TLOADSTOREMASK mask) {
-        return _mm512_mask_loadu_epi64(base, mask, (int64_t const *) ptr);
+        return _mm512_mask_loadu_epi64(base, mask, (i64 const *) ptr);
     }
 
     static INLINE void store_masked_vec(TV * p, TV v, TLOADSTOREMASK mask) {

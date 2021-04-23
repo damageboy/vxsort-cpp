@@ -4,7 +4,7 @@ class vxsort_machine_traits<float, AVX2> {
     typedef float T;
     typedef __m256 TV;
     typedef __m256i TLOADSTOREMASK;
-    typedef uint32_t TMASK;
+    typedef u32 TMASK;
     typedef float TPACK;
 
     static const int N = sizeof(TV) / sizeof(T);

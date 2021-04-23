@@ -1,11 +1,11 @@
 template <>
-class vxsort_machine_traits<int64_t, AVX2> {
+class vxsort_machine_traits<u64, AVX2> {
    public:
-    typedef int64_t T;
+    typedef u64 T;
     typedef __m256i TV;
     typedef __m256i TLOADSTOREMASK;
-    typedef uint32_t TMASK;
-    typedef int32_t TPACK;
+    typedef u32 TMASK;
+    typedef u32 TPACK;
     typedef typename std::make_unsigned<T>::type TU;
 
     static const int N = sizeof(TV) / sizeof(T);
@@ -16,14 +16,14 @@ class vxsort_machine_traits<int64_t, AVX2> {
 
     template <int Shift>
     static constexpr bool can_pack(T span) {
-        const auto PACK_LIMIT = (((TU) std::numeric_limits<uint32_t>::max() + 1)) << Shift;
+        const auto PACK_LIMIT = (((TU) std::numeric_limits<u32>::max() + 1)) << Shift;
         return ((TU) span) < PACK_LIMIT;
     }
 
     static INLINE TLOADSTOREMASK generate_remainder_mask(int remainder) {
         assert(remainder >= 0);
-        assert(remainder < N);
-        return _mm256_cvtepi8_epi64(_mm_loadu_si128((__m128i*)(mask_table_4 + N * remainder)));
+        assert(remainder < 4);
+        return _mm256_cvtepi8_epi64(_mm_loadu_si128((__m128i*)(mask_table_4 + remainder * N)));
     }
 
     static INLINE TV load_vec(TV* p) { return _mm256_lddqu_si256(p); }
@@ -33,7 +33,7 @@ class vxsort_machine_traits<int64_t, AVX2> {
     static void store_compress_vec(TV*, TV, TMASK) { throw std::runtime_error("operation is unsupported"); }
 
     static INLINE TV load_masked_vec(TV *p, TV base, TLOADSTOREMASK mask) {
-        return _mm256_or_si256(_mm256_maskload_epi64((const long long *) p, mask),
+        return _mm256_or_si256(_mm256_maskload_epi64((long long *) p, mask),
                                _mm256_andnot_si256(mask, base));
     }
 
@@ -46,10 +46,12 @@ class vxsort_machine_traits<int64_t, AVX2> {
         assert(mask <= 15);
         return s2i(_mm256_permutevar8x32_ps(i2s(v), _mm256_cvtepu8_epi32(_mm_loadu_si128((__m128i*)(perm_table_64 + mask * 8)))));
     }
+    static INLINE TV broadcast(i64 pivot) { return _mm256_set1_epi64x(pivot); }
 
-    static INLINE TV broadcast(int64_t pivot) { return _mm256_set1_epi64x(pivot); }
-
-    static INLINE TMASK get_cmpgt_mask(TV a, TV b) { return _mm256_movemask_pd(i2d(_mm256_cmpgt_epi64(a, b))); }
+    static INLINE TMASK get_cmpgt_mask(TV a, TV b) {
+        __m256i top_bit = _mm256_set1_epi64x(1LLU << 63);
+        return _mm256_movemask_pd(i2d(_mm256_cmpgt_epi64(_mm256_xor_si256(top_bit, a), _mm256_xor_si256(top_bit, b))));
+    }
 
     static INLINE TV shift_right(TV v, int i) { return _mm256_srli_epi64(v, i); }
     static INLINE TV shift_left(TV v, int i) { return _mm256_slli_epi64(v, i); }
@@ -72,8 +74,8 @@ class vxsort_machine_traits<int64_t, AVX2> {
         auto p01 = _mm256_extracti128_si256(p, 0);
         auto p02 = _mm256_extracti128_si256(p, 1);
 
-        u1 = _mm256_cvtepi32_epi64(p01);
-        u2 = _mm256_cvtepi32_epi64(p02);
+        u1 = _mm256_cvtepu32_epi64(p01);
+        u2 = _mm256_cvtepu32_epi64(p02);
     }
 
     template <int Shift>

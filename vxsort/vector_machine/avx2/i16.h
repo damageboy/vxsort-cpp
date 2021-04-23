@@ -1,11 +1,11 @@
 template <>
-class vxsort_machine_traits<int32_t, AVX2> {
+class vxsort_machine_traits<i16, AVX2> {
    public:
-    typedef int32_t T;
+    typedef i16 T;
     typedef __m256i TV;
-    typedef __m256i TLOADSTOREMASK;
-    typedef uint32_t TMASK;
-    typedef int32_t TPACK;
+    typedef int TLOADSTOREMASK;
+    typedef u32 TMASK;
+    typedef i16 TPACK;
     typedef typename std::make_unsigned<T>::type TU;
 
     static const int N = sizeof(TV) / sizeof(T);
@@ -20,7 +20,8 @@ class vxsort_machine_traits<int32_t, AVX2> {
     static INLINE TLOADSTOREMASK generate_remainder_mask(int remainder) {
         assert(remainder >= 0);
         assert(remainder < N);
-        return _mm256_cvtepi8_epi32(_mm_loadu_si128((__m128i*)(mask_table_8 + N * remainder)));
+
+        return remainder ? remainder : N;
     }
 
     static INLINE TV load_vec(TV* p) { return _mm256_lddqu_si256(p); }
@@ -29,13 +30,17 @@ class vxsort_machine_traits<int32_t, AVX2> {
 
     static void store_compress_vec(TV*, TV, TMASK) { throw std::runtime_error("operation is unsupported"); }
 
-    static INLINE TV load_masked_vec(TV *p, TV base, TLOADSTOREMASK mask) {
-        return _mm256_or_si256(_mm256_maskload_epi32((int32_t *) p, mask),
-                               _mm256_andnot_si256(mask, base));
+    static INLINE TV load_masked_vec(TV *p, TV base, TLOADSTOREMASK remainder) {
+        // FML: There is only so much AVX2 stupidity one person can
+        //      take in their entire lifetime, I'm personally over this crap
+        std::array<T, N> max_vec;
+        max_vec.fill(std::numeric_limits<T>::max());
+        std::copy_n(reinterpret_cast<T *>(p), remainder, max_vec.begin());
+        return _mm256_lddqu_si256((TV *)max_vec.data());
     }
 
-    static INLINE  void store_masked_vec(TV *p, TV v, TLOADSTOREMASK mask) {
-        _mm256_maskstore_epi32((int32_t *) p, mask, v);
+    static INLINE void store_masked_vec(TV *p, TV v, TLOADSTOREMASK remainder) {
+        memcpy(p, &v, sizeof(T) * remainder);
     }
 
     static INLINE TV partition_vector(TV v, int mask) {
@@ -44,12 +49,12 @@ class vxsort_machine_traits<int32_t, AVX2> {
         return s2i(_mm256_permutevar8x32_ps(i2s(v), _mm256_cvtepi8_epi32(_mm_loadu_si128((__m128i*)(perm_table_32 + mask * 8)))));
     }
 
-    static INLINE TV broadcast(int32_t pivot) { return _mm256_set1_epi32(pivot); }
+    static INLINE TV broadcast(T pivot) { return _mm256_set1_epi16(pivot); }
 
     static INLINE TMASK get_cmpgt_mask(TV a, TV b) { return _mm256_movemask_ps(i2s(_mm256_cmpgt_epi32(a, b))); }
 
-    static TV shift_right(TV v, int i) { return _mm256_srli_epi32(v, i); }
-    static TV shift_left(TV v, int i) { return _mm256_slli_epi32(v, i); }
+    static TV shift_right(TV v, int i) { return _mm256_srli_epi16(v, i); }
+    static TV shift_left(TV v, int i) { return _mm256_slli_epi16(v, i); }
 
     static INLINE TV add(TV a, TV b) { return _mm256_add_epi32(a, b); }
     static INLINE TV sub(TV a, TV b) { return _mm256_sub_epi32(a, b); };

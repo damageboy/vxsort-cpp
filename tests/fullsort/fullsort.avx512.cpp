@@ -15,7 +15,7 @@
 namespace vxsort_tests {
 using testing::Types;
 
-using vxsort::vector_machine;
+using namespace vxsort;
 
 struct FullSortTestAVX512_i32 : public SortWithSlackTest<int32_t> {};
 struct FullSortTestAVX512_ui32 : public SortWithSlackTest<uint32_t> {};

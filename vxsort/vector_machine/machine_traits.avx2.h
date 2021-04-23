@@ -38,12 +38,12 @@ namespace vxsort {
 const int M4_SIZE = 16 + 12;
 const int M8_SIZE = 64 + 8;
 
-extern const uint8_t mask_table_4[M4_SIZE];
-extern const uint8_t mask_table_8[M8_SIZE];
+extern const u8 mask_table_4[M4_SIZE];
+extern const u8 mask_table_8[M8_SIZE];
 
 
-extern const int8_t perm_table_64[128];
-extern const int8_t perm_table_32[2048];
+extern const i8 perm_table_64[128];
+extern const i8 perm_table_32[2048];
 
 struct __m256_debug {
 public:
@@ -68,14 +68,14 @@ public:
 
 extern __m256_debug to_m256_dbg(__m256i v);
 
-#include "avx2/double.h"
-#include "avx2/float.h"
-#include "avx2/int16_t.h"
-#include "avx2/int32_t.h"
-#include "avx2/int64_t.h"
-#include "avx2/uint16_t.h"
-#include "avx2/uint32_t.h"
-#include "avx2/uint64_t.h"
+#include "avx2/f64.h"
+#include "avx2/f32.h"
+#include "avx2/i16.h"
+#include "avx2/i32.h"
+#include "avx2/i64.h"
+#include "avx2/u16.h"
+#include "avx2/u32.h"
+#include "avx2/u64.h"
 }
 
 #undef i2d
@@ -86,6 +86,4 @@ extern __m256_debug to_m256_dbg(__m256i v);
 #undef d2s
 
 #include "vxsort_targets_disable.h"
-
-
 #endif  // VXSORT_VXSORT_AVX2_H
