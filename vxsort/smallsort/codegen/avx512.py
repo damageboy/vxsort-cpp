@@ -531,7 +531,8 @@ public:
         t = self.type
         size = self.bitonic_size_map[t]
         if size == 32:
-            s1 = f"_mm512_shuffle_epi32({self.s2i(v)}, (_MM_PERM_ENUM) 0b00'01'10'11)"
+            s1 = f"_mm512_shuffle_epi8({self.s2i(v)}, x1)"
+            s1 = f"_mm512_shuffle_epi32({s1}, (_MM_PERM_ENUM) 0b00'01'10'11)"
             return self.i2t(f"_mm512_shuffle_i64x2({s1}, {s1}, (_MM_PERM_ENUM) 0b00'01'10'11)")
         elif size == 16:
             s1 = f"_mm512_shuffle_epi32({self.s2i(v)}, (_MM_PERM_ENUM) 0b00'01'10'11)"
@@ -545,6 +546,7 @@ public:
 
         g.clean_print(f"""    static INLINE void cross_min_max(TV& d01, TV& d02) {{
         TV tmp;
+        {g.generate_x1_epi16_shuffle_vec()};
 
         tmp = {g.generate_reverse("d02")};
         d02 = {g.generate_max("d01", "tmp")};

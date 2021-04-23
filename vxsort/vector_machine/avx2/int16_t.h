@@ -1,4 +1,3 @@
-
 template <>
 class vxsort_machine_traits<int16_t, AVX2> {
    public:
@@ -30,7 +29,6 @@ class vxsort_machine_traits<int16_t, AVX2> {
     static INLINE void store_vec(TV* ptr, TV v) { _mm256_storeu_si256(ptr, v); }
 
     static void store_compress_vec(TV*, TV, TMASK) { throw std::runtime_error("operation is unsupported"); }
-
 
     static INLINE TV load_masked_vec(TV *p, TV base, TLOADSTOREMASK remainder) {
         // FML: There is only so much AVX2 stupidity one person can
