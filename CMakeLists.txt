@@ -9,6 +9,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+option (USE_SANITIZERS "Turn on sanitizers" OFF)
+
 # Location of additional cmake modules
 #
 set(CMAKE_MODULE_PATH
@@ -29,7 +31,6 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 
     set(CMAKE_CONFIGURATION_TYPES "Debug;Release;RelWithDebInfo;Stats" CACHE STRING
             "Available build-types: Debug, Release, RelWithDebInfo, Stats")
-
 
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
     "Debug" "Release" "RelWithDebInfo" "Stats")
@@ -65,9 +66,11 @@ else()
         add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Werror=conversion-null>)
     endif()
 
-    #set(SANITIZERS "-fsanitize=address,bounds,alignment,bool,enum,shift,shift-exponent")
+    if (${USE_SANITIZERS})
+        add_compile_options(-fsanitize=address,bounds,alignment,shift,shift-exponent)
+        add_link_options(-fsanitize=address,bounds,alignment,shift,shift-exponent)
+    endif()
 
-    set(CMAKE_CXX_FLAGS_DEBUG   "${SANITIZERS}")
     set(CMAKE_CXX_FLAGS_RELEASE "-O2 -fomit-frame-pointer -DNDEBUG -fsave-optimization-record")
 endif()
 
