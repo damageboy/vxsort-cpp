@@ -13,9 +13,8 @@
 
 #include "BM_fullsort.h"
 
-using namespace vxsort;
-
 namespace vxsort_bench {
+using namespace vxsort::types;
 
 BENCHMARK_TEMPLATE(BM_vxsort, i32, vector_machine::AVX512,  1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
 BENCHMARK_TEMPLATE(BM_vxsort, i32, vector_machine::AVX512,  4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);

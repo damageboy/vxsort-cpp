@@ -12,6 +12,7 @@
 namespace vxsort {
 namespace smallsort {
 using namespace std;
+using namespace vxsort::types;
 
 #ifdef VXSORT_COMPILER_MSVC
 #define __builtin_clzl __lzcnt64
@@ -28,10 +29,9 @@ struct bitonic {
 
    private:
 
-    static INLINE uint64_t closest_pow2(size_t x) {
+    static INLINE u64 closest_pow2(size_t x) {
         return x == 1U ? 1U : 1U<<(64-__builtin_clzl(x-1));
     }
-
 
    public:
     static void sort(T* ptr, size_t length) {
@@ -110,7 +110,7 @@ struct bitonic {
     int half_stride;
 
     const auto max_v = closest_pow2(v);
-    for (uint32_t i = 8; i <= max_v; i *= 2) {
+    for (u32 i = 8; i <= max_v; i *= 2) {
         for (p = p_start; p < p_virtual_end; p += i) {
             half_stride = i / 2;
             p1 = p + half_stride - 1;
@@ -152,7 +152,7 @@ struct bitonic {
 
         const auto half_i = i /2;
 
-        for (int j = half_i; j >= 8; j /= 2) {
+        for (i32 j = half_i; j >= 8; j /= 2) {
             const auto half_stride = j/2;
             for (auto p = p_start; p < p_virtual_end; p += j) {
                 p1 = p;

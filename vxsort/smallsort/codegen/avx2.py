@@ -390,6 +390,7 @@ class AVX2BitonicISA(BitonicISA):
 
 namespace vxsort {{
 namespace smallsort {{
+using namespace vxsort::types;
 
 template<> struct bitonic_machine<{t}, AVX2> {{
     static const int N = {self.vector_size()};

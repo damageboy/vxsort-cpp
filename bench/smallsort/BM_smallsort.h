@@ -10,9 +10,9 @@
 #include "../stolen-cycleclock.h"
 #include "../util.h"
 
-using vxsort::vector_machine;
-
 namespace vxsort_bench {
+using namespace vxsort::types;
+using vxsort::vector_machine;
 
 const auto processor_count = std::thread::hardware_concurrency();
 

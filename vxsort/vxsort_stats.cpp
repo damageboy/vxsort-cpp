@@ -24,28 +24,28 @@ extern void print_all_stats() {
     printf("----------|---------|----------|----------|-------------|--------------|------------|------------|--------------\n");
     for (auto i = 0; i < vxsort_stats_base::last_type; i++) {
         switch (vxsort_stats_base::registered_types[i]) {
-            case INT16:
+            case I16:
                 vxsort_stats<int16_t>::print_stats();
                 break;
-            case UINT16:
+            case U16:
                 vxsort_stats<uint16_t>::print_stats();
                 break;
-            case INT32:
+            case I32:
                 vxsort_stats<int32_t>::print_stats();
                 break;
-            case UINT32:
+            case U32:
                 vxsort_stats<uint32_t>::print_stats();
                 break;
-            case INT64:
+            case I64:
                 vxsort_stats<int64_t>::print_stats();
                 break;
-            case UINT64:
+            case U64:
                 vxsort_stats<uint64_t>::print_stats();
                 break;
-            case FLOAT:
+            case F32:
                 vxsort_stats<float>::print_stats();
                 break;
-            case DOUBLE:
+            case F64:
                 vxsort_stats<double>::print_stats();
                 break;
         }
@@ -55,28 +55,28 @@ extern void print_all_stats() {
 extern void reset_all_stats() {
     for (auto i = 0; i < vxsort_stats_base::last_type; i++) {
         switch (vxsort_stats_base::registered_types[i]) {
-            case INT16:
+            case I16:
                 vxsort_stats<int16_t>::reset();
                 break;
-            case UINT16:
+            case U16:
                 vxsort_stats<uint16_t>::reset();
                 break;
-            case INT32:
+            case I32:
                 vxsort_stats<int32_t>::reset();
                 break;
-            case UINT32:
+            case U32:
                 vxsort_stats<uint32_t>::reset();
                 break;
-            case INT64:
+            case I64:
                 vxsort_stats<int64_t>::reset();
                 break;
-            case UINT64:
+            case U64:
                 vxsort_stats<uint64_t>::reset();
                 break;
-            case FLOAT:
+            case F32:
                 vxsort_stats<float>::reset();
                 break;
-            case DOUBLE:
+            case F64:
                 vxsort_stats<double>::reset();
                 break;
         }

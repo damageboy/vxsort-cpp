@@ -9,9 +9,9 @@
 
 #include "BM_packnsort.h"
 
-using vxsort::vector_machine;
 
 namespace vxsort_bench {
+using vxsort::vector_machine;
 
 BENCHMARK_TEMPLATE(BM_packnvxsort, vector_machine::AVX2, 3,  1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);
 BENCHMARK_TEMPLATE(BM_packnvxsort, vector_machine::AVX2, 3,  4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);

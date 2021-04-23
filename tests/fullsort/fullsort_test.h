@@ -8,7 +8,6 @@
 #include <isa_detection.h>
 #include <vxsort.h>
 
-
 namespace vxsort_tests {
 using testing::ElementsAreArray;
 using testing::ValuesIn;

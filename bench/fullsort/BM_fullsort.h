@@ -10,9 +10,10 @@
 
 #include <vxsort.h>
 
+namespace vxsort_bench {
+using namespace vxsort::types;
 using vxsort::vector_machine;
 
-namespace vxsort_bench {
 const auto processor_count = 1;
 
 static const int MIN_SORT = 256;
@@ -20,7 +21,6 @@ static const int MAX_SORT = 1 << 20;
 
 static const int MIN_STRIDE = 1 << 3;
 static const int MAX_STRIDE = 1 << 27;
-
 
 template <class Q>
 static void BM_stdsort(benchmark::State& state) {

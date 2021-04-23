@@ -12,9 +12,8 @@
 #include <smallsort/avx512/bitonic_machine.AVX512.u64.generated.h>
 #include <vector_machine/machine_traits.avx512.h>
 
-using namespace vxsort;
-
 namespace vxsort_bench {
+using namespace vxsort::types;
 
 BENCHMARK(BM_insertionsort)->DenseRange(4, 64, 4)->Unit(benchmark::kNanosecond);
 

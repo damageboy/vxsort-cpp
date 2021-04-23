@@ -332,6 +332,8 @@ class AVX512BitonicISA(BitonicISA):
 
 namespace vxsort {{
 namespace smallsort {{
+using namespace vxsort::types;
+
 template<> struct bitonic_machine<{t}, AVX512> {{
     static const int N = {self.vector_size()};
     static constexpr {t} MAX = std::numeric_limits<{t}>::max();

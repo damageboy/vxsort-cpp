@@ -1,7 +1,3 @@
-//
-// Created by dans on 6/1/20.
-//
-
 #ifndef VXSORT_MACHINE_TRAITS_AVX512_H
 #define VXSORT_MACHINE_TRAITS_AVX512_H
 
@@ -15,6 +11,8 @@
 #include "machine_traits.h"
 
 namespace vxsort {
+using namespace vxsort::types;
+
 #include "avx512/f64.h"
 #include "avx512/f32.h"
 #include "avx512/i16.h"

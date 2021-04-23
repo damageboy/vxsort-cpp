@@ -11,15 +11,16 @@
 #include "packnsort_test.h"
 
 namespace vxsort_tests {
-using testing::Types;
 
+using testing::Types;
+using vxsort::i64;
 using vxsort::vector_machine;
 
-struct PackNSortTestAVX2_i64 : public SortWithSlackTest<int64_t> {};
+struct PackNSortTestAVX2_i64 : public SortWithSlackTest<i64> {};
 
-auto packed_vxsort_int64_params_avx2  = ValuesIn(SizeAndSlack<int64_t>::generate(10, 1000000, 10, 8, 0x1000, 0x8));
+auto packed_vxsort_i64_params_avx2  = ValuesIn(SizeAndSlack<i64>::generate(10, 1000000, 10, 8, 0x1000, 0x8));
 
-INSTANTIATE_TEST_SUITE_P(FullSort, PackNSortTestAVX2_i64,    packed_vxsort_int64_params_avx2, PrintSizeAndSlack<int64_t>());
+INSTANTIATE_TEST_SUITE_P(FullSort, PackNSortTestAVX2_i64, packed_vxsort_i64_params_avx2, PrintSizeAndSlack<i64>());
 
 TEST_P(PackNSortTestAVX2_i64, VxSortAVX2_1)  { perform_packedvxsort_test< 1, vector_machine::AVX2, 3>(V); }
 TEST_P(PackNSortTestAVX2_i64, VxSortAVX2_2)  { perform_packedvxsort_test< 2, vector_machine::AVX2, 3>(V); }

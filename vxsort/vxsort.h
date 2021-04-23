@@ -29,6 +29,7 @@
 #include <cstdio>
 
 namespace vxsort {
+using namespace vxsort::types;
 
 /**
  * sort primitives, quickly

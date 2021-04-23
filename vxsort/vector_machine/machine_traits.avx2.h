@@ -24,6 +24,7 @@
 #define d2s _mm256_castpd_ps
 
 namespace vxsort {
+using namespace vxsort::types;
 
 // * We might read the last 4 bytes into a 128-bit vector for 64-bit element masking
 // * We might read the last 8 bytes into a 128-bit vector for 32-bit element masking

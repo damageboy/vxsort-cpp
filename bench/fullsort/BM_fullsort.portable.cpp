@@ -4,12 +4,10 @@
 #include "vxsort_targets_enable_avx2.h"
 
 #include "BM_fullsort.h"
-
 #include "../reference/introsort/introsort_orig.h"
 
-using namespace vxsort;
-
 namespace vxsort_bench {
+using namespace vxsort::types;
 
 static void BM_full_introsort(benchmark::State &state) {
   auto n = state.range(0);
@@ -37,7 +35,6 @@ static void BM_full_introsort(benchmark::State &state) {
 
   state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
   state.counters["Cycles/N"] = make_cycle_per_n_counter((f64) total_cycles / (f64) (n * ITERATIONS * state.iterations()));
-
 }
 
 BENCHMARK(BM_full_introsort)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(benchmark::kMillisecond)->ThreadRange(1, processor_count);

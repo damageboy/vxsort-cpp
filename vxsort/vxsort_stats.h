@@ -7,23 +7,22 @@
 #include <cstdint>
 #include <cstdio>
 #include <typeinfo>
-
+#include "defs.h"
 
 using namespace std;
 
 namespace vxsort {
 
 enum vxsort_type {
-    INT16,
-    UINT16,
-    INT32,
-    UINT32,
-    INT64,
-    UINT64,
-    FLOAT,
-    DOUBLE,
+    I16,
+    U16,
+    I32,
+    U32,
+    I64,
+    U64,
+    F32,
+    F64,
 };
-
 
 class vxsort_stats_base
 {
@@ -38,38 +37,38 @@ class vxsort_stats_base
 
     template<typename T>
     static vxsort_type typeid_to_vxsort_type() {
-        if (typeid(T) == typeid(int16_t))
-            return vxsort_type::INT16;
-        else if (typeid(T) == typeid(int32_t))
-            return vxsort_type::INT32;
-        else if (typeid(T) == typeid(int64_t))
-            return vxsort_type::INT64;
+        if (typeid(T) == typeid(i16))
+            return vxsort_type::I16;
+        else if (typeid(T) == typeid(i32))
+            return vxsort_type::I32;
+        else if (typeid(T) == typeid(i64))
+            return vxsort_type::I64;
 
-        if (typeid(T) == typeid(uint16_t))
-            return vxsort_type::UINT16;
-        else if (typeid(T) == typeid(uint32_t))
-            return vxsort_type::UINT32;
-        else if (typeid(T) == typeid(uint64_t))
-            return vxsort_type::UINT64;
+        if (typeid(T) == typeid(u16))
+            return vxsort_type::U16;
+        else if (typeid(T) == typeid(u32))
+            return vxsort_type::U32;
+        else if (typeid(T) == typeid(u64))
+            return vxsort_type::U64;
 
-        if (typeid(T) == typeid(float))
-            return vxsort_type::FLOAT;
-        if (typeid(T) == typeid(double))
-            return vxsort_type::DOUBLE;
+        if (typeid(T) == typeid(f32))
+            return vxsort_type::F32;
+        if (typeid(T) == typeid(f64))
+            return vxsort_type::F64;
 
         throw new std::logic_error("Unsupported type");
     }
 
     static const char *vxsort_type_to_str(const vxsort_type type) {
         switch (type) {
-            case INT16:  return "int16_t";
-            case UINT16: return "uint16_t";
-            case INT32:  return "int32_t";
-            case UINT32: return "uint32_t";
-            case INT64:  return "int64_t";
-            case UINT64: return "uint64_t";
-            case FLOAT:  return "float";
-            case DOUBLE: return "double";
+            case I16: return "i16";
+            case U16: return "u16";
+            case I32: return "i32";
+            case U32: return "u32";
+            case I64: return "i64";
+            case U64: return "u64";
+            case F32: return "f32";
+            case F64: return "f64";
         }
     }
 
