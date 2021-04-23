@@ -14,8 +14,6 @@
 #include "defs.h"
 #include "machine_traits.h"
 
-
-
 namespace vxsort {
 #include "avx512/double.h"
 #include "avx512/float.h"

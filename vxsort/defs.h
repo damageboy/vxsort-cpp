@@ -43,9 +43,22 @@
 #define NOINLINE __attribute__((noinline))
 #endif
 
+#include <cstdint>
+
 namespace vxsort {
     template <class... E>
     constexpr bool always_false = false;
+
+    using i8  = int8_t;
+    using u8  = uint8_t;
+    using i16 = int32_t;
+    using i32 = int32_t;
+    using i64 = int64_t;
+    using u16 = uint16_t;
+    using u32 = uint32_t;
+    using u64 = uint64_t;
+    using f32 = float;
+    using f64 = double;
 
     constexpr bool is_powerof2(int v) {
         return v && ((v & (v - 1)) == 0);
