@@ -25,15 +25,13 @@ set(default_build_type "Release")
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   message(STATUS "Setting build type to '${default_build_type}' as none was specified.")
-  set(CMAKE_BUILD_TYPE "${default_build_type}" CACHE
-      STRING "Choose the type of build." FORCE)
+  set(CMAKE_BUILD_TYPE "${default_build_type}" CACHE STRING "Choose the type of build." FORCE)
   # Set the possible values of build type for cmake-gui
-
-    set(CMAKE_CONFIGURATION_TYPES "Debug;Release;RelWithDebInfo;Stats" CACHE STRING
-            "Available build-types: Debug, Release, RelWithDebInfo, Stats")
+  set(CMAKE_CONFIGURATION_TYPES "Debug;Release;RelWithDebInfo;Stats" CACHE STRING
+      "Available build-types: Debug, Release, RelWithDebInfo, Stats")
 
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
-    "Debug" "Release" "RelWithDebInfo" "Stats")
+               "Debug" "Release" "RelWithDebInfo" "Stats")
 endif()
 
 if (CLR_CMAKE_HOST_WIN32)
@@ -49,17 +47,18 @@ if(MSVC)
     add_link_options($<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:/DEBUG>)
     add_link_options($<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:/STACK:1572864>)
 
-      # Release build specific flags
-      add_link_options($<$<CONFIG:RELEASE>:/OPT:REF>)
-      add_link_options($<$<CONFIG:RELEASE>:/OPT:ICF>)
-      if (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-          add_link_options($<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:/PDBCOMPRESS>)
+    # Release build specific flags
+    add_link_options($<$<CONFIG:RELEASE>:/OPT:REF>)
+    add_link_options($<$<CONFIG:RELEASE>:/OPT:ICF>)
+    if (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        add_link_options($<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:/PDBCOMPRESS>)
         set(CMAKE_STATIC_LINKER_FLAGS_RELEASE "${CMAKE_STATIC_LINKER_FLAGS_RELEASE} /LTCG")
         add_link_options($<$<CONFIG:RELEASE>:/LTCG>)
-      endif()
+    endif()
 else()
     add_compile_options(-g3)
     add_compile_options(-Wall)
+
     if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         add_compile_options(-Wno-null-conversion)
     else()

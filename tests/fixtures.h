@@ -3,9 +3,8 @@
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "stats/vxsort_stats.h"
 #include "util.h"
-#include "vxsort_stats.h"
-
 
 #include <array>
 #include <algorithm>
@@ -25,13 +24,12 @@ struct SortTest : public testing::TestWithParam<int> {
     std::vector<T> V;
 
    public:
-    static constexpr int VectorElements = 32 / sizeof(T);
     virtual void SetUp() {
         // const auto align_to = AlignTo == 0 ? sizeof(T) : AlignTo;
         // auto aligned_ptr = (T *) aligned_alloc(align_to, GetParam() * sizeof(T));
         // V = std::vector<T>(aligned_ptr, aligned_ptr + GetParam());
         V = std::vector<T>(GetParam());
-        generate_unique_ptrs_vec(V, (T)0x1000, (T)0x1);
+        generate_unique_values_vec(V, (T)0x1000, (T)0x1);
     }
     virtual void TearDown() {
         // free(V.data());
@@ -58,6 +56,17 @@ struct SizeAndSlack {
     SizeAndSlack(size_t size, int slack, T first_value, T value_stride, bool randomize)
         : Size(size), Slack(slack), FirstValue(first_value), ValueStride(value_stride), Randomize(randomize) {}
 
+    /**
+     * Generate sorting problems "descriptions"
+     * @param start
+     * @param stop
+     * @param step
+     * @param slack
+     * @param first_value - the smallest value in each test array
+     * @param value_stride - the minimal jump between array elements
+     * @param randomize - should the problem array contents be randomized, defaults to true
+     * @return
+     */
     static std::vector<SizeAndSlack> generate(size_t start, size_t stop, size_t step, int slack, T first_value, T value_stride, bool randomize = true) {
         if (step == 0) {
             throw std::invalid_argument("step for range must be non-zero");
@@ -87,7 +96,7 @@ struct SortWithSlackTest : public testing::TestWithParam<SizeAndSlack<T>> {
         testing::TestWithParam<SizeAndSlack<T>>::SetUp();
         auto p = this->GetParam();
         V = std::vector<T>(p.Size + p.Slack);
-        generate_unique_ptrs_vec(V, p.FirstValue, p.ValueStride, p.Randomize);
+        generate_unique_values_vec(V, p.FirstValue, p.ValueStride, p.Randomize);
     }
     virtual void TearDown() {
 #ifdef VXSORT_STATS
@@ -135,7 +144,7 @@ struct SortWithStrideTest : public testing::TestWithParam<SizeAndStride<T>> {
         testing::TestWithParam<SizeAndStride<T>>::SetUp();
         auto p = this->GetParam();
         V = std::vector<T>(p.Size);
-        generate_unique_ptrs_vec(V, p.FirstValue, p.ValueStride, p.Randomize);
+        generate_unique_values_vec(V, p.FirstValue, p.ValueStride, p.Randomize);
         MinValue = p.FirstValue;
         MaxValue = MinValue + p.Size * p.ValueStride;
         if (MinValue > MaxValue)

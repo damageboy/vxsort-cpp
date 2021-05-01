@@ -14,8 +14,6 @@ enum vector_machine {
     SVE,
 };
 
-
-
 template <typename T, vector_machine M>
 struct vxsort_machine_traits {
    public:
@@ -29,38 +27,38 @@ struct vxsort_machine_traits {
         return false;
     }
 
-    static constexpr bool supports_packing() {
+    static constexpr bool type_supports_packing() {
         static_assert(always_false<TV>, "func must be specialized!");
         return false;
     }
 
     template <int Shift>
-    static constexpr bool can_pack(T span) {
+    static constexpr bool can_pack(T) {
         static_assert(always_false<TV>, "func must be specialized!");
         return false;
     }
 
-    static TV load_vec(TV* ptr) {
+    static TV load_vec(TV*) {
         static_assert(always_false<TV>, "func must be specialized!");
     }
 
-    static TLOADSTOREMASK generate_remainder_mask(int remainder) {
+    static TLOADSTOREMASK generate_remainder_mask(int) {
         static_assert(always_false<TV>, "func must be specialized!");
     }
 
-    static void store_vec(TV* ptr, TV v) {
+    static void store_vec(TV*, TV) {
         static_assert(always_false<TV>, "func must be specialized!");
     }
 
-    static TV load_masked_vec(TV *ptr, TV base, TLOADSTOREMASK mask) {
+    static TV load_masked_vec(TV *, TV, TLOADSTOREMASK) {
         static_assert(always_false<TV>, "func must be specialized!");
     }
 
-    static void store_masked_vec(TV *ptr, TV v, TLOADSTOREMASK mask) {
+    static void store_masked_vec(TV *, TV, TLOADSTOREMASK) {
         static_assert(always_false<TV>, "func must be specialized!");
     }
 
-    static void store_compress_vec(TV* ptr, TV v, TMASK mask) {
+    static void store_compress_vec(TV*, TV, TMASK) {
         static_assert(always_false<TV>, "func must be specialized!");
     }
     static TV partition_vector(TV v, int mask);
@@ -76,25 +74,23 @@ struct vxsort_machine_traits {
     static TV pack_ordered(TV a, TV b);
     static TV pack_unordered(TV a, TV b);
 
-    static void unpack_ordered(TV p, TV& u1, TV& u2) {
+    static void unpack_ordered(TV, TV&, TV&) {
         static_assert(always_false<TV>, "func must be specialized!");
     }
 
     template <int Shift>
-    static T shift_n_sub(T v, T sub) {
+    static T shift_n_sub(T v, T) {
         static_assert(always_false<TV>, "func must be specialized!");
         return v;
     }
 
     template <int Shift>
-    static T unshift_and_add(TPACK from, T add) {
+    static T unshift_and_add(TPACK, T add) {
         static_assert(always_false<TV>, "func must be specialized!");
         return add;
     }
 };
 
 }
-
-
 
 #endif  // VXSORT_MACHINE_TRAITS_H

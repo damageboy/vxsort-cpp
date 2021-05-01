@@ -31,7 +31,7 @@ static void BM_packnvxsort(benchmark::State& state) {
   auto v = std::vector<int64_t>(n);
   const auto ITERATIONS = 10;
 
-  generate_unique_ptrs_vec(v, (int64_t) 0x1000, (int64_t) 1 << Shift);
+  generate_unique_values_vec(v, (int64_t) 0x1000, (int64_t) 1 << Shift);
   auto copies = generate_copies(ITERATIONS, n, v);
   auto begins = generate_array_beginnings(copies);
   auto ends = generate_array_beginnings<int64_t, int32_t>(copies);

@@ -1,11 +1,8 @@
 set(TARGET_NAME ${CMAKE_PROJECT_NAME}_lib)
 
-file(GLOB_RECURSE lib_SRC *.cpp)
-file(GLOB_RECURSE lib_HEADERS *.h)
-
 set(lib_SRC
         isa_detection_sane.cpp
-        vxsort_stats.cpp
+        stats/vxsort_stats.cpp
 )
 
 set(lib_HEADERS
@@ -14,15 +11,15 @@ set(lib_HEADERS
         defs.h
         packer.h
         vxsort.h
-        vxsort_stats.h
+        stats/vxsort_stats.h
         machine_traits.h
         vxsort_targets_disable.h
 )
 
 if (${PROCESSOR_IS_X86})
-    file(GLOB_RECURSE avx2_SRC vector_machine/avx2/*.cpp smallsort/avx2/*.cpp)
-    file(GLOB_RECURSE avx2_HEADERS vector_machine/avx2/*.h smallsort/avx2/*.h)
-    file(GLOB_RECURSE avx512_SRC vector_machine/avx512/*.cpp smallsort/avx512/*.cpp)
+    file(GLOB_RECURSE avx2_SRC       vector_machine/avx2/*.cpp smallsort/avx2/*.cpp)
+    file(GLOB_RECURSE avx2_HEADERS   vector_machine/avx2/*.h smallsort/avx2/*.h)
+    file(GLOB_RECURSE avx512_SRC     vector_machine/avx512/*.cpp smallsort/avx512/*.cpp)
     file(GLOB_RECURSE avx512_HEADERS vector_machine/avx512/*.h smallsort/avx512/*.h)
 
     list(APPEND lib_HEADERS
@@ -43,12 +40,8 @@ if (${PROCESSOR_IS_ARM} OR ${PROCESSOR_IS_AARCH64})
     file(GLOB_RECURSE neon_SRC vector_machine/neon/*.cpp smallsort/neon/*.cpp)
     file(GLOB_RECURSE neon_HEADERS vector_machine/neon/*.h smallsort/neon/*.h)
 
-    list(APPEND lib_HEADERS
-            ${neon_HEADERS}
-    )
-    list(APPEND lib_SRC
-            ${neon_SRC}
-    )
+    list(APPEND lib_HEADERS ${neon_HEADERS})
+    list(APPEND lib_SRC ${neon_SRC})
 endif()
 
 add_library(${TARGET_NAME} STATIC ${lib_SRC} ${lib_HEADERS})

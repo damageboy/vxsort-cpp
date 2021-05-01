@@ -12,7 +12,7 @@ class vxsort_machine_traits<i16, AVX512> {
 
     static constexpr bool supports_compress_writes() { return true; }
 
-    static constexpr bool supports_packing() { return false; }
+    static constexpr bool type_supports_packing() { return false; }
 
     template <int Shift>
     static constexpr bool can_pack(T span) { return false; }

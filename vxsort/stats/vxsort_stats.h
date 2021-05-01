@@ -9,10 +9,10 @@
 #include <typeinfo>
 #include "defs.h"
 
+
 using namespace std;
-
 namespace vxsort {
-
+using namespace vxsort::types;
 enum vxsort_type {
     I16,
     U16,
@@ -32,7 +32,9 @@ class vxsort_stats_base
    protected:
     static void reset()
     {
+#ifdef VXSORT_STATS
         last_type = 0;
+#endif
     }
 
     template<typename T>

@@ -13,7 +13,7 @@ static void BM_full_introsort(benchmark::State &state) {
   auto n = state.range(0);
   auto v = std::vector<i64>(n);
   const auto ITERATIONS = 10;
-  generate_unique_ptrs_vec(v, (i64) 0x1000, (i64) 8);
+  generate_unique_values_vec(v, (i64) 0x1000, (i64) 8);
   auto copies = generate_copies(ITERATIONS, n, v);
   auto begins = generate_array_beginnings(copies);
   auto ends = generate_array_beginnings(copies);

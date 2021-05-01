@@ -18,8 +18,8 @@ using namespace vxsort::types;
 
 BENCHMARK(BM_insertionsort)->DenseRange(4, 64, 4)->Unit(benchmark::kNanosecond);
 
-BENCHMARK_TEMPLATE(BM_bitonic_sort, i16, vector_machine::AVX2)->DenseRange(8, 4096, 8)->Unit(benchmark::kNanosecond);
-BENCHMARK_TEMPLATE(BM_bitonic_sort, u16, vector_machine::AVX2)->DenseRange(8, 4096, 8)->Unit(benchmark::kNanosecond);
+BENCHMARK_TEMPLATE(BM_bitonic_sort, i16, vector_machine::AVX2)->DenseRange(16, 4096, 8)->Unit(benchmark::kNanosecond);
+BENCHMARK_TEMPLATE(BM_bitonic_sort, u16, vector_machine::AVX2)->DenseRange(16, 4096, 8)->Unit(benchmark::kNanosecond);
 BENCHMARK_TEMPLATE(BM_bitonic_sort, i32, vector_machine::AVX2)->DenseRange(4, 2048, 4)->Unit(benchmark::kNanosecond);
 BENCHMARK_TEMPLATE(BM_bitonic_sort, u32, vector_machine::AVX2)->DenseRange(4, 2048, 4)->Unit(benchmark::kNanosecond);
 BENCHMARK_TEMPLATE(BM_bitonic_sort, f32, vector_machine::AVX2)->DenseRange(4, 2048, 4)->Unit(benchmark::kNanosecond);

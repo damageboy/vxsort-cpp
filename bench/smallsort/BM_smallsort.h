@@ -20,7 +20,7 @@ static void BM_insertionsort(benchmark::State& state) {
   static const int ITERATIONS = 1024;
   auto n = state.range(0);
   auto v = std::vector<int64_t>(n);
-  generate_unique_ptrs_vec(v, (int64_t)0x1000, (int64_t) 8);
+  generate_unique_values_vec(v, (int64_t)0x1000, (int64_t) 8);
 
   auto copies = generate_copies(ITERATIONS, n, v);
   auto begins = generate_array_beginnings(copies);
@@ -55,7 +55,7 @@ static void BM_bitonic_sort(benchmark::State& state) {
   static const int ITERATIONS = 1024;
   auto n = state.range(0);
   auto v = std::vector<Q>(n);
-  generate_unique_ptrs_vec(v, (Q) 0x1000, (Q) 0x8);
+  generate_unique_values_vec(v, (Q) 0x1000, (Q) 0x8);
 
   auto copies = generate_copies(ITERATIONS, n, v);
   auto begins = generate_array_beginnings(copies);

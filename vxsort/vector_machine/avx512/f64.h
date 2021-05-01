@@ -11,7 +11,7 @@ class vxsort_machine_traits<double, AVX512> {
     static_assert(is_powerof2(N), "vector-size / element-size must be a power of 2");
 
     static constexpr bool supports_compress_writes() { return true; }
-    static constexpr bool supports_packing() { return false; }
+    static constexpr bool type_supports_packing() { return false; }
 
     template <int Shift>
     static constexpr bool can_pack(T) { return false; }

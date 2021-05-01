@@ -17,16 +17,14 @@ Counter make_time_per_n_counter(int64_t n);
 Counter make_cycle_per_n_counter(double n);
 
 template <typename T>
-extern void generate_unique_ptrs_vec(std::vector<T>& vec, T start, T stride) {
-
+extern void generate_unique_values_vec(std::vector<T>& vec, T start, T stride) {
     for (size_t i = 0; i < vec.size(); i++, start += stride)
         vec[i] = start;
 
+    std::random_device rd;
+    std::mt19937 g(rd());
 
-  std::random_device rd;
-  std::mt19937 g(rd());
-
-  std::shuffle(vec.begin(), vec.end(), g);
+    std::shuffle(vec.begin(), vec.end(), g);
 }
 
 template <typename T, typename U=T>

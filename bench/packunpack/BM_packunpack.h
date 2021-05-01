@@ -31,7 +31,7 @@ static void BM_pack(benchmark::State& state) {
   static const int ITERATIONS = 10;
   auto n = state.range(0);
   auto v = std::vector<Q1>(n);
-  generate_unique_ptrs_vec(v, (Q1) 0x1000L, (Q1) 1<<Shift);
+  generate_unique_values_vec(v, (Q1) 0x1000L, (Q1) 1<<Shift);
 
   auto copies = generate_copies(ITERATIONS, n, v);
   auto begins = generate_array_beginnings(copies);
@@ -63,7 +63,7 @@ static void BM_unpack(benchmark::State& state) {
     static const int ITERATIONS = 10;
     auto n = state.range(0);
     auto v = std::vector<Q1>(n);
-    generate_unique_ptrs_vec(v, (Q1) 0x1000L, (Q1) 1<<Shift);
+    generate_unique_values_vec(v, (Q1) 0x1000L, (Q1) 1<<Shift);
 
     // Do one packing
     vxsort::packer<Q1, Q2, M, Shift, Unroll, MIN_PACKUNPACK>::pack(v.data(), n, 0x1000);

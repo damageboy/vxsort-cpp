@@ -7,7 +7,7 @@
 #include <random>
 
 template <typename T>
-void generate_unique_ptrs_vec(std::vector<T>& vec, T start, T stride=0x1, bool randomize = true) {
+void generate_unique_values_vec(std::vector<T>& vec, T start, T stride= 0x1, bool randomize = true) {
   for (size_t i = 0; i < vec.size(); i++) {
     vec[i] = start;
     start += stride;
