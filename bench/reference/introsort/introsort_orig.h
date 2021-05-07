@@ -105,7 +105,7 @@ class introsort_orig {
     *(lo + i - 1) = d;
   }
 };
-}  // namespace gcsort
+}  // namespace vxsort
 
 extern "C" void sort_introsort(uint8_t** begin, uint8_t** end);
 

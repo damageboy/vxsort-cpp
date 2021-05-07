@@ -25,7 +25,7 @@ static const int MAX_STRIDE = 1 << 27;
 template <class Q>
 static void BM_stdsort(benchmark::State& state) {
   auto n = state.range(0);
-  auto v = std::vector<Q>(n);
+  auto v = std::vector<Q>((i32) n);
   const auto ITERATIONS = 10;
 
   generate_unique_values_vec(v, (Q) 0x1000, (Q) 8);
@@ -60,7 +60,7 @@ static void BM_vxsort(benchmark::State& state) {
   }
 
   auto n = state.range(0);
-  auto v = std::vector<Q>(n);
+  auto v = std::vector<Q>((i32)n);
   const auto ITERATIONS = 10;
 
   generate_unique_values_vec(v, (Q) 0x1000, (Q) 0x8);
@@ -72,7 +72,7 @@ static void BM_vxsort(benchmark::State& state) {
 
   auto sorter = ::vxsort::vxsort<Q, M, U>();
 
-  vxsort::u64 total_cycles = 0;
+  u64 total_cycles = 0;
   for (auto _ : state) {
     state.PauseTiming();
     refresh_copies(copies, v);
@@ -85,11 +85,11 @@ static void BM_vxsort(benchmark::State& state) {
   }
 
   state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
-  state.counters["Cycles/N"] = make_cycle_per_n_counter((vxsort::f64) total_cycles / (vxsort::f64) (n * ITERATIONS * state.iterations()));
+  state.counters["Cycles/N"] = make_cycle_per_n_counter((f64) total_cycles / (f64) (n * ITERATIONS * state.iterations()));
 }
 
-const vxsort::i32 StridedSortSize = 1000000;
-const vxsort::i64 StridedSortMinValue = 0x80000000LL;
+const i32 StridedSortSize = 1000000;
+const i64 StridedSortMinValue = 0x80000000LL;
 
 template <class Q, vector_machine M, int U>
 static void BM_vxsort_strided(benchmark::State& state) {
@@ -116,7 +116,7 @@ static void BM_vxsort_strided(benchmark::State& state) {
 
     auto sorter = ::vxsort::vxsort<Q, M, U, 3>();
 
-    vxsort::u64 total_cycles = 0;
+    u64 total_cycles = 0;
     for (auto _ : state) {
         state.PauseTiming();
         refresh_copies(copies, v);
@@ -129,7 +129,7 @@ static void BM_vxsort_strided(benchmark::State& state) {
     }
 
     state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
-    state.counters["Cycles/N"] = make_cycle_per_n_counter((vxsort::f64) total_cycles / (vxsort::f64) (n * ITERATIONS * state.iterations()));
+    state.counters["Cycles/N"] = make_cycle_per_n_counter((f64) total_cycles / (f64) (n * ITERATIONS * state.iterations()));
 }
 }
 

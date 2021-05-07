@@ -2,14 +2,7 @@
 
 #include "BM_smallsort.h"
 
-#include <smallsort/avx2/bitonic_machine.AVX2.f64.generated.h>
-#include <smallsort/avx2/bitonic_machine.AVX2.f32.generated.h>
-#include <smallsort/avx2/bitonic_machine.AVX2.i16.generated.h>
-#include <smallsort/avx2/bitonic_machine.AVX2.i32.generated.h>
-#include <smallsort/avx2/bitonic_machine.AVX2.i64.generated.h>
-#include <smallsort/avx2/bitonic_machine.AVX2.u16.generated.h>
-#include <smallsort/avx2/bitonic_machine.AVX2.u32.generated.h>
-#include <smallsort/avx2/bitonic_machine.AVX2.u64.generated.h>
+#include <smallsort/avx2/bitonic_machine.AVX2.h>
 #include <vector_machine/machine_traits.avx2.h>
 
 

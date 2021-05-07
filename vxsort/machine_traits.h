@@ -16,7 +16,7 @@ enum vector_machine {
 
 template <typename T, vector_machine M>
 struct vxsort_machine_traits {
-   public:
+public:
     typedef T TV;
     typedef T TLOADSTOREMASK;
     typedef T TMASK;

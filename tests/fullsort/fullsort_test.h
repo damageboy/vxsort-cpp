@@ -14,11 +14,11 @@ using testing::ValuesIn;
 using testing::WhenSorted;
 using testing::Types;
 
-using vxsort::vector_machine;
+using ::vxsort::vector_machine;
 
 template <class T, int Unroll, vector_machine M>
 void perform_vxsort_test(std::vector<T> V) {
-  if (!vxsort::supports_vector_machine(M)) {
+  if (!::vxsort::supports_vector_machine(M)) {
     GTEST_SKIP_(
         "Current CPU does not support the minimal features for this test");
     return;
@@ -26,7 +26,7 @@ void perform_vxsort_test(std::vector<T> V) {
   auto begin = V.data();
   auto end = V.data() + V.size() - 1;
 
-  auto sorter = vxsort::vxsort<T, M, Unroll>();
+  auto sorter = ::vxsort::vxsort<T, M, Unroll>();
   sorter.sort(begin, end);
 
   EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
@@ -40,7 +40,7 @@ void perform_vxsort_hinted_test(std::vector<T> V, T min_value, T max_value, int 
     for (auto i = 0; i < loops; i++) {
         auto copy = std::vector<T>(V.size()) = V;
         std::shuffle(copy.begin(), copy.end(), g);
-        if (!vxsort::supports_vector_machine(M)) {
+        if (!::vxsort::supports_vector_machine(M)) {
             GTEST_SKIP_(
                     "Current CPU does not support the minimal features for this test");
             return;
@@ -48,7 +48,7 @@ void perform_vxsort_hinted_test(std::vector<T> V, T min_value, T max_value, int 
         auto begin = copy.data();
         auto end = copy.data() + copy.size() - 1;
 
-        auto sorter = vxsort::vxsort<T, M, Unroll, Shift>();
+        auto sorter = ::vxsort::vxsort<T, M, Unroll, Shift>();
         sorter.sort(begin, end, min_value, max_value);
 
         EXPECT_THAT(copy, WhenSorted(ElementsAreArray(copy)));

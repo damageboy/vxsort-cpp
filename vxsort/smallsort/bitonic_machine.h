@@ -11,7 +11,7 @@ using namespace std;
 
 template <typename T, vector_machine M>
 struct bitonic_machine {
- public:
+public:
     typedef T TV;
     typedef T TMASK;
 
@@ -21,5 +21,5 @@ struct bitonic_machine {
     static INLINE void strided_min_max(TV& d01, TV& d02);
 };
 }  // namespace smallsort
-}  // namespace gcsort
+}  // namespace vxsort
 #endif

@@ -1,6 +1,6 @@
 template <>
 class vxsort_machine_traits<float, AVX2> {
-   public:
+public:
     typedef float T;
     typedef __m256 TV;
     typedef __m256i TLOADSTOREMASK;

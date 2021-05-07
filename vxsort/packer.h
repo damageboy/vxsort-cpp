@@ -55,7 +55,7 @@ class packer {
         }
     }
 
-   public:
+public:
 
     static void pack(TFrom *mem, std::size_t len, TFrom base) {
         TFrom offset = MT::template shift_n_sub<Shift>(base, (TFrom) std::numeric_limits<TTo>::min());
@@ -162,11 +162,10 @@ class packer {
         auto baseVec = MT::broadcast(offset);
 
         auto mem_read = mem + len;
-        auto mem_write = ((TFrom *) mem) + len;
+        auto mem_write = reinterpret_cast<TFrom*>(mem) + len;
 
 
-        // Include a "special" pass to handle very short scalar
-        // passers
+        // Include a "special" pass to handle very short lengths
         if (MinLength < 2 * N && len < 2 * N) {
             while (len--) {
                 *(--mem_write) = MT::template unshift_and_add<Shift>(*(--mem_read), offset);
@@ -244,9 +243,9 @@ class packer {
                 MT::store_vec(memv_write + 0, u01);
                 MT::store_vec(memv_write + 1, u02);
 
-                memv_read--;
+                --memv_read;
                 memv_write -= 2;
-                lenv--;
+                --lenv;
             }
         }
 

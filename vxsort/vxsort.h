@@ -307,9 +307,8 @@ private:
                 auto packed_sorter = vxsort<TPACK, M, Unroll>();
                 packed_sorter.sort(left_packed, left_packed + left_length - 1);
                 packed_sorter.sort(right_packed + 1 - right_length, right_packed);
-                //vectorized_unpack_from_edge<Left, 2>(left_packed, left_length, left_hint);
-                //vectorized_unpack_from_edge<Right, 2>(right_packed, right_length, left_hint);
-                //packer<T, TPACK, M, Shift, 2, SMALL_SORT_THRESHOLD_ELEMENTS>::unpack((TPACK *) left, length, left_hint);
+                vectorized_unpack_backward<2>(left_packed, left_length, left_hint);
+                vectorized_unpack_forward<2>(right_packed, right_length, left_hint);
                 return;
             }
         }
@@ -429,7 +428,7 @@ private:
         *right = std::numeric_limits<T>::max();
 
         // Broadcast the selected pivot
-        const TV P = VM::broadcast(pivot);
+        const auto P = VM::broadcast(pivot);
 
         auto read_left = left;
         auto read_right = right;
@@ -509,32 +508,32 @@ private:
             TV d01, d02, d03, d04, d05, d06, d07, d08, d09, d10, d11, d12;
 
             switch (InnerUnroll) {
-                case 12: d12 = VM::load_vec(nextPtr + InnerUnroll - 12);
-                case 11: d11 = VM::load_vec(nextPtr + InnerUnroll - 11);
-                case 10: d10 = VM::load_vec(nextPtr + InnerUnroll - 10);
-                case  9: d09 = VM::load_vec(nextPtr + InnerUnroll -  9);
-                case  8: d08 = VM::load_vec(nextPtr + InnerUnroll -  8);
-                case  7: d07 = VM::load_vec(nextPtr + InnerUnroll -  7);
-                case  6: d06 = VM::load_vec(nextPtr + InnerUnroll -  6);
-                case  5: d05 = VM::load_vec(nextPtr + InnerUnroll -  5);
-                case  4: d04 = VM::load_vec(nextPtr + InnerUnroll -  4);
-                case  3: d03 = VM::load_vec(nextPtr + InnerUnroll -  3);
-                case  2: d02 = VM::load_vec(nextPtr + InnerUnroll -  2);
+                case 12: d12 = VM::load_vec(nextPtr + InnerUnroll - 12); [[fallthrough]];
+                case 11: d11 = VM::load_vec(nextPtr + InnerUnroll - 11); [[fallthrough]];
+                case 10: d10 = VM::load_vec(nextPtr + InnerUnroll - 10); [[fallthrough]];
+                case  9: d09 = VM::load_vec(nextPtr + InnerUnroll -  9); [[fallthrough]];
+                case  8: d08 = VM::load_vec(nextPtr + InnerUnroll -  8); [[fallthrough]];
+                case  7: d07 = VM::load_vec(nextPtr + InnerUnroll -  7); [[fallthrough]];
+                case  6: d06 = VM::load_vec(nextPtr + InnerUnroll -  6); [[fallthrough]];
+                case  5: d05 = VM::load_vec(nextPtr + InnerUnroll -  5); [[fallthrough]];
+                case  4: d04 = VM::load_vec(nextPtr + InnerUnroll -  4); [[fallthrough]];
+                case  3: d03 = VM::load_vec(nextPtr + InnerUnroll -  3); [[fallthrough]]; 
+                case  2: d02 = VM::load_vec(nextPtr + InnerUnroll -  2); [[fallthrough]];
                 case  1: d01 = VM::load_vec(nextPtr + InnerUnroll -  1);
             }
 
             switch (InnerUnroll) {
-                case 12: partition_block(d12, P, write_left, write_right);
-                case 11: partition_block(d11, P, write_left, write_right);
-                case 10: partition_block(d10, P, write_left, write_right);
-                case  9: partition_block(d09, P, write_left, write_right);
-                case  8: partition_block(d08, P, write_left, write_right);
-                case  7: partition_block(d07, P, write_left, write_right);
-                case  6: partition_block(d06, P, write_left, write_right);
-                case  5: partition_block(d05, P, write_left, write_right);
-                case  4: partition_block(d04, P, write_left, write_right);
-                case  3: partition_block(d03, P, write_left, write_right);
-                case  2: partition_block(d02, P, write_left, write_right);
+                case 12: partition_block(d12, P, write_left, write_right); [[fallthrough]];
+                case 11: partition_block(d11, P, write_left, write_right); [[fallthrough]]; 
+                case 10: partition_block(d10, P, write_left, write_right); [[fallthrough]];
+                case  9: partition_block(d09, P, write_left, write_right); [[fallthrough]];
+                case  8: partition_block(d08, P, write_left, write_right); [[fallthrough]];
+                case  7: partition_block(d07, P, write_left, write_right); [[fallthrough]];
+                case  6: partition_block(d06, P, write_left, write_right); [[fallthrough]];
+                case  5: partition_block(d05, P, write_left, write_right); [[fallthrough]];
+                case  4: partition_block(d04, P, write_left, write_right); [[fallthrough]];
+                case  3: partition_block(d03, P, write_left, write_right); [[fallthrough]];
+                case  2: partition_block(d02, P, write_left, write_right); [[fallthrough]];
                 case  1: partition_block(d01, P, write_left, write_right);
             }
         }
@@ -542,7 +541,7 @@ private:
         read_right_v += (InnerUnroll - 1);
 
         while (read_left_v <= read_right_v) {
-          if (write_right - (T *)read_right_v < N) {
+            if (write_right - (T *)read_right_v < N) {
                 nextPtr = read_right_v;
                 read_right_v -= 1;
             } else {
@@ -580,13 +579,13 @@ private:
     /// \param right - pointer (inclusive) to the right edge of the partition.
     ///                Note: as part of the internal convention, this points
     ///                      to where the pivot for this call is stored.
-    /// \param base - the base value to subtract from each value before performing
+    /// \param min_bounding - the base value to subtract from each value before performing
     ///               the packing
     /// \param hint - a (partially) cache hint used to communicate where the
     ///               the nearest vector-alignment left+right of the partition
     ///               is situated.
     /// \return A pointer to the new location
-    size_t vectorized_packed_partition(T* const left, T* const right, T base, const AH hint) {
+    size_t vectorized_packed_partition(T* const left, T* const right, T min_bounding, const AH hint) {
         assert(right - left >= SMALL_SORT_THRESHOLD_ELEMENTS);
         assert((reinterpret_cast<size_t>(left) & ELEMENT_ALIGN) == 0);
         assert((reinterpret_cast<size_t>(right) & ELEMENT_ALIGN) == 0);
@@ -599,11 +598,11 @@ private:
         *right = std::numeric_limits<T>::max();
 
         // Broadcast the selected pivot
-        const TV P = VM::broadcast(pivot);
+        const auto P = VM::broadcast(pivot);
         // Create a vectorized version of the offset by which we need to
         // correct the data before packing it
-        T offset = VM::template shift_n_sub<Shift>(base, (T) std::numeric_limits<TPACK>::min());
-        const TV base_v = VM::broadcast(offset);
+        auto offset = VM::template shift_n_sub<Shift>(min_bounding, static_cast<T>(std::numeric_limits<TPACK>::min()));
+        const TV offset_v = VM::broadcast(offset);
 
         auto* read_left = left;
         auto* read_right = right;
@@ -633,8 +632,7 @@ private:
 
         if (right_align < 0) {
             tmp_right += N;
-            read_right =
-                align_right_scalar_uncommon(read_right, pivot, tmp_left, tmp_right);
+            read_right = align_right_scalar_uncommon(read_right, pivot, tmp_left, tmp_right);
             tmp_right -= N;
         }
 
@@ -680,8 +678,8 @@ private:
                 dl = VM::shift_right(dl, Shift);
                 dr = VM::shift_right(dr, Shift);
             }
-            dl = VM::sub(dl, base_v);
-            dr = VM::sub(dr, base_v);
+            dl = VM::sub(dl, offset_v);
+            dr = VM::sub(dr, offset_v);
 
             auto packed_data = VM::pack_unordered(dl, dr);
 
@@ -728,15 +726,15 @@ private:
         }
     }
 
-    template<UnpackDirection Dir, int UnpackUnroll>
-    void vectorized_unpack_from_edge(TPACK* const mem, size_t len, T base) {
+    template<int UnpackUnroll>
+    void vectorized_unpack_backward(TPACK* const mem, size_t len, T base) {
         T offset = VM::template shift_n_sub<Shift>(base, (T) std::numeric_limits<TPACK>::min());
         auto baseVec = VM::broadcast(offset);
 
         auto mem_read = mem + len;
-        auto mem_write = ((T *) mem) + len;
+        auto mem_write = reinterpret_cast<T*>(mem) + len;
 
-        auto pre_aligned_mem = reinterpret_cast<TPACK *>(reinterpret_cast<size_t>(mem_read) & ~ALIGN_MASK);
+        auto pre_aligned_mem = reinterpret_cast<TPACK *>(reinterpret_cast<uintptr_t>(mem_read) & ~ALIGN_MASK);
 
         if (pre_aligned_mem < mem_read) {
             len -= (mem_read - pre_aligned_mem);
@@ -748,16 +746,14 @@ private:
         assert(AH::is_aligned(mem_read));
 
         auto lenv = len / (N * 2);
-        auto memv_read = ((TV *) mem_read) - 1;
-        auto memv_write = ((TV *) mem_write) - 2;
+        auto memv_read = reinterpret_cast<TV*>(mem_read) - 1;
+        auto memv_write = reinterpret_cast<TV*>(mem_write) - 2;
         len -= lenv * N * 2;
 
         while (lenv >= UnpackUnroll) {
             assert(memv_read <= memv_write);
 
             TV d01, d02, d03, d04;
-            TV u01, u02, u03, u04, u05, u06, u07, u08;
-
             do {
                 d01 = VM::load_vec(memv_read + 0);
                 if (UnpackUnroll == 1) break;
@@ -770,6 +766,7 @@ private:
             } while(true);
 
             do {
+                TV u01, u02, u03, u04, u05, u06, u07, u08;
                 unpack_vectorized(baseVec, d01, u01, u02);
                 VM::store_vec(memv_write + 0, u01);
                 VM::store_vec(memv_write + 1, u02);
@@ -806,14 +803,106 @@ private:
                 VM::store_vec(memv_write + 0, u01);
                 VM::store_vec(memv_write + 1, u02);
 
-                memv_read--;
+                --memv_read;
                 memv_write -= 2;
-                lenv--;
+                --lenv;
             }
         }
 
-        mem_read = (TPACK *) (memv_read + 1);
-        mem_write = (T *) (memv_write + 2);
+        mem_read = reinterpret_cast<TPACK*>(memv_read + 1);
+        mem_write = reinterpret_cast<T*>(memv_write + 2);
+
+        while (len-- > 0) {
+            *(--mem_write) = VM::template unshift_and_add<Shift>(*(--mem_read), offset);
+        }
+    }
+
+
+    template<int UnpackUnroll>
+    void vectorized_unpack_forward(TPACK* const mem, size_t len, T base) {
+        T offset = VM::template shift_n_sub<Shift>(base, (T) std::numeric_limits<TPACK>::min());
+        auto baseVec = VM::broadcast(offset);
+
+        auto mem_read = mem + len;
+        auto mem_write = reinterpret_cast<T*>(mem) + len;
+
+        auto pre_aligned_mem = reinterpret_cast<TPACK *>(reinterpret_cast<uintptr_t>(mem_read) & ~ALIGN_MASK);
+
+        if (pre_aligned_mem < mem_read) {
+            len -= (mem_read - pre_aligned_mem);
+            while (mem_read > pre_aligned_mem) {
+                *(--mem_write) = VM::template unshift_and_add<Shift>(*(--mem_read), offset);
+            }
+        }
+
+        assert(AH::is_aligned(mem_read));
+
+        auto lenv = len / (N * 2);
+        auto memv_read = reinterpret_cast<TV*>(mem_read) - 1;
+        auto memv_write = reinterpret_cast<TV*>(mem_write) - 2;
+        len -= lenv * N * 2;
+
+        while (lenv >= UnpackUnroll) {
+            assert(memv_read <= memv_write);
+
+            TV d01, d02, d03, d04;
+            do {
+                d01 = VM::load_vec(memv_read + 0);
+                if (UnpackUnroll == 1) break;
+                d02 = VM::load_vec(memv_read - 1);
+                if (UnpackUnroll == 2) break;
+                d03 = VM::load_vec(memv_read - 2);
+                if (UnpackUnroll == 3) break;
+                d04 = VM::load_vec(memv_read - 3);
+                break;
+            } while(true);
+
+            do {
+                TV u01, u02, u03, u04, u05, u06, u07, u08;
+                unpack_vectorized(baseVec, d01, u01, u02);
+                VM::store_vec(memv_write + 0, u01);
+                VM::store_vec(memv_write + 1, u02);
+                if (UnpackUnroll == 1) break;
+                unpack_vectorized(baseVec, d02, u03, u04);
+                VM::store_vec(memv_write - 2, u03);
+                VM::store_vec(memv_write - 1, u04);
+                if (UnpackUnroll == 2) break;
+                unpack_vectorized(baseVec, d03, u05, u06);
+                VM::store_vec(memv_write - 4, u05);
+                VM::store_vec(memv_write - 3, u06);
+                if (UnpackUnroll == 3) break;
+                unpack_vectorized(baseVec, d04, u07, u08);
+                VM::store_vec(memv_write - 6, u07);
+                VM::store_vec(memv_write - 5, u08);
+                break;
+            } while(true);
+
+            memv_read -= UnpackUnroll;
+            memv_write -= 2 * UnpackUnroll;
+            lenv -= UnpackUnroll;
+        }
+
+        if (UnpackUnroll > 1) {
+            while (lenv >= 1) {
+                assert(memv_read <= memv_write);
+
+                TV d01;
+                TV u01, u02;
+
+                d01 = VM::load_vec(memv_read + 0);
+
+                unpack_vectorized(baseVec, d01, u01, u02);
+                VM::store_vec(memv_write + 0, u01);
+                VM::store_vec(memv_write + 1, u02);
+
+                --memv_read;
+                memv_write -= 2;
+                --lenv;
+            }
+        }
+
+        mem_read = reinterpret_cast<TPACK*>(memv_read + 1);
+        mem_write = reinterpret_cast<T*>(memv_write + 2);
 
         while (len-- > 0) {
             *(--mem_write) = VM::template unshift_and_add<Shift>(*(--mem_read), offset);

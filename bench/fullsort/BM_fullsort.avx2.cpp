@@ -3,12 +3,7 @@
 #include <random>
 #include <benchmark/benchmark.h>
 
-#include <smallsort/avx2/bitonic_machine.AVX2.f64.generated.h>
-#include <smallsort/avx2/bitonic_machine.AVX2.f32.generated.h>
-#include <smallsort/avx2/bitonic_machine.AVX2.i32.generated.h>
-#include <smallsort/avx2/bitonic_machine.AVX2.i64.generated.h>
-#include <smallsort/avx2/bitonic_machine.AVX2.u32.generated.h>
-#include <smallsort/avx2/bitonic_machine.AVX2.u64.generated.h>
+#include <smallsort/avx2/bitonic_machine.AVX2.h>
 #include <vector_machine/machine_traits.avx2.h>
 
 #include "BM_fullsort.h"

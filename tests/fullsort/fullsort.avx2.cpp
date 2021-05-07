@@ -3,12 +3,7 @@
 #include "gtest/gtest.h"
 #include "../fixtures.h"
 
-#include <smallsort/avx2/bitonic_machine.AVX2.f64.generated.h>
-#include <smallsort/avx2/bitonic_machine.AVX2.f32.generated.h>
-#include <smallsort/avx2/bitonic_machine.AVX2.i32.generated.h>
-#include <smallsort/avx2/bitonic_machine.AVX2.i64.generated.h>
-#include <smallsort/avx2/bitonic_machine.AVX2.u32.generated.h>
-#include <smallsort/avx2/bitonic_machine.AVX2.u64.generated.h>
+#include <smallsort/avx2/bitonic_machine.AVX2.h>
 #include <vector_machine/machine_traits.avx2.h>
 #include "fullsort_test.h"
 
@@ -24,7 +19,7 @@ struct FullSortTestAVX2_u64 : public SortWithSlackTest<u64> {};
 struct FullSortTestAVX2_f32 : public SortWithSlackTest<f32> {};
 struct FullSortTestAVX2_f64 : public SortWithSlackTest<f64> {};
 
-auto v  xsort_i32_params_avx2 = ValuesIn(SizeAndSlack<i32>::generate(10, 1000000, 10, 16, 0x1000, 0x1));
+auto vxsort_i32_params_avx2 = ValuesIn(SizeAndSlack<i32>::generate(10, 1000000, 10, 16, 0x1000, 0x1));
 auto vxsort_u32_params_avx2 = ValuesIn(SizeAndSlack<u32>::generate(10, 1000000, 10, 16, 0x1000, 0x1));
 auto vxsort_f32_params_avx2 = ValuesIn(SizeAndSlack<f32>::generate(10, 1000000, 10, 16, 1234.5, 0.1f));
 auto vxsort_i64_params_avx2 = ValuesIn(SizeAndSlack<i64>::generate(10, 1000000, 10, 8, 0x1000, 0x1));

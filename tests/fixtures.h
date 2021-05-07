@@ -20,10 +20,10 @@ using testing::Types;
 
 template <typename T, int AlignTo = 0>
 struct SortTest : public testing::TestWithParam<int> {
-   protected:
+protected:
     std::vector<T> V;
 
-   public:
+public:
     virtual void SetUp() {
         // const auto align_to = AlignTo == 0 ? sizeof(T) : AlignTo;
         // auto aligned_ptr = (T *) aligned_alloc(align_to, GetParam() * sizeof(T));
@@ -46,7 +46,7 @@ struct PrintValue {
 
 template <typename T>
 struct SizeAndSlack {
-   public:
+public:
     size_t Size;
     int Slack;
     T FirstValue;
@@ -88,10 +88,10 @@ struct SizeAndSlack {
 
 template <typename T, int AlignTo = 0>
 struct SortWithSlackTest : public testing::TestWithParam<SizeAndSlack<T>> {
-   protected:
+protected:
     std::vector<T> V;
 
-   public:
+public:
     virtual void SetUp() {
         testing::TestWithParam<SizeAndSlack<T>>::SetUp();
         auto p = this->GetParam();
@@ -114,7 +114,7 @@ struct PrintSizeAndSlack {
 
 template <typename T>
 struct SizeAndStride {
-   public:
+public:
     size_t Size;
     T FirstValue;
     T ValueStride;
@@ -134,12 +134,12 @@ struct SizeAndStride {
 
 template <typename T, int AlignTo = 0>
 struct SortWithStrideTest : public testing::TestWithParam<SizeAndStride<T>> {
-   protected:
+protected:
     std::vector<T> V;
     T MinValue;
     T MaxValue;
 
-   public:
+public:
     virtual void SetUp() {
         testing::TestWithParam<SizeAndStride<T>>::SetUp();
         auto p = this->GetParam();

@@ -27,13 +27,13 @@ struct bitonic {
     static constexpr int N = sizeof(TV) / sizeof(T);
     static_assert(is_powerof2(N), "vector-size / element-size must be a power of 2");
 
-   private:
+private:
 
     static INLINE u64 closest_pow2(size_t x) {
         return x == 1U ? 1U : 1U<<(64-__builtin_clzl(x-1));
     }
 
-   public:
+public:
     static void sort(T* ptr, size_t length) {
     // We keep up to the last 4 vectors
     // in this temp space, because we need to deal with inputs < 4 vectors
@@ -251,5 +251,5 @@ struct bitonic {
 }
 };
 }  // namespace smallsort
-}  // namespace gcsort
+}  // namespace vxsort
 #endif

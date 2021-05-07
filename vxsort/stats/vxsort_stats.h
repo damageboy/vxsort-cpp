@@ -26,10 +26,10 @@ enum vxsort_type {
 
 class vxsort_stats_base
 {
-   public:
+public:
     static std::array<vxsort_type, 6> registered_types;
     static int last_type;
-   protected:
+protected:
     static void reset()
     {
 #ifdef VXSORT_STATS
@@ -87,7 +87,7 @@ class vxsort_stats_base
 template<typename T>
 class vxsort_stats : vxsort_stats_base
 {
-   private:
+private:
     static uint64_t _num_sorts;
     static uint64_t _total_sort_size;
     static uint64_t _num_partitions;
@@ -100,7 +100,7 @@ class vxsort_stats : vxsort_stats_base
     static uint64_t _num_vec_loads;
     static uint64_t _num_vec_stores;
 
-   public:
+public:
     static void reset()
     {
         _num_sorts = 0;
