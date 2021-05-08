@@ -57,8 +57,6 @@ protected:
             return vxsort_type::F32;
         if (typeid(T) == typeid(f64))
             return vxsort_type::F64;
-
-        throw new std::logic_error("Unsupported type");
     }
 
     static const char *vxsort_type_to_str(const vxsort_type type) {

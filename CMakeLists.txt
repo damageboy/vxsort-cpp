@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.14)
 
 project(vxsort)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -19,6 +19,7 @@ set(CMAKE_MODULE_PATH
 
 include(CheckCXXCompilerFlag)
 include(GetHostType)
+include(FetchContent)
 
 # Set a default build type if none was specified
 set(default_build_type "Release")
@@ -94,29 +95,40 @@ SET(CMAKE_SHARED_LINKER_FLAGS_STATS
 #
 include(ConfigSafeGuards)
 
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-# If you want to self-test benchmark lib too, turn me ON
+#################################################################3
+# 3rd party deps
 #
-set(BENCHMARK_ENABLE_TESTING OFF)
+FetchContent_Declare(googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG master
+)
+FetchContent_MakeAvailable(googletest)
 
-##
-# Configure fmt lib
-include(ConfigFmtLib)
+FetchContent_Declare(fmt
+        GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+        GIT_TAG master
+)
+FetchContent_MakeAvailable(fmt)
 
-##
-# Configure google cpu feature detection lib
-include(ConfigCPUFeatures)
+FetchContent_Declare(cpu_features
+        GIT_REPOSITORY https://github.com/google/cpu_features.git
+        GIT_TAG master
+)
+FetchContent_MakeAvailable(cpu_features)
 
 add_subdirectory(${PROJECT_SOURCE_DIR}/vxsort/)
-include(ConfigGTest)
+add_subdirectory(${PROJECT_SOURCE_DIR}/demo/)
+add_subdirectory(${PROJECT_SOURCE_DIR}/tests/)
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Android")
     MESSAGE("Skipping google-bench related project since building for Android")
 else()
-    include(ConfigGBench)
+    set(BENCHMARK_ENABLE_TESTING OFF)
+    FetchContent_Declare(googlebench
+            GIT_REPOSITORY https://github.com/google/benchmark.git
+            GIT_TAG master
+    )
+    FetchContent_MakeAvailable(googlebench)
+
     add_subdirectory(${PROJECT_SOURCE_DIR}/bench/)
 endif()
-
-add_subdirectory(${PROJECT_SOURCE_DIR}/demo/)
-add_subdirectory(${PROJECT_SOURCE_DIR}/tests/)

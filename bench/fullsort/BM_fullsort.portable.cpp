@@ -1,7 +1,7 @@
+#include "vxsort_targets_enable_avx2.h"
+
 #include <random>
 #include <benchmark/benchmark.h>
-
-#include "vxsort_targets_enable_avx2.h"
 
 #include "BM_fullsort.h"
 #include "../reference/introsort/introsort_orig.h"

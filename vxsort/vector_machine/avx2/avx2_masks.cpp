@@ -4,9 +4,9 @@
 
 namespace vxsort {
 
-__m256_debug to_m256_dbg(__m256i v)
+__m256_dbg __m256_dbg::make(__m256i v)
 {
-    return __m256_debug(v);
+    return __m256_dbg(v);
 }
 
 alignas(16) const u8 mask_table_4[M4_SIZE] = {
