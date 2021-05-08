@@ -100,8 +100,12 @@ include(ConfigSafeGuards)
 #
 set(BENCHMARK_ENABLE_TESTING OFF)
 
-# Configure google micro benchmark
-#
+##
+# Configure fmt lib
+include(ConfigFmtLib)
+
+##
+# Configure google cpu feature detection lib
 include(ConfigCPUFeatures)
 
 add_subdirectory(${PROJECT_SOURCE_DIR}/vxsort/)

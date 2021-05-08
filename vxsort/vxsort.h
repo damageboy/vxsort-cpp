@@ -26,8 +26,9 @@
 #include <memory>
 #include <cstring>
 #include <cstdint>
-#include <cstdio>
-
+#ifndef NDEBUG
+#include <fmt/format.h>
+#endif
 namespace vxsort {
 using namespace vxsort::types;
 
@@ -79,12 +80,12 @@ private:
 
     void reset(T* start, T* end) {
         _depth = 0;
-        _startPtr = start;
-        _endPtr = end;
+        _start = start;
+        _end = end;
     }
 
-    T* _startPtr = nullptr;
-    T* _endPtr = nullptr;
+    T* _start = nullptr;
+    T* _end = nullptr;
 
     T _temp[PARTITION_TMP_SIZE_IN_ELEMENTS];
     i32 _depth = 0;
@@ -201,7 +202,7 @@ private:
 #endif
 
             auto* const aligned_left = reinterpret_cast<T *>(reinterpret_cast<uintptr_t>(left) & ~(N - 1));
-            if (aligned_left < _startPtr) {
+            if (aligned_left < _start) {
                 smallsort::bitonic<T, M>::sort(left, length);
                 return;
             }
@@ -247,7 +248,7 @@ private:
             // * Since we'd like to avoid that, we adjust for post-alignment
             // * No branches since we do branch->arithmetic
             auto* preAlignedLeft = reinterpret_cast<T*>(reinterpret_cast<size_t>(left) & ~ALIGN_MASK);
-            auto cannotPreAlignLeft = (preAlignedLeft - _startPtr) >> 63;
+            auto cannotPreAlignLeft = (preAlignedLeft - _start) >> 63;
             realign_hint.left_align = (preAlignedLeft - left) + (N & cannotPreAlignLeft);
             assert(realign_hint.left_align >= -N && realign_hint.left_align <= N);
             assert(AH::is_aligned(left + realign_hint.left_align));
@@ -259,7 +260,7 @@ private:
             // (it's pointing to where we will store the pivot!) So we calculate alignment based on
             // right - 1
             auto* preAlignedRight = reinterpret_cast<T*>(((reinterpret_cast<size_t>(right) - 1) & ~ALIGN_MASK) + ALIGN);
-            auto cannotPreAlignRight = (_endPtr - preAlignedRight) >> 63;
+            auto cannotPreAlignRight = (_end - preAlignedRight) >> 63;
             realign_hint.right_align = (preAlignedRight - right - (N & cannotPreAlignRight));
             assert(realign_hint.right_align >= -N && realign_hint.right_align <= N);
             assert(AH::is_aligned(right + realign_hint.right_align));
@@ -300,6 +301,11 @@ private:
             if (VM::template can_pack<Shift>(right_hint - left_hint)) {
                 auto left_length = vectorized_packed_partition(left, right, left_hint, realign_hint);
                 auto right_length = length - left_length;
+
+#ifndef NDEBUG
+                fmt::print("pack-partitioned {} elements: {}<->{}, split-point: {}\n",
+                       right+1-left, left_length, right_length, fmt::ptr(left + left_length - 1));
+#endif
 
                 auto* const left_packed = reinterpret_cast<TPACK *>(left);
                 auto* const right_packed = reinterpret_cast<TPACK *>(right);
@@ -734,6 +740,11 @@ private:
         auto mem_read = mem + len;
         auto mem_write = reinterpret_cast<T*>(mem) + len;
 
+#ifndef NDEBUG
+        fmt::print("unpacking sorted data from {}({}) -> {}\n",
+                   fmt::ptr(mem_read), len, fmt::ptr(mem_write));
+#endif
+
         auto pre_aligned_mem = reinterpret_cast<TPACK *>(reinterpret_cast<uintptr_t>(mem_read) & ~ALIGN_MASK);
 
         if (pre_aligned_mem < mem_read) {
@@ -745,7 +756,7 @@ private:
 
         assert(AH::is_aligned(mem_read));
 
-        auto lenv = len / (N * 2);
+        auto lenv = len / VM_PACKED::N;
         auto memv_read = reinterpret_cast<TV*>(mem_read) - 1;
         auto memv_write = reinterpret_cast<TV*>(mem_write) - 2;
         len -= lenv * N * 2;

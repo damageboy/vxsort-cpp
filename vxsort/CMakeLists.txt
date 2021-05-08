@@ -47,7 +47,10 @@ endif()
 add_library(${TARGET_NAME} STATIC ${lib_SRC} ${lib_HEADERS})
 set_target_properties(${TARGET_NAME} PROPERTIES PREFIX lib)
 set_target_properties(${TARGET_NAME} PROPERTIES OUTPUT_NAME ${CMAKE_PROJECT_NAME})
-target_link_libraries(${TARGET_NAME} cpu_features)
+target_link_libraries(${TARGET_NAME}
+    cpu_features
+    fmt
+)
 
 target_include_directories(${TARGET_NAME} PUBLIC .)
 #set_property(TARGET ${TARGET_NAME} PROPERTY INTERPROCEDURAL_OPTIMIZATION True)

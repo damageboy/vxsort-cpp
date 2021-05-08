@@ -87,15 +87,15 @@ TEST_P(FullSortTestAVX512_f64, VxSortAVX512_4)  { perform_vxsort_test<f64,  4, v
 TEST_P(FullSortTestAVX512_f64, VxSortAVX512_8)  { perform_vxsort_test<f64,  8, vector_machine::AVX512>(V); }
 TEST_P(FullSortTestAVX512_f64, VxSortAVX512_12) { perform_vxsort_test<f64, 12, vector_machine::AVX512>(V); }
 
-struct FullSortStridedTestAVX512_i64 : public SortWithStrideTest<i64> {};
+struct PackingStridedSortTestAVX512_i64 : public SortWithStrideTest<i64> {};
 auto vxsort_int64_stride_params_avx512  = ValuesIn(SizeAndStride<i64>::generate(1000000, 0x8L, 0x1000000L, 0x80000000L));
-INSTANTIATE_TEST_SUITE_P(FullSort, FullSortStridedTestAVX512_i64, vxsort_int64_stride_params_avx512, PrintSizeAndStride<i64>());
+INSTANTIATE_TEST_SUITE_P(FullPackingSort, PackingStridedSortTestAVX512_i64, vxsort_int64_stride_params_avx512, PrintSizeAndStride<i64>());
 
-TEST_P(FullSortStridedTestAVX512_i64, VxSortStridedAVX512_1)  { perform_vxsort_hinted_test<i64,  1, 3, vector_machine::AVX512>(V, MinValue, MaxValue); }
-TEST_P(FullSortStridedTestAVX512_i64, VxSortStridedAVX512_2)  { perform_vxsort_hinted_test<i64,  2, 3, vector_machine::AVX512>(V, MinValue, MaxValue); }
-TEST_P(FullSortStridedTestAVX512_i64, VxSortStridedAVX512_4)  { perform_vxsort_hinted_test<i64,  4, 3, vector_machine::AVX512>(V, MinValue, MaxValue); }
-TEST_P(FullSortStridedTestAVX512_i64, VxSortStridedAVX512_8)  { perform_vxsort_hinted_test<i64,  8, 3, vector_machine::AVX512>(V, MinValue, MaxValue); }
-TEST_P(FullSortStridedTestAVX512_i64, VxSortStridedAVX512_12) { perform_vxsort_hinted_test<i64, 12, 3, vector_machine::AVX512>(V, MinValue, MaxValue); }
+//TEST_P(PackingStridedSortTestAVX512_i64, VxSortStridedAVX512_1)  { perform_vxsort_hinted_test<i64,  1, 3, vector_machine::AVX512>(V, MinValue, MaxValue); }
+//TEST_P(PackingStridedSortTestAVX512_i64, VxSortStridedAVX512_2)  { perform_vxsort_hinted_test<i64,  2, 3, vector_machine::AVX512>(V, MinValue, MaxValue); }
+//TEST_P(PackingStridedSortTestAVX512_i64, VxSortStridedAVX512_4)  { perform_vxsort_hinted_test<i64,  4, 3, vector_machine::AVX512>(V, MinValue, MaxValue); }
+TEST_P(PackingStridedSortTestAVX512_i64, VxSortStridedAVX512_8)  { perform_vxsort_hinted_test<i64,  8, 3, vector_machine::AVX512>(V, MinValue, MaxValue); }
+//TEST_P(PackingStridedSortTestAVX512_i64, VxSortStridedAVX512_12) { perform_vxsort_hinted_test<i64, 12, 3, vector_machine::AVX512>(V, MinValue, MaxValue); }
 
 
 }
