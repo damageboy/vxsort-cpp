@@ -732,6 +732,20 @@ private:
         }
     }
 
+    template <typename TPTR = char>
+    inline T* align_up(void* p, intptr_t mask) {
+        auto value = reinterpret_cast<intptr_t>(p);
+        value += (-value ) & mask;
+        return reinterpret_cast<TPTR*>(value);
+    }
+
+    template <typename TPTR = char>
+    inline T* align_down(void* p, intptr_t mask) {
+        auto value = reinterpret_cast<intptr_t>(p);
+        value = value & ~mask;
+        return reinterpret_cast<T*>(value);
+    }
+
     template<int UnpackUnroll>
     void vectorized_unpack_backward(TPACK* const mem, size_t len, T base) {
         T offset = VM::template shift_n_sub<Shift>(base, (T) std::numeric_limits<TPACK>::min());
@@ -741,15 +755,15 @@ private:
         auto mem_write = reinterpret_cast<T*>(mem) + len;
 
 #ifndef NDEBUG
-        fmt::print("unpacking sorted data from {}({}) -> {}\n",
+        fmt::print("unpacking sorted data from {}({}) <- {}\n",
                    fmt::ptr(mem_read), len, fmt::ptr(mem_write));
 #endif
 
-        auto pre_aligned_mem = reinterpret_cast<TPACK *>(reinterpret_cast<uintptr_t>(mem_read) & ~ALIGN_MASK);
+        auto align_point = align_down(mem_read);
 
-        if (pre_aligned_mem < mem_read) {
-            len -= (mem_read - pre_aligned_mem);
-            while (mem_read > pre_aligned_mem) {
+        if (align_point < mem_read) {
+            len -= (mem_read - align_point);
+            while (mem_read > align_point) {
                 *(--mem_write) = VM::template unshift_and_add<Shift>(*(--mem_read), offset);
             }
         }
@@ -834,21 +848,26 @@ private:
         T offset = VM::template shift_n_sub<Shift>(base, (T) std::numeric_limits<TPACK>::min());
         auto baseVec = VM::broadcast(offset);
 
-        auto mem_read = mem + len;
-        auto mem_write = reinterpret_cast<T*>(mem) + len;
+        auto mem_read = mem;
+        auto mem_write = reinterpret_cast<T*>(mem - len);
 
-        auto pre_aligned_mem = reinterpret_cast<TPACK *>(reinterpret_cast<uintptr_t>(mem_read) & ~ALIGN_MASK);
+#ifndef NDEBUG
+        fmt::print("unpacking sorted data from {}({}) -> {}\n",
+                   fmt::ptr(mem_read), len, fmt::ptr(mem_write));
+#endif
 
-        if (pre_aligned_mem < mem_read) {
-            len -= (mem_read - pre_aligned_mem);
-            while (mem_read > pre_aligned_mem) {
-                *(--mem_write) = VM::template unshift_and_add<Shift>(*(--mem_read), offset);
+        auto align_point = align_up(mem_read);
+
+        if (align_point > mem_read) {
+            len -= (mem_read - align_point);
+            while (mem_read > align_point) {
+                *(mem_write++) = VM::template unshift_and_add<Shift>(*(mem_read++), offset);
             }
         }
 
         assert(AH::is_aligned(mem_read));
 
-        auto lenv = len / (N * 2);
+        auto lenv = len / VM_PACKED::N;
         auto memv_read = reinterpret_cast<TV*>(mem_read) - 1;
         auto memv_write = reinterpret_cast<TV*>(mem_write) - 2;
         len -= lenv * N * 2;
