@@ -590,7 +590,7 @@ private:
     /// \param hint - a (partially) cache hint used to communicate where the
     ///               the nearest vector-alignment left+right of the partition
     ///               is situated.
-    /// \return A pointer to the new location
+    /// \return The amount of elements partitioned to the left side
     size_t vectorized_packed_partition(T* const left, T* const right, T min_bounding, const AH hint) {
         assert(right - left >= SMALL_SORT_THRESHOLD_ELEMENTS);
         assert((reinterpret_cast<size_t>(left) & ELEMENT_ALIGN) == 0);
@@ -607,7 +607,8 @@ private:
         const auto P = VM::broadcast(pivot);
         // Create a vectorized version of the offset by which we need to
         // correct the data before packing it
-        auto offset = VM::template shift_n_sub<Shift>(min_bounding, static_cast<T>(std::numeric_limits<TPACK>::min()));
+        auto constexpr MIN = T(std::numeric_limits<TPACK>::min());
+        auto offset = VM::template shift_n_sub<Shift>(min_bounding, MIN);
         const TV offset_v = VM::broadcast(offset);
 
         auto* read_left = left;
@@ -841,6 +842,8 @@ private:
         while (len-- > 0) {
             *(--mem_write) = VM::template unshift_and_add<Shift>(*(--mem_read), offset);
         }
+        assert(mem_read == reinterpret_cast<TPACK *>(mem_write));
+        assert(mem_read == mem);
     }
 
 
@@ -851,8 +854,8 @@ private:
         T offset = VM::template shift_n_sub<Shift>(base, MIN);
         auto base_v = VM::broadcast(offset);
 
-        auto mem_read = mem;
-        auto mem_write = reinterpret_cast<T*>(mem - len);
+        auto mem_read = mem + 1 - len;
+        auto mem_write = reinterpret_cast<T*>(mem) + 1 - len;
 
 #ifndef NDEBUG
         fmt::print("unpacking sorted data from {}({}) -> {}\n",
@@ -862,8 +865,8 @@ private:
         auto align_point = align_up<TPACK>(mem_read, ALIGN_MASK);
 
         if (align_point > mem_read) {
-            len -= (mem_read - align_point);
-            while (mem_read > align_point) {
+            len -= (align_point - mem_read);
+            while (mem_read < align_point) {
                 *(mem_write++) = VM::template unshift_and_add<Shift>(*(mem_read++), offset);
             }
         }
@@ -910,8 +913,8 @@ private:
                 break;
             } while(true);
 
-            memv_read -= UnpackUnroll;
-            memv_write -= 2 * UnpackUnroll;
+            memv_read += UnpackUnroll;
+            memv_write += 2 * UnpackUnroll;
             lenv -= UnpackUnroll;
         }
 
@@ -940,6 +943,9 @@ private:
         while (len-- > 0) {
             *(mem_write++) = VM::template unshift_and_add<Shift>(*(mem_read++), offset);
         }
+
+        assert((mem_read - 1) == reinterpret_cast<TPACK *>(mem_write - 1));
+        assert((mem_read - 1) == mem);
     }
 
     void align_vectorized(const T* left, const T* right,
