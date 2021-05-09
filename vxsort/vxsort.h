@@ -733,23 +733,24 @@ private:
     }
 
     template <typename TPTR = char>
-    inline T* align_up(void* p, intptr_t mask) {
+    static TPTR* align_up(void* p, const intptr_t mask) {
         auto value = reinterpret_cast<intptr_t>(p);
-        value += (-value ) & mask;
+        value += (-value) & mask;
         return reinterpret_cast<TPTR*>(value);
     }
 
     template <typename TPTR = char>
-    inline T* align_down(void* p, intptr_t mask) {
+    static TPTR* align_down(void* p, const intptr_t mask) {
         auto value = reinterpret_cast<intptr_t>(p);
         value = value & ~mask;
-        return reinterpret_cast<T*>(value);
+        return reinterpret_cast<TPTR*>(value);
     }
 
     template<int UnpackUnroll>
     void vectorized_unpack_backward(TPACK* const mem, size_t len, T base) {
-        T offset = VM::template shift_n_sub<Shift>(base, (T) std::numeric_limits<TPACK>::min());
-        auto baseVec = VM::broadcast(offset);
+        auto constexpr MIN = T(std::numeric_limits<TPACK>::min());
+        T offset = VM::template shift_n_sub<Shift>(base, MIN);
+        auto base_v = VM::broadcast(offset);
 
         auto mem_read = mem + len;
         auto mem_write = reinterpret_cast<T*>(mem) + len;
@@ -759,7 +760,7 @@ private:
                    fmt::ptr(mem_read), len, fmt::ptr(mem_write));
 #endif
 
-        auto align_point = align_down(mem_read);
+        auto align_point = align_down<TPACK>(mem_read, ALIGN_MASK);
 
         if (align_point < mem_read) {
             len -= (mem_read - align_point);
@@ -792,19 +793,19 @@ private:
 
             do {
                 TV u01, u02, u03, u04, u05, u06, u07, u08;
-                unpack_vectorized(baseVec, d01, u01, u02);
+                unpack_vectorized(base_v, d01, u01, u02);
                 VM::store_vec(memv_write + 0, u01);
                 VM::store_vec(memv_write + 1, u02);
                 if (UnpackUnroll == 1) break;
-                unpack_vectorized(baseVec, d02, u03, u04);
+                unpack_vectorized(base_v, d02, u03, u04);
                 VM::store_vec(memv_write - 2, u03);
                 VM::store_vec(memv_write - 1, u04);
                 if (UnpackUnroll == 2) break;
-                unpack_vectorized(baseVec, d03, u05, u06);
+                unpack_vectorized(base_v, d03, u05, u06);
                 VM::store_vec(memv_write - 4, u05);
                 VM::store_vec(memv_write - 3, u06);
                 if (UnpackUnroll == 3) break;
-                unpack_vectorized(baseVec, d04, u07, u08);
+                unpack_vectorized(base_v, d04, u07, u08);
                 VM::store_vec(memv_write - 6, u07);
                 VM::store_vec(memv_write - 5, u08);
                 break;
@@ -822,9 +823,9 @@ private:
                 TV d01;
                 TV u01, u02;
 
-                d01 = VM::load_vec(memv_read + 0);
+                d01 = VM::load_vec(memv_read);
 
-                unpack_vectorized(baseVec, d01, u01, u02);
+                unpack_vectorized(base_v, d01, u01, u02);
                 VM::store_vec(memv_write + 0, u01);
                 VM::store_vec(memv_write + 1, u02);
 
@@ -845,8 +846,10 @@ private:
 
     template<int UnpackUnroll>
     void vectorized_unpack_forward(TPACK* const mem, size_t len, T base) {
-        T offset = VM::template shift_n_sub<Shift>(base, (T) std::numeric_limits<TPACK>::min());
-        auto baseVec = VM::broadcast(offset);
+        auto constexpr MIN = T(std::numeric_limits<TPACK>::min());
+
+        T offset = VM::template shift_n_sub<Shift>(base, MIN);
+        auto base_v = VM::broadcast(offset);
 
         auto mem_read = mem;
         auto mem_write = reinterpret_cast<T*>(mem - len);
@@ -856,7 +859,7 @@ private:
                    fmt::ptr(mem_read), len, fmt::ptr(mem_write));
 #endif
 
-        auto align_point = align_up(mem_read);
+        auto align_point = align_up<TPACK>(mem_read, ALIGN_MASK);
 
         if (align_point > mem_read) {
             len -= (mem_read - align_point);
@@ -868,42 +871,42 @@ private:
         assert(AH::is_aligned(mem_read));
 
         auto lenv = len / VM_PACKED::N;
-        auto memv_read = reinterpret_cast<TV*>(mem_read) - 1;
-        auto memv_write = reinterpret_cast<TV*>(mem_write) - 2;
+        auto memv_read = reinterpret_cast<TV*>(mem_read);
+        auto memv_write = reinterpret_cast<TV*>(mem_write);
         len -= lenv * N * 2;
 
         while (lenv >= UnpackUnroll) {
-            assert(memv_read <= memv_write);
+            assert(memv_read >= memv_write);
 
             TV d01, d02, d03, d04;
             do {
                 d01 = VM::load_vec(memv_read + 0);
                 if (UnpackUnroll == 1) break;
-                d02 = VM::load_vec(memv_read - 1);
+                d02 = VM::load_vec(memv_read + 1);
                 if (UnpackUnroll == 2) break;
-                d03 = VM::load_vec(memv_read - 2);
+                d03 = VM::load_vec(memv_read + 2);
                 if (UnpackUnroll == 3) break;
-                d04 = VM::load_vec(memv_read - 3);
+                d04 = VM::load_vec(memv_read + 3);
                 break;
             } while(true);
 
             do {
                 TV u01, u02, u03, u04, u05, u06, u07, u08;
-                unpack_vectorized(baseVec, d01, u01, u02);
+                unpack_vectorized(base_v, d01, u01, u02);
                 VM::store_vec(memv_write + 0, u01);
                 VM::store_vec(memv_write + 1, u02);
                 if (UnpackUnroll == 1) break;
-                unpack_vectorized(baseVec, d02, u03, u04);
-                VM::store_vec(memv_write - 2, u03);
-                VM::store_vec(memv_write - 1, u04);
+                unpack_vectorized(base_v, d02, u03, u04);
+                VM::store_vec(memv_write + 2, u03);
+                VM::store_vec(memv_write + 3, u04);
                 if (UnpackUnroll == 2) break;
-                unpack_vectorized(baseVec, d03, u05, u06);
-                VM::store_vec(memv_write - 4, u05);
-                VM::store_vec(memv_write - 3, u06);
+                unpack_vectorized(base_v, d03, u05, u06);
+                VM::store_vec(memv_write + 4, u05);
+                VM::store_vec(memv_write + 5, u06);
                 if (UnpackUnroll == 3) break;
-                unpack_vectorized(baseVec, d04, u07, u08);
-                VM::store_vec(memv_write - 6, u07);
-                VM::store_vec(memv_write - 5, u08);
+                unpack_vectorized(base_v, d04, u07, u08);
+                VM::store_vec(memv_write + 6, u07);
+                VM::store_vec(memv_write + 7, u08);
                 break;
             } while(true);
 
@@ -914,28 +917,28 @@ private:
 
         if (UnpackUnroll > 1) {
             while (lenv >= 1) {
-                assert(memv_read <= memv_write);
+                assert(memv_read >= memv_write);
 
                 TV d01;
                 TV u01, u02;
 
-                d01 = VM::load_vec(memv_read + 0);
+                d01 = VM::load_vec(memv_read);
 
-                unpack_vectorized(baseVec, d01, u01, u02);
+                unpack_vectorized(base_v, d01, u01, u02);
                 VM::store_vec(memv_write + 0, u01);
                 VM::store_vec(memv_write + 1, u02);
 
-                --memv_read;
-                memv_write -= 2;
+                ++memv_read;
+                memv_write += 2;
                 --lenv;
             }
         }
 
-        mem_read = reinterpret_cast<TPACK*>(memv_read + 1);
-        mem_write = reinterpret_cast<T*>(memv_write + 2);
+        mem_read = reinterpret_cast<TPACK*>(memv_read);
+        mem_write = reinterpret_cast<T*>(memv_write);
 
         while (len-- > 0) {
-            *(--mem_write) = VM::template unshift_and_add<Shift>(*(--mem_read), offset);
+            *(mem_write++) = VM::template unshift_and_add<Shift>(*(mem_read++), offset);
         }
     }
 

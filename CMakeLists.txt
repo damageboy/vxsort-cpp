@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.15)
 
 project(vxsort)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -42,6 +42,8 @@ endif (CLR_CMAKE_HOST_WIN32)
 
 if(MSVC)
     add_compile_options(/Zi /FC /Zc:strictStrings /EHs)
+
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
     set(CMAKE_CXX_FLAGS_RELEASE "/O2b2y- -DNDEBUG")
 
