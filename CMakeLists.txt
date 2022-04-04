@@ -24,6 +24,7 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules")
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+include(CheckCXXCompilerFlag)
 include(GetHostType)
 include(CPM)
 
@@ -77,6 +78,12 @@ if(MSVC)
 else()
     add_compile_options(-g3)
     add_compile_options(-Wall)
+
+    check_cxx_compiler_flag(-Walign-mismatch HAVE_ALIGN_MISMATCH)
+
+    if (HAVE_ALIGN_MISMATCH)
+        add_compile_options(-Wno-align-mismatch)
+    endif()
 
     if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         add_compile_options(-Wno-null-conversion)

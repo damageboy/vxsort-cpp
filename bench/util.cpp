@@ -4,9 +4,7 @@
 #include <fmt/format.h>
 #include <defs.h>
 
-#ifdef VXSORT_COMPILER_MSVC
 #include <unordered_map>
-#endif
 
 namespace vxsort_bench {
 using namespace vxsort::types;
