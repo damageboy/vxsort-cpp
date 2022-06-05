@@ -87,6 +87,8 @@ static void BM_vxsort(benchmark::State& state) {
 
     state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
 
+    state.SetBytesProcessed(state.iterations() * n * ITERATIONS * sizeof(Q));
+
     process_perf_counters(state.counters, n * ITERATIONS);
     if (!state.counters.contains("cycles/N"))
         state.counters["rdtsc-cycles/N"] = make_cycle_per_n_counter((f64)total_cycles / (f64)(n * ITERATIONS * state.iterations()));

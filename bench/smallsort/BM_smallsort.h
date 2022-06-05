@@ -53,6 +53,8 @@ static void BM_insertion_sort(benchmark::State& state) {
         total_cycles += cycleclock::Now() - start;
     }
 
+    state.SetBytesProcessed(state.iterations() * n * ITERATIONS * sizeof(Q));
+
     state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
     process_perf_counters(state.counters, n * ITERATIONS);
     if (!state.counters.contains("cycles/N"))
@@ -84,6 +86,8 @@ static void BM_bitonic_sort(benchmark::State& state) {
             vxsort::smallsort::bitonic<Q, M>::sort(begins[i], n);
         total_cycles += cycleclock::Now() - start;
     }
+
+    state.SetBytesProcessed(state.iterations() * n * ITERATIONS * sizeof(Q));
 
     state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
     process_perf_counters(state.counters, n * ITERATIONS);
