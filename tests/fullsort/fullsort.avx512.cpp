@@ -12,6 +12,7 @@ namespace vxsort_tests {
 using namespace vxsort::types;
 using testing::Types;
 
+using VMT = vxsort::vector_machine;
 using namespace vxsort;
 
 struct FullSortTestAVX512_i16 : public SortWithSlackTest<i16> {};
@@ -41,63 +42,63 @@ INSTANTIATE_TEST_SUITE_P(FullSort, FullSortTestAVX512_u64, vxsort_u64_params_avx
 INSTANTIATE_TEST_SUITE_P(FullSort, FullSortTestAVX512_f32, vxsort_f32_params_avx512, PrintSizeAndSlack<f32>());
 INSTANTIATE_TEST_SUITE_P(FullSort, FullSortTestAVX512_f64, vxsort_f64_params_avx512, PrintSizeAndSlack<f64>());
 
-TEST_P(FullSortTestAVX512_i16, VxSortAVX512_1)  { vxsort_test<i16,  1, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_i16, VxSortAVX512_2)  { vxsort_test<i16,  2, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_i16, VxSortAVX512_4)  { vxsort_test<i16,  4, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_i16, VxSortAVX512_8)  { vxsort_test<i16,  8, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_i16, VxSortAVX512_12) { vxsort_test<i16, 12, vector_machine::AVX512>(V); }
+TEST_P(FullSortTestAVX512_i16, VxSortAVX512_1)  { vxsort_test<i16,  1, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_i16, VxSortAVX512_2)  { vxsort_test<i16,  2, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_i16, VxSortAVX512_4)  { vxsort_test<i16,  4, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_i16, VxSortAVX512_8)  { vxsort_test<i16,  8, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_i16, VxSortAVX512_12) { vxsort_test<i16, 12, VMT::AVX512>(V); }
 
-TEST_P(FullSortTestAVX512_i32, VxSortAVX512_1)  { vxsort_test<i32,  1, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_i32, VxSortAVX512_2)  { vxsort_test<i32,  2, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_i32, VxSortAVX512_4)  { vxsort_test<i32,  4, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_i32, VxSortAVX512_8)  { vxsort_test<i32,  8, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_i32, VxSortAVX512_12) { vxsort_test<i32, 12, vector_machine::AVX512>(V); }
+TEST_P(FullSortTestAVX512_i32, VxSortAVX512_1)  { vxsort_test<i32,  1, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_i32, VxSortAVX512_2)  { vxsort_test<i32,  2, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_i32, VxSortAVX512_4)  { vxsort_test<i32,  4, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_i32, VxSortAVX512_8)  { vxsort_test<i32,  8, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_i32, VxSortAVX512_12) { vxsort_test<i32, 12, VMT::AVX512>(V); }
 
-TEST_P(FullSortTestAVX512_i64, VxSortAVX512_1)  { vxsort_test<i64,  1, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_i64, VxSortAVX512_2)  { vxsort_test<i64,  2, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_i64, VxSortAVX512_4)  { vxsort_test<i64,  4, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_i64, VxSortAVX512_8)  { vxsort_test<i64,  8, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_i64, VxSortAVX512_12) { vxsort_test<i64, 12, vector_machine::AVX512>(V); }
+TEST_P(FullSortTestAVX512_i64, VxSortAVX512_1)  { vxsort_test<i64,  1, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_i64, VxSortAVX512_2)  { vxsort_test<i64,  2, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_i64, VxSortAVX512_4)  { vxsort_test<i64,  4, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_i64, VxSortAVX512_8)  { vxsort_test<i64,  8, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_i64, VxSortAVX512_12) { vxsort_test<i64, 12, VMT::AVX512>(V); }
 
-TEST_P(FullSortTestAVX512_u16, VxSortAVX512_1)  { vxsort_test<u16,  1, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_u16, VxSortAVX512_2)  { vxsort_test<u16,  2, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_u16, VxSortAVX512_4)  { vxsort_test<u16,  4, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_u16, VxSortAVX512_8)  { vxsort_test<u16,  8, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_u16, VxSortAVX512_12) { vxsort_test<u16, 12, vector_machine::AVX512>(V); }
+TEST_P(FullSortTestAVX512_u16, VxSortAVX512_1)  { vxsort_test<u16,  1, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_u16, VxSortAVX512_2)  { vxsort_test<u16,  2, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_u16, VxSortAVX512_4)  { vxsort_test<u16,  4, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_u16, VxSortAVX512_8)  { vxsort_test<u16,  8, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_u16, VxSortAVX512_12) { vxsort_test<u16, 12, VMT::AVX512>(V); }
 
-TEST_P(FullSortTestAVX512_u32, VxSortAVX512_1)  { vxsort_test<u32,  1, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_u32, VxSortAVX512_2)  { vxsort_test<u32,  2, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_u32, VxSortAVX512_4)  { vxsort_test<u32,  4, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_u32, VxSortAVX512_8)  { vxsort_test<u32,  8, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_u32, VxSortAVX512_12) { vxsort_test<u32, 12, vector_machine::AVX512>(V); }
+TEST_P(FullSortTestAVX512_u32, VxSortAVX512_1)  { vxsort_test<u32,  1, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_u32, VxSortAVX512_2)  { vxsort_test<u32,  2, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_u32, VxSortAVX512_4)  { vxsort_test<u32,  4, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_u32, VxSortAVX512_8)  { vxsort_test<u32,  8, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_u32, VxSortAVX512_12) { vxsort_test<u32, 12, VMT::AVX512>(V); }
 
-TEST_P(FullSortTestAVX512_u64, VxSortAVX512_1)  { vxsort_test<u64,  1, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_u64, VxSortAVX512_2)  { vxsort_test<u64,  2, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_u64, VxSortAVX512_4)  { vxsort_test<u64,  4, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_u64, VxSortAVX512_8)  { vxsort_test<u64,  8, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_u64, VxSortAVX512_12) { vxsort_test<u64, 12, vector_machine::AVX512>(V); }
+TEST_P(FullSortTestAVX512_u64, VxSortAVX512_1)  { vxsort_test<u64,  1, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_u64, VxSortAVX512_2)  { vxsort_test<u64,  2, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_u64, VxSortAVX512_4)  { vxsort_test<u64,  4, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_u64, VxSortAVX512_8)  { vxsort_test<u64,  8, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_u64, VxSortAVX512_12) { vxsort_test<u64, 12, VMT::AVX512>(V); }
 
-TEST_P(FullSortTestAVX512_f32, VxSortAVX512_1)  { vxsort_test<f32,  1, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_f32, VxSortAVX512_2)  { vxsort_test<f32,  2, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_f32, VxSortAVX512_4)  { vxsort_test<f32,  4, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_f32, VxSortAVX512_8)  { vxsort_test<f32,  8, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_f32, VxSortAVX512_12) { vxsort_test<f32, 12, vector_machine::AVX512>(V); }
+TEST_P(FullSortTestAVX512_f32, VxSortAVX512_1)  { vxsort_test<f32,  1, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_f32, VxSortAVX512_2)  { vxsort_test<f32,  2, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_f32, VxSortAVX512_4)  { vxsort_test<f32,  4, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_f32, VxSortAVX512_8)  { vxsort_test<f32,  8, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_f32, VxSortAVX512_12) { vxsort_test<f32, 12, VMT::AVX512>(V); }
 
-TEST_P(FullSortTestAVX512_f64, VxSortAVX512_1)  { vxsort_test<f64,  1, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_f64, VxSortAVX512_2)  { vxsort_test<f64,  2, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_f64, VxSortAVX512_4)  { vxsort_test<f64,  4, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_f64, VxSortAVX512_8)  { vxsort_test<f64,  8, vector_machine::AVX512>(V); }
-TEST_P(FullSortTestAVX512_f64, VxSortAVX512_12) { vxsort_test<f64, 12, vector_machine::AVX512>(V); }
+TEST_P(FullSortTestAVX512_f64, VxSortAVX512_1)  { vxsort_test<f64,  1, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_f64, VxSortAVX512_2)  { vxsort_test<f64,  2, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_f64, VxSortAVX512_4)  { vxsort_test<f64,  4, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_f64, VxSortAVX512_8)  { vxsort_test<f64,  8, VMT::AVX512>(V); }
+TEST_P(FullSortTestAVX512_f64, VxSortAVX512_12) { vxsort_test<f64, 12, VMT::AVX512>(V); }
 
 struct PackingStridedSortTestAVX512_i64 : public SortWithStrideTest<i64> {};
 auto vxsort_int64_stride_params_avx512  = ValuesIn(SizeAndStride<i64>::generate(1000000, 0x8L, 0x1000000L, 0x80000000L));
 INSTANTIATE_TEST_SUITE_P(FullPackingSort, PackingStridedSortTestAVX512_i64, vxsort_int64_stride_params_avx512, PrintSizeAndStride<i64>());
 
-//TEST_P(PackingStridedSortTestAVX512_i64, VxSortStridedAVX512_1)  { vxsort_hinted_test<i64,  1, 3, vector_machine::AVX512>(V, MinValue, MaxValue); }
-//TEST_P(PackingStridedSortTestAVX512_i64, VxSortStridedAVX512_2)  { vxsort_hinted_test<i64,  2, 3, vector_machine::AVX512>(V, MinValue, MaxValue); }
-//TEST_P(PackingStridedSortTestAVX512_i64, VxSortStridedAVX512_4)  { vxsort_hinted_test<i64,  4, 3, vector_machine::AVX512>(V, MinValue, MaxValue); }
-TEST_P(PackingStridedSortTestAVX512_i64, VxSortStridedAVX512_8)  { vxsort_hinted_test<i64,  8, 3, vector_machine::AVX512>(V, MinValue, MaxValue); }
-//TEST_P(PackingStridedSortTestAVX512_i64, VxSortStridedAVX512_12) { vxsort_hinted_test<i64, 12, 3, vector_machine::AVX512>(V, MinValue, MaxValue); }
+//TEST_P(PackingStridedSortTestAVX512_i64, VxSortStridedAVX512_1)  { vxsort_hinted_test<i64,  1, 3, VMT::AVX512>(V, MinValue, MaxValue); }
+//TEST_P(PackingStridedSortTestAVX512_i64, VxSortStridedAVX512_2)  { vxsort_hinted_test<i64,  2, 3, VMT::AVX512>(V, MinValue, MaxValue); }
+//TEST_P(PackingStridedSortTestAVX512_i64, VxSortStridedAVX512_4)  { vxsort_hinted_test<i64,  4, 3, VMT::AVX512>(V, MinValue, MaxValue); }
+TEST_P(PackingStridedSortTestAVX512_i64, VxSortStridedAVX512_8)  { vxsort_hinted_test<i64,  8, 3, VMT::AVX512>(V, MinValue, MaxValue); }
+//TEST_P(PackingStridedSortTestAVX512_i64, VxSortStridedAVX512_12) { vxsort_hinted_test<i64, 12, 3, VMT::AVX512>(V, MinValue, MaxValue); }
 
 }
 
