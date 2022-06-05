@@ -51,13 +51,13 @@ public:
 
     static INLINE TV broadcast(T pivot) { return _mm256_set1_epi16(pivot); }
 
-    static INLINE TMASK get_cmpgt_mask(TV a, TV b) { return _mm256_movemask_ps(i2s(_mm256_cmpgt_epi32(a, b))); }
+    static INLINE TMASK get_cmpgt_mask(TV a, TV b) { return _mm256_movemask_epi8(i2s(_mm256_cmpgt_epi16(a, b))); }
 
     static TV shift_right(TV v, int i) { return _mm256_srli_epi16(v, i); }
     static TV shift_left(TV v, int i) { return _mm256_slli_epi16(v, i); }
 
-    static INLINE TV add(TV a, TV b) { return _mm256_add_epi32(a, b); }
-    static INLINE TV sub(TV a, TV b) { return _mm256_sub_epi32(a, b); };
+    static INLINE TV add(TV a, TV b) { return _mm256_add_epi16(a, b); }
+    static INLINE TV sub(TV a, TV b) { return _mm256_sub_epi16(a, b); };
 
     static INLINE TV pack_unordered(TV, TV) { TV tmp = _mm256_set1_epi32(0); return tmp; }
     static INLINE void unpack_ordered(TV, TV&, TV&) { }
