@@ -11,8 +11,6 @@ using namespace vxsort::types;
 using benchmark::TimeUnit;
 using vm = vxsort::vector_machine;
 
-BENCHMARK(BM_insertionsort)->DenseRange(4, 64, 4)->Unit(kNanosecond);
-
 BENCHMARK_TEMPLATE(BM_bitonic_sort, i16, vm::AVX2)->DenseRange(16, 4096, 8)->Unit(kNanosecond);
 BENCHMARK_TEMPLATE(BM_bitonic_sort, u16, vm::AVX2)->DenseRange(16, 4096, 8)->Unit(kNanosecond);
 BENCHMARK_TEMPLATE(BM_bitonic_sort, i32, vm::AVX2)->DenseRange( 4, 2048, 4)->Unit(kNanosecond);

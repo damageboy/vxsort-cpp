@@ -16,11 +16,25 @@ using vxsort::vector_machine;
 
 const auto processor_count = std::thread::hardware_concurrency();
 
-static void BM_insertionsort(benchmark::State& state) {
+template <typename T>
+static void insertionsort_cpp(T* lo, T* hi) {
+    for (T* i = lo + 1; i <= hi; i++) {
+        T* j = i;
+        T t = *i;
+        while ((j > lo) && (t < *(j - 1))) {
+            *j = *(j - 1);
+            j--;
+        }
+        *j = t;
+    }
+}
+
+template <class Q>
+static void BM_insertion_sort(benchmark::State& state) {
     static const int ITERATIONS = 1024;
     auto n = state.range(0);
-    auto v = std::vector<int64_t>(n);
-    generate_unique_values_vec(v, (int64_t)0x1000, (int64_t)8);
+    auto v = std::vector<Q>(n);
+    generate_unique_values_vec(v, (Q)0x1000, (Q)8);
 
     auto copies = generate_copies(ITERATIONS, n, v);
     auto begins = generate_array_beginnings(copies);
@@ -35,7 +49,7 @@ static void BM_insertionsort(benchmark::State& state) {
         state.ResumeTiming();
         auto start = cycleclock::Now();
         for (auto i = 0; i < ITERATIONS; i++)
-            sort_insertionsort((uint8_t**)begins[i], (uint8_t**)ends[i]);
+            insertionsort_cpp((Q*)begins[i], (Q*)ends[i]);
         total_cycles += cycleclock::Now() - start;
     }
 
