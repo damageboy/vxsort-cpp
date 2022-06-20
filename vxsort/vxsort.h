@@ -134,7 +134,7 @@ private:
 
     NOINLINE
     T* align_left_scalar_uncommon(T* read_left, T pivot,
-                                  T*& tmp_left, T*& tmp_right) {
+                                  T* RESTRICT & tmp_left, T* RESTRICT & tmp_right) {
         if (((size_t)read_left & ALIGN_MASK) == 0)
             return read_left;
 
@@ -153,7 +153,7 @@ private:
 
     NOINLINE
     T* align_right_scalar_uncommon(T* read_right, T pivot,
-                                   T*& tmp_left, T*& tmp_right) {
+                                   T* RESTRICT & tmp_left, T* RESTRICT & tmp_right) {
         if (((size_t)read_right & ALIGN_MASK) == 0)
             return read_right;
 
@@ -327,7 +327,7 @@ private:
     friend class vxsort;
 
     static INLINE void partition_block(TV& data_vec, const TV P,
-                                       T*& left, T*& right)
+                                       T* RESTRICT &left, T* RESTRICT &right)
     {
 #ifdef VXSORT_STATS
         vxsort_stats<T>::bump_vec_loads();
@@ -341,7 +341,7 @@ private:
     }
 
     static INLINE void partition_block_without_compress(TV& data_vec, const TV P,
-                                                        T*& left, T*& right)
+                                                        T* RESTRICT & left, T* RESTRICT & right)
     {
 #ifdef VXSORT_STATS
         vxsort_stats<T>::bump_perms();
@@ -356,7 +356,7 @@ private:
     }
 
     static INLINE void partition_block_with_compress(TV& data_vec, const TV P,
-                                                     T*& left, T*& right)
+                                                     T* RESTRICT & left, T* RESTRICT & right)
     {
         auto mask = VMT::get_cmpgt_mask(data_vec, P);
         auto popcnt = -_mm_popcnt_u64(mask);
@@ -435,10 +435,10 @@ private:
         auto read_left = left;
         auto read_right = right;
 
-        auto tmp_start_left = _temp;
-        auto tmp_left = tmp_start_left;
-        auto tmp_start_right = _temp + PARTITION_TMP_SIZE_IN_ELEMENTS;
-        auto tmp_right = tmp_start_right;
+        auto * RESTRICT tmp_start_left = _temp;
+        auto * RESTRICT tmp_left = tmp_start_left;
+        auto * RESTRICT tmp_start_right = _temp + PARTITION_TMP_SIZE_IN_ELEMENTS;
+        auto *tmp_right = tmp_start_right;
 
         tmp_right -= N;
 
@@ -473,8 +473,8 @@ private:
 
         // From now on, we are fully aligned
         // and all reading is done in full vector units
-        auto read_left_v = (TV*)read_left;
-        auto read_right_v = (TV*)read_right;
+        auto * RESTRICT read_left_v = (TV*)read_left;
+        auto * RESTRICT read_right_v = (TV*)read_right;
 #ifndef NDEBUG
         read_left = nullptr;
         read_right = nullptr;
@@ -495,8 +495,8 @@ private:
         read_right_v -= InnerUnroll*2;
         TV* nextPtr;
 
-        auto write_left = left;
-        auto write_right = right - N;
+        auto * RESTRICT write_left = left;
+        auto * RESTRICT write_right = right - N;
 
         while (read_left_v < read_right_v) {
             if (write_right - ((T *)read_right_v) < (2 * (InnerUnroll * N) - N)) {
@@ -588,7 +588,8 @@ private:
     ///               the nearest vector-alignment left+right of the partition
     ///               is situated.
     /// \return The amount of elements partitioned to the left side
-    size_t vectorized_packed_partition(T* const left, T* const right, T min_bounding, const AH hint) {
+    size_t vectorized_packed_partition(T* const left, T* const right,
+                                       T min_bounding, const AH hint) {
         assert(right - left >= SMALL_SORT_THRESHOLD_ELEMENTS);
         assert((reinterpret_cast<size_t>(left) & ELEMENT_ALIGN) == 0);
         assert((reinterpret_cast<size_t>(right) & ELEMENT_ALIGN) == 0);
@@ -648,15 +649,15 @@ private:
 
         // From now on, we are fully aligned
         // and all reading is done in full vector units
-        auto read_left_v = reinterpret_cast<TV*>(read_left);
-        auto read_right_v = reinterpret_cast<TV*>(read_right);
+        auto * RESTRICT read_left_v = reinterpret_cast<TV*>(read_left);
+        auto * RESTRICT read_right_v = reinterpret_cast<TV*>(read_right);
 #ifndef NDEBUG
         read_left = nullptr;
         read_right = nullptr;
 #endif
 
-        auto* write_left = reinterpret_cast<TPACK*>(left);
-        auto* write_right = reinterpret_cast<TPACK*>(right+1) - 2*N;
+        auto* RESTRICT write_left = reinterpret_cast<TPACK*>(left);
+        auto* RESTRICT write_right = reinterpret_cast<TPACK*>(right+1) - 2*N;
 
         // We will be packing before partitioning, so
         // We must generate a pre-packed pivot
@@ -1003,9 +1004,9 @@ private:
 
     void align_vectorized(const T* left, const T* right,
                           const AH& hint, const TV P,
-                          T*& read_left, T*& read_right,
-                          T*& tmp_start_left, T*& tmp_left,
-                          T*& tmp_start_right, T*& tmp_right) const
+                          T* RESTRICT & read_left, T* RESTRICT & read_right,
+                          T* RESTRICT & tmp_start_left, T* RESTRICT & tmp_left,
+                          T* RESTRICT & tmp_start_right, T* RESTRICT & tmp_right) const
     {
         const auto left_align = hint.left_align;
         const auto right_align = hint.right_align;

@@ -34,7 +34,7 @@ private:
     }
 
 public:
-    static void sort(T* ptr, usize length) {
+    static void sort(T* RESTRICT ptr, usize length) {
     // We keep up to the last 4 vectors
     // in this temp space, because we need to deal with inputs < 4 vectors
     // and also deal with the tail of the array when it isn't exactly divisible by 4
@@ -59,7 +59,7 @@ public:
 
     auto p_exit_loop = p_end_inplace;
 
-    TV *p = p_start;
+    TV * RESTRICT p = p_start;
     TV d01, d02, d03, d04;
 
     for (; p < p_exit_loop; p += 4) {
@@ -104,8 +104,8 @@ public:
     last_chunk_v = slack_v;
     p_exit_loop = p_end_inplace;
 
-    TV*  __restrict p1;
-    TV*  __restrict p2;
+    TV* RESTRICT p1;
+    TV* RESTRICT p2;
     TV *p2_end;
     i32 half_stride;
 

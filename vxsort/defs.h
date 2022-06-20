@@ -51,6 +51,8 @@
 typedef SSIZE_T ssize_t;
 #endif
 
+#define RESTRICT __restrict
+
 namespace vxsort {
 
 template <class... E>
