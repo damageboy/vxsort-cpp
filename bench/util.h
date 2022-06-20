@@ -23,14 +23,69 @@ Counter make_cycle_per_n_counter(f64 n);
 void process_perf_counters(UserCounters &counters, i64 num_elements);
 
 template <typename T>
-extern void generate_unique_values_vec(std::vector<T>& vec, T start, T stride) {
+void generate_unique_values_vec(std::vector<T>& vec, T start, T stride) {
     for (usize i = 0; i < vec.size(); i++, start += stride)
         vec[i] = start;
 
     std::random_device rd;
-    std::mt19937 g(rd());
+    std::mt19937_64 g(rd());
 
     std::shuffle(vec.begin(), vec.end(), g);
+}
+
+std::vector<int> shuffled_int(int size, std::mt19937_64& rng) {
+    std::vector<int> v; v.reserve(size);
+    for (int i = 0; i < size; ++i) v.push_back(i);
+    std::shuffle(v.begin(), v.end(), rng);
+    return v;
+}
+
+std::vector<int> shuffled_16_values_int(int size, std::mt19937_64& rng) {
+    std::vector<int> v; v.reserve(size);
+    for (int i = 0; i < size; ++i) v.push_back(i % 16);
+    std::shuffle(v.begin(), v.end(), rng);
+    return v;
+}
+
+std::vector<int> all_equal_int(int size, std::mt19937_64&) {
+    std::vector<int> v; v.reserve(size);
+    for (int i = 0; i < size; ++i) v.push_back(0);
+    return v;
+}
+
+std::vector<int> ascending_int(int size, std::mt19937_64&) {
+    std::vector<int> v; v.reserve(size);
+    for (int i = 0; i < size; ++i) v.push_back(i);
+    return v;
+}
+
+std::vector<int> descending_int(int size, std::mt19937_64&) {
+    std::vector<int> v; v.reserve(size);
+    for (int i = size - 1; i >= 0; --i) v.push_back(i);
+    return v;
+}
+
+std::vector<int> pipe_organ_int(int size, std::mt19937_64&) {
+    std::vector<int> v; v.reserve(size);
+    for (int i = 0; i < size/2; ++i) v.push_back(i);
+    for (int i = size/2; i < size; ++i) v.push_back(size - i);
+    return v;
+}
+
+std::vector<int> push_front_int(int size, std::mt19937_64&) {
+    std::vector<int> v; v.reserve(size);
+    for (int i = 1; i < size; ++i) v.push_back(i);
+    v.push_back(0);
+    return v;
+}
+
+std::vector<int> push_middle_int(int size, std::mt19937_64&) {
+    std::vector<int> v; v.reserve(size);
+    for (int i = 0; i < size; ++i) {
+        if (i != size/2) v.push_back(i);
+    }
+    v.push_back(size/2);
+    return v;
 }
 
 template <typename T, typename U=T>
