@@ -52,7 +52,7 @@ public:
     // How many vectors in the last group of up to 4 vectors
     auto last_chunk_v = slack_v;
 
-    const auto p_start = (TV*)ptr;
+    auto * RESTRICT p_start = (TV*)ptr;
     const auto p_end_inplace = p_start + ((v/4) * 4);
     const auto p_virtual_end = p_end_inplace + ((slack_v > 0) ? 4 : 0);
     v += (remainder > 0) ? 1 : 0;

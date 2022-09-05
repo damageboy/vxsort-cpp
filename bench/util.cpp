@@ -1,3 +1,7 @@
+#include <random>
+#include <numeric>
+#include <algorithm>
+#include <vector>
 #include "util.h"
 
 #include <benchmark/benchmark.h>
@@ -16,7 +20,7 @@ Counter make_cycle_per_n_counter(double n) {
     return {n, Counter::kDefaults, Counter::kIs1000};
 }
 
-std::unordered_map<std::string, std::string> perf_counter_names ={
+std::unordered_map<std::string, std::string> perf_counter_names = {
     { "branches", "branches" },
     { "branch-instructions", "branch-insn" },
     { "branch-misses", "branch-misses" },

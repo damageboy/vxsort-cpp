@@ -70,7 +70,7 @@ namespace types {
     using u64 = uint64_t;
     using f32 = float;
     using f64 = double;
-    using ssize = ssize_t;
+    using isize = ssize_t;
     using usize = size_t;
 }
 
