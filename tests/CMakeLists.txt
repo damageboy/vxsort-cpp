@@ -10,6 +10,10 @@ set(test_HEADERS
 
 add_compile_definitions("BITONIC_TESTS")
 
+list(APPEND test_SOURCES
+        known_unknowns/masked_load_store.sanity.cpp
+)
+
 if (${PROCESSOR_IS_X86})
     list(APPEND test_SOURCES
             smallsort/smallsort.avx2.cpp
@@ -18,15 +22,10 @@ if (${PROCESSOR_IS_X86})
             fullsort/fullsort.avx512.cpp
             packunpack/packunpack.avx2.cpp
             packunpack/packunpack.avx512.cpp
+            known_unknowns/masked_load_store.avx2.cpp
+            known_unknowns/masked_load_store.avx512.cpp
     )
 endif()
-
-if (${PROCESSOR_IS_ARM} OR ${PROCESSOR_IS_AARCH64})
-    list(APPEND test_SOURCES
-            smallsort/smallsort.neon.cpp
-    )
-endif()
-
 
 add_executable(${TARGET_NAME} ${test_SOURCES} ${test_HEADERS})
 

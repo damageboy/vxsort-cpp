@@ -3,7 +3,7 @@
 
 #include <cstdint>
 #include "../defs.h"
-#include "../machine_traits.h"
+#include "vector_machine/machine_traits.h"
 
 namespace vxsort {
 namespace smallsort {

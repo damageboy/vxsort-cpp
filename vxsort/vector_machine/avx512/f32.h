@@ -7,19 +7,19 @@ public:
     typedef __mmask16 TMASK;
     typedef float TPACK;
 
-    static const int N = sizeof(TV) / sizeof(T);
+    static constexpr i32 N = sizeof(TV) / sizeof(T);
     static_assert(is_powerof2(N), "vector-size / element-size must be a power of 2");
 
     static constexpr bool supports_compress_writes() { return true; }
-    static constexpr bool type_supports_packing() { return false; }
+    static constexpr bool supports_packing() { return false; }
 
     template <int Shift>
     static constexpr bool can_pack(T) { return false; }
 
-    static INLINE TLOADSTOREMASK generate_remainder_mask(int remainder) {
-        assert(remainder >= 0);
-        assert(remainder <= 16);
-        return  0xFFFF >> ((N - remainder) & (N-1));
+    static INLINE TLOADSTOREMASK generate_prefix_mask(i32 amount) {
+        assert(amount >= 0);
+        assert(amount <= N);
+        return 0xFFFF >> ((N - amount) & (N-1));
     }
 
     static INLINE TV load_vec(TV* p) { return _mm512_loadu_ps(p); }

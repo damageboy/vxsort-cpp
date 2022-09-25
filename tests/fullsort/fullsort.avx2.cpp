@@ -42,11 +42,11 @@ INSTANTIATE_TEST_SUITE_P(FullSort, FullSortTestAVX2_i64, vxsort_i64_params_avx2,
 INSTANTIATE_TEST_SUITE_P(FullSort, FullSortTestAVX2_u64, vxsort_u64_params_avx2, PrintSizeAndSlack<u64>());
 INSTANTIATE_TEST_SUITE_P(FullSort, FullSortTestAVX2_f64, vxsort_f64_params_avx2, PrintSizeAndSlack<f64>());
 
-TEST_P(FullSortTestAVX2_i16, VxSortAVX2_1)  { vxsort_test<i16,  1, VMT::AVX2>(V); }
-TEST_P(FullSortTestAVX2_i16, VxSortAVX2_2)  { vxsort_test<i16,  2, VMT::AVX2>(V); }
-TEST_P(FullSortTestAVX2_i16, VxSortAVX2_4)  { vxsort_test<i16,  4, VMT::AVX2>(V); }
-TEST_P(FullSortTestAVX2_i16, VxSortAVX2_8)  { vxsort_test<i16,  8, VMT::AVX2>(V); }
-TEST_P(FullSortTestAVX2_i16, VxSortAVX2_12) { vxsort_test<i16, 12, VMT::AVX2>(V); }
+//TEST_P(FullSortTestAVX2_i16, VxSortAVX2_1)  { vxsort_test<i16,  1, VMT::AVX2>(V); }
+//TEST_P(FullSortTestAVX2_i16, VxSortAVX2_2)  { vxsort_test<i16,  2, VMT::AVX2>(V); }
+//TEST_P(FullSortTestAVX2_i16, VxSortAVX2_4)  { vxsort_test<i16,  4, VMT::AVX2>(V); }
+//TEST_P(FullSortTestAVX2_i16, VxSortAVX2_8)  { vxsort_test<i16,  8, VMT::AVX2>(V); }
+//TEST_P(FullSortTestAVX2_i16, VxSortAVX2_12) { vxsort_test<i16, 12, VMT::AVX2>(V); }
 
 TEST_P(FullSortTestAVX2_i32, VxSortAVX2_1)  { vxsort_test<i32,  1, VMT::AVX2>(V); }
 TEST_P(FullSortTestAVX2_i32, VxSortAVX2_2)  { vxsort_test<i32,  2, VMT::AVX2>(V); }
@@ -54,11 +54,11 @@ TEST_P(FullSortTestAVX2_i32, VxSortAVX2_4)  { vxsort_test<i32,  4, VMT::AVX2>(V)
 TEST_P(FullSortTestAVX2_i32, VxSortAVX2_8)  { vxsort_test<i32,  8, VMT::AVX2>(V); }
 TEST_P(FullSortTestAVX2_i32, VxSortAVX2_12) { vxsort_test<i32, 12, VMT::AVX2>(V); }
 
-TEST_P(FullSortTestAVX2_u16, VxSortAVX2_1)  { vxsort_test<u16,  1, VMT::AVX2>(V); }
-TEST_P(FullSortTestAVX2_u16, VxSortAVX2_2)  { vxsort_test<u16,  2, VMT::AVX2>(V); }
-TEST_P(FullSortTestAVX2_u16, VxSortAVX2_4)  { vxsort_test<u16,  4, VMT::AVX2>(V); }
-TEST_P(FullSortTestAVX2_u16, VxSortAVX2_8)  { vxsort_test<u16,  8, VMT::AVX2>(V); }
-TEST_P(FullSortTestAVX2_u16, VxSortAVX2_12) { vxsort_test<u16, 12, VMT::AVX2>(V); }
+//TEST_P(FullSortTestAVX2_u16, VxSortAVX2_1)  { vxsort_test<u16,  1, VMT::AVX2>(V); }
+//TEST_P(FullSortTestAVX2_u16, VxSortAVX2_2)  { vxsort_test<u16,  2, VMT::AVX2>(V); }
+//TEST_P(FullSortTestAVX2_u16, VxSortAVX2_4)  { vxsort_test<u16,  4, VMT::AVX2>(V); }
+//TEST_P(FullSortTestAVX2_u16, VxSortAVX2_8)  { vxsort_test<u16,  8, VMT::AVX2>(V); }
+//TEST_P(FullSortTestAVX2_u16, VxSortAVX2_12) { vxsort_test<u16, 12, VMT::AVX2>(V); }
 
 TEST_P(FullSortTestAVX2_u32, VxSortAVX2_1)  { vxsort_test<u32,  1, VMT::AVX2>(V); }
 TEST_P(FullSortTestAVX2_u32, VxSortAVX2_2)  { vxsort_test<u32,  2, VMT::AVX2>(V); }

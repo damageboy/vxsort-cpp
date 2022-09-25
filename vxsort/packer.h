@@ -7,7 +7,7 @@
 #include <cassert>
 #include "defs.h"
 #include "alignment.h"
-#include "machine_traits.h"
+#include "vector_machine/machine_traits.h"
 
 #include <immintrin.h>
 #include <cstdio>

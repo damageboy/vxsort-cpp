@@ -12,9 +12,9 @@ set(lib_HEADERS
         packer.h
         vxsort.h
         stats/vxsort_stats.h
-        machine_traits.h
+        vector_machine/machine_traits.h
         vxsort_targets_disable.h
-)
+        partition_machine.h)
 
 if (${PROCESSOR_IS_X86})
     file(GLOB_RECURSE avx2_SRC       vector_machine/avx2/*.cpp smallsort/avx2/*.cpp)
