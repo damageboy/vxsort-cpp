@@ -31,7 +31,7 @@ using namespace vxsort::types;
 // This mostly applies to debug mode, since without optimizations, most compilers
 // actually execute the instruction stream _mm256_cvtepi8_epiNN + _mm_loadu_si128 as they are given.
 // In contrast, release/optimizing compilers, turn that very specific intrinsic pair to
-// a more reasonable: vpmovsxbq ymm0, dword [rax*4 + mask_table_4], eliminating the 128-bit
+// a more reasonable: vpmovsxbq ymm0, dword [rax*4 + prefix_mask_table_64b], eliminating the 128-bit
 // load completely and effectively reading exactly 4/8 (depending if the instruction is vpmovsxb[q,d]
 // without generating an out of bounds read at all.
 // But, life is harsh, and we can't trust the compiler to do the right thing if it is not
@@ -39,9 +39,11 @@ using namespace vxsort::types;
 const int M4_SIZE = 16 + 12;
 const int M8_SIZE = 64 + 8;
 
-extern const u8 mask_table_4[M4_SIZE];
-extern const u8 mask_table_8[M8_SIZE];
+extern const u8 prefix_mask_table_64b[M4_SIZE];
+extern const u8 prefix_mask_table_32b[M8_SIZE];
 
+extern const u8 suffix_mask_table_64b[M4_SIZE];
+extern const u8 suffix_mask_table_32b[M8_SIZE];
 
 extern const i8 perm_table_64[128];
 extern const i8 perm_table_32[2048];

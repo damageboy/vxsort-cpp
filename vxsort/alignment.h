@@ -2,16 +2,19 @@
 #define VXSORT_ALIGNNMENT_H
 
 #include <cstdint>
+#include "defs.h"
 
 namespace vxsort {
+using namespace vxsort::types;
 
 using namespace std;
 
 template <int N>
 struct alignment_hint {
 public:
-    static const size_t ALIGN = N;
-    static const int8_t REALIGN = 0x66;
+    static constexpr usize ALIGN = N;
+    static const i8 REALIGN = 0x66;
+    static_assert(REALIGN > ALIGN, "REALIGN must be larger than ALIGN");
 
     alignment_hint() : left_align(REALIGN), right_align(REALIGN) {}
     alignment_hint realign_left() {
@@ -26,10 +29,10 @@ public:
         return copy;
         }
 
-    static bool is_aligned(void* p) { return (size_t)p % ALIGN == 0; }
+    static bool is_aligned(void* p) { return (usize)p % ALIGN == 0; }
 
-    int left_align : 8;
-    int right_align : 8;
+    i32 left_align : 8;
+    i32 right_align : 8;
 };
 
 } // namespace vxsort

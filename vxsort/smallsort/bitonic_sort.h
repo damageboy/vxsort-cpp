@@ -6,7 +6,7 @@
 #include <limits>
 #include <cassert>
 #include "../defs.h"
-#include "../machine_traits.h"
+#include "vector_machine/machine_traits.h"
 #include "bitonic_machine.h"
 
 namespace vxsort {
@@ -48,7 +48,7 @@ public:
     const auto slack_v = (v % 4) + (remainder ? 1 : 0);
 
     // Load/Store mask for the last vector
-    const auto mask = VMT::generate_remainder_mask(remainder);
+    const auto mask = VMT::generate_prefix_mask(remainder);
     // How many vectors in the last group of up to 4 vectors
     auto last_chunk_v = slack_v;
 
