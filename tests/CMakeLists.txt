@@ -5,13 +5,12 @@ set(TARGET_NAME ${CMAKE_PROJECT_NAME}_tests)
 set(test_HEADERS
         smallsort/smallsort_test.h
         fullsort/fullsort_test.h
-        packunpack/packunpack_test.h
 )
 
 add_compile_definitions("BITONIC_TESTS")
 
 list(APPEND test_SOURCES
-        known_unknowns/masked_load_store.sanity.cpp
+        mini_tests/masked_load_store.sanity.cpp
 )
 
 if (${PROCESSOR_IS_X86})
@@ -20,10 +19,8 @@ if (${PROCESSOR_IS_X86})
             smallsort/smallsort.avx512.cpp
             fullsort/fullsort.avx2.cpp
             fullsort/fullsort.avx512.cpp
-            packunpack/packunpack.avx2.cpp
-            packunpack/packunpack.avx512.cpp
-            known_unknowns/masked_load_store.avx2.cpp
-            known_unknowns/masked_load_store.avx512.cpp
+            mini_tests/masked_load_store.avx2.cpp
+            mini_tests/masked_load_store.avx512.cpp
     )
 endif()
 

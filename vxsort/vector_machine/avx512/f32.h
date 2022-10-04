@@ -22,11 +22,17 @@ public:
         return 0xFFFF >> ((N - amount) & (N-1));
     }
 
+    static INLINE TLOADSTOREMASK generate_suffix_mask(i32 amount) {
+        assert(amount >= 0);
+        assert(amount <= N);
+        return 0xFFFF << (amount & (N-1));
+    }
+
     static INLINE TV load_vec(TV* p) { return _mm512_loadu_ps(p); }
 
     static INLINE void store_vec(TV* ptr, TV v) { _mm512_storeu_ps(ptr, v); }
 
-    static TV load_masked_vec(TV *ptr, TV base, TLOADSTOREMASK mask) {
+    static TV load_partial_vec(TV *ptr, TV base, TLOADSTOREMASK mask) {
         return _mm512_mask_loadu_ps(base, mask, (T const *) ptr);
     }
 

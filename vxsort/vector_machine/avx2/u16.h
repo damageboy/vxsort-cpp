@@ -19,7 +19,14 @@ class vxsort_machine_traits<u16, AVX2> {
 
     static INLINE TLOADSTOREMASK generate_prefix_mask(i32 amount) {
         assert(amount >= 0);
-        assert(amount < N);
+        assert(amount <= N);
+
+        return amount ? amount : N;
+    }
+
+    static INLINE TLOADSTOREMASK generate_suffix_mask(i32 amount) {
+        assert(amount >= 0);
+        assert(amount <= N);
 
         return amount ? amount : N;
     }
@@ -30,17 +37,17 @@ class vxsort_machine_traits<u16, AVX2> {
 
     static void store_compress_vec(TV*, TV, TMASK) { throw std::runtime_error("operation is unsupported"); }
 
-    static INLINE TV load_masked_vec(TV *p, TV base, TLOADSTOREMASK remainder) {
+    static INLINE TV load_partial_vec(TV *p, TV base, TLOADSTOREMASK mask) {
         // FML: There is only so much AVX2 stupidity one person can
         //      take in their entire lifetime, I'm personally over this crap
         std::array<T, N> max_vec;
         max_vec.fill(std::numeric_limits<T>::max());
-        std::copy_n(reinterpret_cast<T *>(p), remainder, max_vec.begin());
+        std::copy_n(reinterpret_cast<T *>(p), mask, max_vec.begin());
         return _mm256_lddqu_si256((TV *)max_vec.data());
     }
 
-    static INLINE void store_masked_vec(TV *p, TV v, TLOADSTOREMASK remainder) {
-        memcpy(p, &v, sizeof(T) * remainder);
+    static INLINE void store_masked_vec(TV *p, TV v, TLOADSTOREMASK mask) {
+        memcpy(p, &v, sizeof(T) * mask);
     }
 
     static INLINE TV partition_vector(TV v, int mask) {
