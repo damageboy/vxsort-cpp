@@ -22,13 +22,13 @@ class vxsort_machine_traits<u64, AVX2> {
 
     static INLINE TLOADSTOREMASK generate_prefix_mask(i32 amount) {
         assert(amount >= 0);
-        assert(amount < N);
+        assert(amount <= N);
         return _mm256_cvtepi8_epi64(_mm_loadu_si128((__m128i*)(prefix_mask_table_64b + amount * N)));
     }
 
     static INLINE TLOADSTOREMASK generate_suffix_mask(i32 amount) {
         assert(amount >= 0);
-        assert(amount < N);
+        assert(amount <= N);
         return _mm256_cvtepi8_epi64(_mm_loadu_si128((__m128i*)(suffix_mask_table_64b + amount * N)));
     }
 
@@ -38,7 +38,7 @@ class vxsort_machine_traits<u64, AVX2> {
 
     static void store_compress_vec(TV*, TV, TMASK) { throw std::runtime_error("operation is unsupported"); }
 
-    static INLINE TV load_masked_vec(TV *p, TV base, TLOADSTOREMASK mask) {
+    static INLINE TV load_partial_vec(TV *p, TV base, TLOADSTOREMASK mask) {
         return _mm256_or_si256(_mm256_maskload_epi64((long long *) p, mask),
                                _mm256_andnot_si256(mask, base));
     }

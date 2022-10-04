@@ -36,6 +36,8 @@ public:
     typedef T TMASK;
     typedef T TPACK;
 
+    static constexpr i32 N = 1;
+
     static constexpr bool supports_compress_writes() {
         static_assert(always_false<TV>, "must be specialized!");
         return false;
@@ -68,7 +70,7 @@ public:
         static_assert(always_false<TV>, "must be specialized!");
     }
 
-    static TV load_masked_vec(TV *, TV, TLOADSTOREMASK) {
+    static TV load_partial_vec(TV *, TV, TLOADSTOREMASK) {
         static_assert(always_false<TV>, "must be specialized!");
     }
 

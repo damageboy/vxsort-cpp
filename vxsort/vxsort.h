@@ -19,6 +19,7 @@
 #include "isa_detection.h"
 #include "vector_machine/machine_traits.h"
 #include "partition_machine.h"
+#include "pack_machine.h"
 #include "smallsort/bitonic_sort.h"
 #include <algorithm>
 #include <cstring>
@@ -47,10 +48,12 @@ class vxsort {
 private:
     using VMT = vxsort_machine_traits<T, M>;
     using PMT = partition_machine<T, M>;
+    using PKM = pack_machine<T, M, Shift>;
+
     typedef typename VMT::TPACK TPACK;
     using VM_PACKED = vxsort_machine_traits<TPACK, M>;
     typedef typename VMT::TV TV;
-    typedef alignment_hint<sizeof(TV)> AH;
+    typedef alignment_hint<T, M> AH;
 
     static const i32 ELEMENT_ALIGN = sizeof(T) - 1;
     static const i32 N = sizeof(TV) / sizeof(T);
@@ -60,7 +63,7 @@ private:
     static const i32 SMALL_SORT_THRESHOLD_VECTORS = SMALL_SORT_THRESHOLD_ELEMENTS / N;
     static const i32 SLACK_PER_SIDE_IN_VECTORS = Unroll;
     static const size_t ALIGN = AH::ALIGN;
-    static const size_t ALIGN_MASK = ALIGN - 1;
+    static const size_t ALIGN_MASK = AH::ALIGN_MASK;
     static const i32 SLACK_PER_SIDE_IN_ELEMENTS = SLACK_PER_SIDE_IN_VECTORS * N;
     // The formula for figuring out how much temporary space we need for partitioning:
     // 2 x the number of slack elements on each side for the purpose of partitioning in unrolled manner +
@@ -70,10 +73,10 @@ private:
     // In other words, while we allocated this much temp memory, the actual amount of elements inside said memory
     // is smaller by 8 elements + 1 for each alignment (max alignment is actually N-1, I just round up to N...)
     // This long sense just means that we over-allocate N+2 elements...
-    static const i32 PARTITION_TMP_SIZE_IN_ELEMENTS =
+    static const i32 PARTITION_SPILL_SIZE_IN_ELEMENTS =
             (2 * SLACK_PER_SIDE_IN_ELEMENTS + N + 4*N);
 
-    static_assert(PARTITION_TMP_SIZE_IN_ELEMENTS < SMALL_SORT_THRESHOLD_ELEMENTS, "Unroll-level must match small-sorting threshold");
+    static_assert(PARTITION_SPILL_SIZE_IN_ELEMENTS < SMALL_SORT_THRESHOLD_ELEMENTS, "Unroll-level must match small-sorting threshold");
     static const i32 PackUnroll = (Unroll / 2 > 0) ? Unroll / 2 : 1;
 
 
@@ -86,7 +89,7 @@ private:
     T* _start = nullptr;
     T* _end = nullptr;
 
-    T _temp[PARTITION_TMP_SIZE_IN_ELEMENTS];
+    T _spill[PARTITION_SPILL_SIZE_IN_ELEMENTS];
     i32 _depth = 0;
 
     static i32 floor_log2_plus_one(size_t n) {
@@ -134,47 +137,9 @@ private:
         *(lo + i - 1) = d;
     }
 
-    NOINLINE
-    T* align_left_scalar_uncommon(T* read_left, T pivot,
-                                  T* RESTRICT & tmp_left, T* RESTRICT & tmp_right) {
-        if (((size_t)read_left & ALIGN_MASK) == 0)
-            return read_left;
-
-        auto* next_align = (T*)(((size_t)read_left + ALIGN) & ~ALIGN_MASK);
-        while (read_left < next_align) {
-            auto v = *(read_left++);
-            if (v <= pivot) {
-                *(tmp_left++) = v;
-            } else {
-                *(--tmp_right) = v;
-            }
-        }
-
-        return read_left;
-    }
-
-    NOINLINE
-    T* align_right_scalar_uncommon(T* read_right, T pivot,
-                                   T* RESTRICT & tmp_left, T* RESTRICT & tmp_right) {
-        if (((size_t)read_right & ALIGN_MASK) == 0)
-            return read_right;
-
-        auto* nextAlign = (T *) ((size_t)read_right & ~ALIGN_MASK);
-        while (read_right > nextAlign) {
-            auto v = *(--read_right);
-            if (v <= pivot) {
-                *(tmp_left++) = v;
-            } else {
-                *(--tmp_right) = v;
-            }
-        }
-
-        return read_right;
-    }
-
     void sort(T* left, T* right,
               T left_hint, T right_hint,
-              AH realign_hint, i32 depth_limit) {
+              AH alignment, i32 depth_limit) {
         auto length = static_cast<size_t>(right - left + 1);
 
         T* mid;
@@ -238,29 +203,16 @@ private:
         // do this. In reality, we need more like 2x 4bits for each side, but I
         // don't think there is a real difference'
 
-        if (realign_hint.left_align == AH::REALIGN) {
-            // Alignment flow:
-            // * Calculate pre-alignment on the left
-            // * See it would cause us an out-of bounds read
-            // * Since we'd like to avoid that, we adjust for post-alignment
-            // * No branches since we do branch->arithmetic
-            auto* preAlignedLeft = reinterpret_cast<T*>(reinterpret_cast<usize>(left) & ~ALIGN_MASK);
-            auto cannotPreAlignLeft = (preAlignedLeft - _start) >> 63;
-            realign_hint.left_align = (preAlignedLeft - left) + (N & cannotPreAlignLeft);
-            assert(realign_hint.left_align >= -N && realign_hint.left_align <= N);
-            assert(AH::is_aligned(left + realign_hint.left_align));
+        if (alignment.left_masked_amount == AH::REALIGN) {
+            alignment.calc_left_alignment(left);
         }
 
-        if (realign_hint.right_align == AH::REALIGN) {
-            // Same as above, but in addition:
-            // right is pointing just PAST the last element we intend to partition
-            // (it's pointing to where we will store the pivot!) So we calculate alignment based on
-            // right - 1
-            auto* preAlignedRight = reinterpret_cast<T*>(((reinterpret_cast<usize>(right) - 1) & ~ALIGN_MASK) + ALIGN);
-            auto cannotPreAlignRight = (_end - preAlignedRight) >> 63;
-            realign_hint.right_align = (preAlignedRight - right - (N & cannotPreAlignRight));
-            assert(realign_hint.right_align >= -N && realign_hint.right_align <= N);
-            assert(AH::is_aligned(right + realign_hint.right_align));
+        // `right` points to the last element of the array, where we the pivot is stored
+        // IOW, while it *technically* points *inside* the partition, it is, actually
+        // pointing exactly one element past the last element we will partition
+        // Therefore, we pass it as-is since this is what the callee expects exactly
+        if (alignment.right_unmasked_amount == AH::REALIGN) {
+            alignment.calc_right_alignment(right);
         }
 
         // Compute median-of-three, of:
@@ -272,7 +224,6 @@ private:
 
         // Pivot is mid, place it in the right-hand side
         swap(mid, right);
-
 
         // Some types (e.g. integers) can be potentially packed to a lower bit width while being partitioned.
         // Examples: i64 -> i32 -> i16, u32 -> u16, and so on...
@@ -300,7 +251,7 @@ private:
                 vxsort_stats<T>::bump_packs(length);
                 vxsort_stats<T>::bump_unpacks(length);
 #endif
-                auto left_length = vectorized_packed_partition(left, right, left_hint, realign_hint);
+                auto left_length = vectorized_packed_partition(left, right, left_hint, alignment);
                 auto right_length = length - left_length;
                 auto* const left_packed_start  = reinterpret_cast<TPACK *>(left);
                 auto* const left_packed_end    = left_packed_start + left_length - 1;
@@ -317,11 +268,11 @@ private:
             }
         }
 
-        auto sep = vectorized_partition<Unroll>(left, right, realign_hint);
+        auto sep = vectorized_partition<Unroll>(left, right, alignment);
 
         _depth++;
-        sort(left, sep - 2, left_hint, *sep, realign_hint.realign_right(), depth_limit);
-        sort(sep, right, *(sep - 2), right_hint, realign_hint.realign_left(), depth_limit);
+        sort(left, sep - 2, left_hint, *sep, alignment.clear_right(), depth_limit);
+        sort(sep, right, *(sep - 2), right_hint, alignment.clear_left(), depth_limit);
         _depth--;
     }
 
@@ -332,12 +283,14 @@ private:
     /// \tparam InnerUnroll - The amount of unrolling / code-bloat
     /// \param left - pointer (inclusive) to the left edge of the partition
     /// \param right - pointer (inclusive) to the right edge of the partition.
-    ///                Note: as part of the internal convention, this points
-    ///                      to where the pivot for this call is stored.
-    /// \param hint - a (partially) cache hint used to communicate where the
+    ///                Note: as part of the internal convention, this is a "dual" pointer
+    ///                as it points to the pivot for this partition call, and is pointing just past
+    ///                the last element to be partitioned during this call.
+    /// \param alignment - a (partially) cache alignment used to communicate where the
     ///               the nearest vector-alignment left+right of the partition
     ///               is situated.
     /// \return A pointer to the new location
+    ///
     /// Vectorized double-pumped (dual-sided) partitioning:
     /// We start with reading the pivot value passed on to use at the position
     /// pointed to by the 'right' parameter. We process the array from both ends.
@@ -346,19 +299,22 @@ private:
     /// from the left and right, each. This data is partitioned and stored in a
     /// small temporary buffer to make some room for the main block where an
     /// inplace partitioning loop is performed.
-    ///Conceptually, the bulk
+    /// Conceptually, the bulk
     /// of the processing looks like this after clearing out some initial space
     /// as described above:
+    /// @code
     /// |-- InnerUnroll x -|                                    |-- InnerUnroll x -|
     ///        vector-size                                             vector-size
-    //           bytes                                                   bytes
+    ///          bytes                                                   bytes
     /// [..........................................................................]
-    //  ^wl                ^rl                                rr^                wr^
+    ///  ^wl                ^rl                                rr^                wr^
     /// Where:
     /// wl = write_left_v
     /// rl = read_left_v
     /// rr = read_right_v
     /// wr = write_right_v
+    /// @endcode
+    ///
     /// In every iteration, we select what side to read from based on how much
     /// space is left between head read/write pointer on each side...
     /// We read from where there is a smaller gap, e.g. that side
@@ -373,11 +329,25 @@ private:
     /// a vector unit, which greatly reduces the amount of execution resources
     /// required by a modern processor to read the required data.
     template<int InnerUnroll>
-    T* vectorized_partition(T* const left, T* const right, const AH hint)
+    T* vectorized_partition(T* const left, T* const right, const AH alignment)
     {
+//#ifdef NDEBUG
+//#   define LOAD_LEFT
+//#   define LOAD_RIGHT
+//#else
+//        usize last_left = (usize)left;
+//        usize last_right = (usize)right;
+//        #define LOAD_LEFT(p) { fmt::print("LL: {}\n", (usize) p - last_left); last_left = (usize) p; }
+//        #define LOAD_RIGHT(p) { fmt::print("LR: {}\n", last_right - (usize) p); last_right = (usize) p; }
+//#endif
+
         assert(right - left >= SMALL_SORT_THRESHOLD_ELEMENTS);
-        assert((reinterpret_cast<size_t>(left) & ELEMENT_ALIGN) == 0);
-        assert((reinterpret_cast<size_t>(right) & ELEMENT_ALIGN) == 0);
+        assert((reinterpret_cast<usize>(left) & ELEMENT_ALIGN) == 0);
+        assert((reinterpret_cast<usize>(right) & ELEMENT_ALIGN) == 0);
+#ifndef NDEBUG
+        memset((void *)_spill, 0, PARTITION_SPILL_SIZE_IN_ELEMENTS * sizeof(T));
+#endif
+
 
 #ifdef VXSORT_STATS
         vxsort_stats<T>::bump_partitions((right - left) + 1);
@@ -387,60 +357,50 @@ private:
         // right pointer must be decremented by another Vector256<T>.Count elements
         // Since the Load/Store primitives obviously accept start addresses
         auto pivot = *right;
-        // We do this here just in case we need to pre-align to the right
-        // We end up
-        *right = std::numeric_limits<T>::max();
 
         // Broadcast the selected pivot
         const auto P = VMT::broadcast(pivot);
 
-        auto read_left = left;
-        auto read_right = right;
+        auto * RESTRICT spill_read_left = _spill;
+        auto * RESTRICT spill_write_left = spill_read_left;
+        auto * RESTRICT spill_read_right = _spill + PARTITION_SPILL_SIZE_IN_ELEMENTS;
+        auto * RESTRICT spill_write_right = spill_read_right;
 
-        const auto left_align = hint.left_align;
-        const auto right_align = hint.right_align;
+        // mutable pointer copies of the originals
+        auto * RESTRICT read_left = left;
+        auto * RESTRICT read_right = right;
 
-        auto * RESTRICT tmp_start_left = _temp;
-        auto * RESTRICT tmp_left = tmp_start_left;
-        auto * RESTRICT tmp_start_right = _temp + PARTITION_TMP_SIZE_IN_ELEMENTS;
-        auto *tmp_right = tmp_start_right;
+        // the read heads always advance by N elements towards te middle,
+        // It would be wise to spend some extra effort here to align the read
+        // pointers such that they align naturally to vector size;
+        // on vector-machines, where the ratio between vector/cache-line size
+        // is close, for example, assuming 64-byte cache-line:
+        // * unaligned 256-bit loads create split-line loads 50% of the time
+        // * unaligned 512-bit loads create a split-line loads 100% of the time
+        PMT::align_vectorized(alignment.left_masked_amount,
+                              alignment.right_unmasked_amount,
+                              P,
+                              read_left, read_right,
+                              spill_read_left, spill_write_left,
+                              spill_read_right, spill_write_right);
 
-        tmp_right -= N;
+        assert((right - left) ==
+               ((read_right + N) - read_left) + // Unpartitioned elements (+N for right-side vec reads)
+               (spill_write_left - spill_read_left) + // partitioned to left-spill
+               (spill_read_right - (spill_write_right + N))); // partitioned to right-spill (+N for right-side vec reads)
 
-        // the read heads always advance by 8 elements, or 32 bytes,
-        // We can spend some extra time here to align the pointers
-        // so they start at a cache-line boundary
-        // Once that happens, we can read with Avx.LoadAlignedVector256
-        // And also know for sure that our reads will never cross cache-lines
-        // Otherwise, 50% of our AVX2 Loads will need to read from two cache-lines
-        align_vectorized(left_align, right_align, P,
-                         read_left, read_right,
-                         tmp_start_left, tmp_left,
-                         tmp_start_right, tmp_right);
 
-        if (left_align > 0) {
-            tmp_right += N;
-            read_left = align_left_scalar_uncommon(read_left, pivot, tmp_left, tmp_right);
-            tmp_right -= N;
-        }
 
-        if (right_align < 0) {
-            tmp_right += N;
-            read_right =
-                    align_right_scalar_uncommon(read_right, pivot, tmp_left, tmp_right);
-            tmp_right -= N;
-        }
-
-        assert(((size_t)read_left & ALIGN_MASK) == 0);
-        assert(((size_t)read_right & ALIGN_MASK) == 0);
-
-        assert((((size_t)read_right - (size_t)read_left) % ALIGN) == 0);
+        assert(((usize)read_left & ALIGN_MASK) == 0);
+        assert(((usize)read_right & ALIGN_MASK) == 0);
+        assert((((usize)read_right - (usize)read_left) % ALIGN) == 0);
         assert((read_right - read_left) >= InnerUnroll * 2);
 
         // From now on, we are fully aligned
         // and all reading is done in full vector units
-        auto * RESTRICT read_left_v = (TV*)read_left;
-        auto * RESTRICT read_right_v = (TV*)read_right;
+        auto * RESTRICT read_left_v = reinterpret_cast<TV*>(read_left);
+        auto * RESTRICT read_right_v = reinterpret_cast<TV*>(read_right);
+
 #ifndef NDEBUG
         read_left = nullptr;
         read_right = nullptr;
@@ -448,16 +408,17 @@ private:
 
         for (auto u = 0; u < InnerUnroll; u++) {
             auto dl = VMT::load_vec(read_left_v + u);
-            auto dr = VMT::load_vec(read_right_v - (u + 1));
-            PMT::partition_block(dl, P, tmp_left, tmp_right);
-            PMT::partition_block(dr, P, tmp_left, tmp_right);
+            auto dr = VMT::load_vec(read_right_v - u);
+            PMT::partition_block(dl, P, spill_write_left, spill_write_right);
+            PMT::partition_block(dr, P, spill_write_left, spill_write_right);
         }
 
-        // Fix-up tmp_right after the last vector operation
+        // Fix-up spill_write_right after the last vector operation
         // potentially *writing* through it is done
-        tmp_right += N;
+        spill_write_right += N;
         // Adjust for the reading that was made above
         read_left_v += InnerUnroll;
+        read_right_v += 1;
         read_right_v -= InnerUnroll*2;
         TV* nextPtr;
 
@@ -525,11 +486,11 @@ private:
         }
 
         // 3. Copy-back the 4 registers + remainder we partitioned in the beginning
-        auto left_tmp_size = tmp_left - tmp_start_left;
-        memcpy(write_left, tmp_start_left, left_tmp_size * sizeof(T));
+        auto left_tmp_size = spill_write_left - spill_read_left;
+        memcpy(write_left, spill_read_left, left_tmp_size * sizeof(T));
         write_left += left_tmp_size;
-        auto right_tmp_size = tmp_start_right - tmp_right;
-        memcpy(write_left, tmp_right, right_tmp_size * sizeof(T));
+        auto right_tmp_size = spill_read_right - spill_write_right;
+        memcpy(write_left, spill_write_right, right_tmp_size * sizeof(T));
 
         // Shove to pivot back to the boundary
         *right = *write_left;
@@ -550,22 +511,26 @@ private:
     ///                      to where the pivot for this call is stored.
     /// \param min_bounding - the base value to subtract from each value before performing
     ///               the packing
-    /// \param hint - a (partially) cache hint used to communicate where the
+    /// \param alignment - a (partially) cache alignment used to communicate where the
     ///               the nearest vector-alignment left+right of the partition
     ///               is situated.
     /// \return The amount of elements partitioned to the left side
     size_t vectorized_packed_partition(T* const left, T* const right,
-                                       T min_bounding, const AH hint) {
+                                       T min_bounding, const AH alignment) {
         assert(right - left >= SMALL_SORT_THRESHOLD_ELEMENTS);
         assert((reinterpret_cast<size_t>(left) & ELEMENT_ALIGN) == 0);
         assert((reinterpret_cast<size_t>(right) & ELEMENT_ALIGN) == 0);
+
+#ifndef NDEBUG
+        memset((void *)_spill, 0, PARTITION_SPILL_SIZE_IN_ELEMENTS * sizeof(T));
+#endif
+
 
 #ifdef VXSORT_STATS
         vxsort_stats<T>::bump_partitions((right - left) + 1);
 #endif
 
         auto pivot = *right;
-        *right = std::numeric_limits<T>::max();
 
         // Broadcast the selected pivot
         const auto P = VMT::broadcast(pivot);
@@ -575,42 +540,27 @@ private:
         auto offset = VMT::template shift_n_sub<Shift>(min_bounding, MIN);
         const TV offset_v = VMT::broadcast(offset);
 
-        auto* read_left = left;
-        auto* read_right = right;
+        auto * RESTRICT read_left = left;
+        auto * RESTRICT read_right = right;
 
-        const auto left_align = hint.left_align;
-        const auto right_align = hint.right_align;
+        auto * RESTRICT spill_read_left = _spill;
+        auto * RESTRICT spill_write_left = spill_read_left;
+        auto * RESTRICT spill_read_right = _spill + PARTITION_SPILL_SIZE_IN_ELEMENTS;
+        auto * RESTRICT spill_write_right = spill_read_right;
 
-        auto* tmp_start_left = _temp;
-        auto* tmp_left = tmp_start_left;
-        auto* tmp_start_right = _temp + PARTITION_TMP_SIZE_IN_ELEMENTS;
-        auto* tmp_right = tmp_start_right;
-
-        tmp_right -= N;
-
-        // We take some extra time to attempt to read more than the exact partition extents
-        // there-by killing off two birds: We align the read-pointers to vector-size units,
-        // which greatly reduces the amount of split-cache-line load operations on the one hand.
-        // At the same time, if we manage to accomplish this in a vectorized manner, we also
-        // avoid all scalar work that may have been required to take care of the tail of partition
-        // when that is not vector-sized.
-        align_vectorized(left_align, right_align,
-                         P,
-                         read_left, read_right,
-                         tmp_start_left, tmp_left,
-                         tmp_start_right, tmp_right);
-
-        if (left_align > 0) {
-            tmp_right += N;
-            read_left = align_left_scalar_uncommon(read_left, pivot, tmp_left, tmp_right);
-            tmp_right -= N;
-        }
-
-        if (right_align < 0) {
-            tmp_right += N;
-            read_right = align_right_scalar_uncommon(read_right, pivot, tmp_left, tmp_right);
-            tmp_right -= N;
-        }
+        // the read heads always advance by N elements towards te middle,
+        // It would be wise to spend some extra effort here to align the read
+        // pointers such that they align naturally to vector size;
+        // on vector-machines, where the ratio between vector/cache-line size
+        // is close, for example, assuming 64-byte cache-line:
+        // * unaligned 256-bit loads create split-line loads 50% of the time
+        // * unaligned 512-bit loads create a split-line loads 100% of the time
+        PMT::align_vectorized(alignment.left_masked_amount,
+                              alignment.right_unmasked_amount,
+                              P,
+                              read_left, read_right,
+                              spill_read_left, spill_write_left,
+                              spill_read_right, spill_write_right);
 
         assert(((size_t)read_left & ALIGN_MASK) == 0);
         assert(((size_t)read_right & ALIGN_MASK) == 0);
@@ -635,7 +585,7 @@ private:
         const auto packed_pivot = VMT::template shift_n_sub<Shift>(pivot, offset);
         const TV PPP = VM_PACKED::broadcast(static_cast<TPACK>(packed_pivot));
 
-        auto len_v = read_right_v - read_left_v;
+        auto len_v = read_right_v - read_left_v + 1;
         auto len_dv = len_v / 2;
 
         len_v -= len_dv * 2;
@@ -647,17 +597,9 @@ private:
 
         for (auto i = 0; i < len_dv; i++) {
             auto dl = VMT::load_vec(read_left_v + i);
-            auto dr = VMT::load_vec(read_right_v - (i + 1));
+            auto dr = VMT::load_vec(read_right_v - i);
 
-            // This is statically compiled in/out
-            if (Shift > 0) {
-                dl = VMT::shift_right(dl, Shift);
-                dr = VMT::shift_right(dr, Shift);
-            }
-            dl = VMT::sub(dl, offset_v);
-            dr = VMT::sub(dr, offset_v);
-
-            auto packed_data = VMT::pack_unordered(dl, dr);
+            auto packed_data  = PKM::pack_vectors(dl, dr, offset_v);
 
             vxsort<TPACK, M, Unroll>::PMT::partition_block(packed_data, PPP, write_left, write_right);
         }
@@ -666,19 +608,19 @@ private:
         // scalar partitioning into the tmp space
         if (len_v > 0) {
             auto slack = VMT::load_vec((TV *) (read_left_v + len_dv));
-            PMT::partition_block(slack, P, tmp_left, tmp_right);
+            PMT::partition_block(slack, P, spill_write_left, spill_write_right);
         }
-        // Fix-up tmp_right after the last vector operation
+        // Fix-up spill_write_right after the last vector operation
         // potentially *writing* through it is done
-        tmp_right += N;
+        spill_write_right += N;
 
         write_right += 2*N;
 
-        for (auto *p = tmp_start_left; p < tmp_left; p++) {
+        for (auto *p = spill_read_left; p < spill_write_left; p++) {
             *(write_left++) = static_cast<TPACK>(VMT::template shift_n_sub<Shift>(*p, offset));
         }
 
-        for (auto *p = tmp_right; p < tmp_start_right; p++) {
+        for (auto *p = spill_write_right; p < spill_read_right; p++) {
             *(--write_right) = static_cast<TPACK>(VMT::template shift_n_sub<Shift>(*p, offset));
         }
 
@@ -692,18 +634,6 @@ private:
         None = 0,
         Right = 1,
     };
-
-    static NOINLINE void unpack_vectorized(const TV baseVec, TV d01, TV& u01, TV& u02) {
-        VMT::unpack_ordered(d01, u01, u02);
-
-        u01 = VMT::add(u01, baseVec);
-        u02 = VMT::add(u02, baseVec);
-
-        if (Shift > 0) { // This is statically compiled in/out
-            u01 = VMT::shift_left(u01, Shift);
-            u02 = VMT::shift_left(u02, Shift);
-        }
-    }
 
     template <typename TPTR = char>
     static TPTR* align_up(void* p, const intptr_t mask) {
@@ -722,6 +652,7 @@ private:
     /// \brief Unpack a sequence of packed values into a sequence of unpacked values.
     ///        This implementation goes through the memory going backwards
     ///        (e.g. decreasing addresses) as depicted below:
+    /// @code
     ///                length                                          x    - unreadable/writeable memory
     ///                   ▲                                            r/R  - readable elements
     ///                   │                                            ww/WW- written elements
@@ -739,6 +670,8 @@ private:
     ///    ├──────────────────────────────────────────────────────────▼───────────────────────────────────┐
     ///    wwWWwwWWwwWWwwWWwwWWwwWWwwWWwwWWwwWWwwWWwwWWwwWWwwWWwwWWwwWWxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
     ///    └──────────────────────────────────────────────────────────────────────────────────────────────┘
+    /// @endcode
+
 
     /// \param mem_end
     /// \param len
@@ -792,19 +725,19 @@ private:
 
             do {
                 TV u01, u02, u03, u04, u05, u06, u07, u08;
-                unpack_vectorized(base_v, d01, u01, u02);
+                PKM::unpack_vectors(base_v, d01, u01, u02);
                 VMT::store_vec(memv_write + 0, u01);
                 VMT::store_vec(memv_write + 1, u02);
                 if (UnpackUnroll == 1) break;
-                unpack_vectorized(base_v, d02, u03, u04);
+                PKM::unpack_vectors(base_v, d02, u03, u04);
                 VMT::store_vec(memv_write - 2, u03);
                 VMT::store_vec(memv_write - 1, u04);
                 if (UnpackUnroll == 2) break;
-                unpack_vectorized(base_v, d03, u05, u06);
+                PKM::unpack_vectors(base_v, d03, u05, u06);
                 VMT::store_vec(memv_write - 4, u05);
                 VMT::store_vec(memv_write - 3, u06);
                 if (UnpackUnroll == 3) break;
-                unpack_vectorized(base_v, d04, u07, u08);
+                PKM::unpack_vectors(base_v, d04, u07, u08);
                 VMT::store_vec(memv_write - 6, u07);
                 VMT::store_vec(memv_write - 5, u08);
                 break;
@@ -824,7 +757,7 @@ private:
 
                 d01 = VMT::load_vec(memv_read);
 
-                unpack_vectorized(base_v, d01, u01, u02);
+                PKM::unpack_vectors(base_v, d01, u01, u02);
                 VMT::store_vec(memv_write + 0, u01);
                 VMT::store_vec(memv_write + 1, u02);
 
@@ -920,19 +853,19 @@ private:
 
             do {
                 TV u01, u02, u03, u04, u05, u06, u07, u08;
-                unpack_vectorized(base_v, d01, u01, u02);
+                PKM::unpack_vectors(base_v, d01, u01, u02);
                 VMT::store_vec(memv_write + 0, u01);
                 VMT::store_vec(memv_write + 1, u02);
                 if (UnpackUnroll == 1) break;
-                unpack_vectorized(base_v, d02, u03, u04);
+                PKM::unpack_vectors(base_v, d02, u03, u04);
                 VMT::store_vec(memv_write + 2, u03);
                 VMT::store_vec(memv_write + 3, u04);
                 if (UnpackUnroll == 2) break;
-                unpack_vectorized(base_v, d03, u05, u06);
+                PKM::unpack_vectors(base_v, d03, u05, u06);
                 VMT::store_vec(memv_write + 4, u05);
                 VMT::store_vec(memv_write + 5, u06);
                 if (UnpackUnroll == 3) break;
-                unpack_vectorized(base_v, d04, u07, u08);
+                PKM::unpack_vectors(base_v, d04, u07, u08);
                 VMT::store_vec(memv_write + 6, u07);
                 VMT::store_vec(memv_write + 7, u08);
                 break;
@@ -952,7 +885,7 @@ private:
 
                 d01 = VMT::load_vec(memv_read);
 
-                unpack_vectorized(base_v, d01, u01, u02);
+                PKM::unpack_vectors(base_v, d01, u01, u02);
                 VMT::store_vec(memv_write + 0, u01);
                 VMT::store_vec(memv_write + 1, u02);
 
@@ -971,106 +904,6 @@ private:
 
         assert(mem_read == reinterpret_cast<TPACK *>(mem_write));
         assert(mem_read == mem_end);
-    }
-
-    void align_vectorized(const i32 left_align, const i32 right_align,
-                          const TV P,
-                          T* RESTRICT &read_left, T* RESTRICT &read_right,
-                          T* RESTRICT &tmp_start_left, T* RESTRICT &tmp_left,
-                          T* RESTRICT &tmp_start_right, T* RESTRICT &tmp_right)
-    {
-        const i32 ra_mask = ~((right_align - 1) >> 31);
-        const i32 la_mask = left_align >> 31;
-#define LA_MASK(x) ((x) & la_mask)
-#define RA_MASK(x) ((x) & ra_mask)
-        const auto pre_aligned_left = (TV*)(read_left + left_align);
-        const auto pre_aligned_right = (TV*)(read_right + right_align - N);
-
-#ifndef NDEBUG
-        memset((void *)_temp, 0, PARTITION_TMP_SIZE_IN_ELEMENTS * sizeof(T));
-#endif
-
-#ifdef VXSORT_STATS
-        vxsort_stats<T>::bump_vec_loads(2);
-        vxsort_stats<T>::bump_vec_stores(4);
-#endif
-        /// :   left        :                 :     right
-        /// :   │           :                 :         │
-        /// :   │           :                 :         │
-        /// :   ▼           :                 :         ▼
-        /// ┌───┬───────────────────────────────────────┬─────┐
-        /// │< <│< > > > > > x x x x x x x x x < < > > >│> > >│
-        /// └┬──┴──────────┬───────────────────┬────────┴────┬┘
-        /// :└──────┬──────┘:                 :└──────┬──────┘
-        /// :└──┘       │   :                 :       │ └────┘
-        /// :       ▼       :                 :       ▼
-        ///    lt_vec                                 rt_vec
-        // Alignment with vectorization is tricky, so read carefully before changing code:
-        // 1. We load data, which we might need to align, if the alignment hints
-        //    mean pre-alignment (or overlapping alignment)
-        // 2. We partition and store in the following order:
-        //    a) right-portion of right vector to the right-side
-        //    b) left-portion of left vector to the left side
-        //    c) at this point one-half of each partitioned vector has been committed
-        //       back to memory.
-        //    d) we advance the right write (tmp_right) pointer by how many elements
-        //       were actually needed to be written to the right hand side
-        //    e) We write the right portion of the left vector to the right side
-        //       now that its write position has been updated
-        auto rt_vec = VMT::load_vec(pre_aligned_right);
-        auto lt_vec = VMT::load_vec(pre_aligned_left);
-        const auto rt_mask = VMT::get_cmpgt_mask(rt_vec, P);
-        const auto lt_mask = VMT::get_cmpgt_mask(lt_vec, P);
-        const auto rt_popcount_right_part = std::max(_mm_popcnt_u32(rt_mask), right_align);
-        const auto lt_popcount_right_part = _mm_popcnt_u32(lt_mask);
-        const auto rt_popcount_left_part = N - rt_popcount_right_part;
-        const auto lt_popcount_left_part = N - lt_popcount_right_part;
-
-        // This is a compile-time check
-        // controlled by the compiled instruction set
-        if (VMT::supports_compress_writes()) {
-            VMT::store_compress_vec((TV *) (tmp_right + N - rt_popcount_right_part), rt_vec, rt_mask);
-            VMT::store_compress_vec((TV *)tmp_left, lt_vec, ~lt_mask);
-
-          tmp_right -= RA_MASK(rt_popcount_right_part);
-          read_right += RA_MASK(right_align - N);
-
-          VMT::store_compress_vec((TV *) (tmp_right + N - lt_popcount_right_part), lt_vec, lt_mask);
-          tmp_right -= LA_MASK(lt_popcount_right_part);
-          tmp_left += LA_MASK(lt_popcount_left_part);
-          tmp_start_left += LA_MASK(-left_align);
-          read_left += LA_MASK(left_align + N);
-
-          VMT::store_compress_vec((TV*)tmp_left, rt_vec, ~rt_mask);
-          tmp_left += RA_MASK(rt_popcount_left_part);
-          tmp_start_right -= RA_MASK(right_align);
-        }
-        else {
-#ifdef VXSORT_STATS
-            vxsort_stats<T>::bump_perms(2);
-#endif
-            rt_vec = VMT::partition_vector(rt_vec, rt_mask);
-            lt_vec = VMT::partition_vector(lt_vec, lt_mask);
-            VMT::store_vec((TV*)tmp_right, rt_vec);
-            VMT::store_vec((TV*)tmp_left, lt_vec);
-
-            tmp_right -= RA_MASK(rt_popcount_right_part);
-            read_right += RA_MASK(right_align - N);
-
-            VMT::store_vec((TV*)tmp_right, lt_vec);
-            tmp_right -= LA_MASK(lt_popcount_right_part);
-
-            tmp_left += LA_MASK(lt_popcount_left_part);
-            tmp_start_left += LA_MASK(-left_align);
-            read_left += LA_MASK(left_align + N);
-
-            VMT::store_vec((TV*)tmp_left, rt_vec);
-            tmp_left += RA_MASK(rt_popcount_left_part);
-            tmp_start_right -= RA_MASK(right_align);
-        }
-
-#undef LA_MASK
-#undef RA_MASK
     }
 
 public:

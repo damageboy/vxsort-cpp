@@ -9,7 +9,7 @@ set(lib_HEADERS
         isa_detection.h
         alignment.h
         defs.h
-        packer.h
+        pack_machine.h
         vxsort.h
         stats/vxsort_stats.h
         vector_machine/machine_traits.h

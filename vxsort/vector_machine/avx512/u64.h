@@ -29,14 +29,14 @@ public:
     static INLINE TLOADSTOREMASK generate_suffix_mask(i32 amount) {
         assert(amount >= 0);
         assert(amount <= N);
-        return 0xFF << ((N - amount) & (N-1));
+        return 0xFF << (amount & (N-1));
     }
 
     static INLINE TV load_vec(TV* p) { return _mm512_loadu_si512(p); }
 
     static INLINE void store_vec(TV* ptr, TV v) { _mm512_storeu_si512(ptr, v); }
 
-    static INLINE TV load_masked_vec(TV *ptr, TV base, TLOADSTOREMASK mask) {
+    static INLINE TV load_partial_vec(TV *ptr, TV base, TLOADSTOREMASK mask) {
         return _mm512_mask_loadu_epi64(base, mask, (i64 const *) ptr);
     }
 

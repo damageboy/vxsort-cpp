@@ -81,24 +81,24 @@ public:
     switch (last_chunk_v) {
         case 1:
             d04 = d03 = d02 = VMT::broadcast(MAX);
-            d01 = VMT::load_masked_vec(p + 0, d02, mask);
+            d01 = VMT::load_partial_vec(p + 0, d02, mask);
             last_chunk_v = 0; p = slack; goto ugly_hack_1;
         case 2:
             d04 = d03 = VMT::broadcast(MAX);
             d01 = VMT::load_vec(p + 0);
-            d02 = VMT::load_masked_vec(p + 1, d03, mask);
+            d02 = VMT::load_partial_vec(p + 1, d03, mask);
             last_chunk_v = 0; p = slack; goto ugly_hack_1;
         case 3:
             d04 = VMT::broadcast(MAX);
             d01 = VMT::load_vec(p + 0);
             d02 = VMT::load_vec(p + 1);
-            d03 = VMT::load_masked_vec(p + 2, d04, mask);
+            d03 = VMT::load_partial_vec(p + 2, d04, mask);
             last_chunk_v = 0; p = slack; goto ugly_hack_1;
         case 4:
             d01 = VMT::load_vec(p + 0);
             d02 = VMT::load_vec(p + 1);
             d03 = VMT::load_vec(p + 2);
-            d04 = VMT::load_masked_vec(p + 3, VMT::broadcast(MAX), mask);
+            d04 = VMT::load_partial_vec(p + 3, VMT::broadcast(MAX), mask);
             last_chunk_v = 0; p = slack; goto ugly_hack_1;
     }
     last_chunk_v = slack_v;
