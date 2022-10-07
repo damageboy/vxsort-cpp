@@ -2,8 +2,15 @@
 #define VXSORT_MASKED_LOAD_STORE_TEST_H
 
 #include <gtest/gtest.h>
+#ifndef WIN32
 #include <sys/mman.h>
-
+#else
+#ifndef NOMINMAX
+# define NOMINMAX
+#endif
+#define WIN32_LEAN_AND_MEAN 1
+#include <Windows.h>
+#endif
 
 #include "defs.h"
 #include "vector_machine/machine_traits.h"
@@ -14,7 +21,20 @@ namespace vxsort_tests {
 using namespace vxsort::types;
 using VM = vxsort::vector_machine;
 
-static i32 page_size = sysconf(_SC_PAGESIZE);
+static inline usize get_page_size()
+{
+    usize page_size;
+#ifdef WIN32
+    SYSTEM_INFO sys_info;
+    GetSystemInfo(&sys_info);
+    page_size = sys_info.dwPageSize;
+#else
+    page_size = sysconf(_SC_PAGESIZE);
+#endif
+    return page_size;
+}
+
+static i32 page_size = get_page_size();
 
 template <typename T, VM M>
 class MaskedLoadStoreTest : public ::testing::Test {
@@ -23,12 +43,26 @@ class MaskedLoadStoreTest : public ::testing::Test {
     static constexpr i32 N = VMT::N;
 
 protected:
-    void SetUp() override {
-        // Map 3 pages
-        mem = (u8 *) mmap(nullptr, 3*page_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
+    u8 *create_mapping_with_boundary_pages() {
+#ifdef WIN32
+        auto *mem = (u8 *) VirtualAlloc(nullptr, 3*page_size, MEM_COMMIT, PAGE_READWRITE);
+        DWORD old_protect;
+        VirtualProtect(mem, page_size, PAGE_NOACCESS, &old_protect);
+        VirtualProtect(mem + 2*page_size, page_size, PAGE_NOACCESS, &old_protect);
+        return mem;
+#else
+        auto *mem = (u8 *) mmap(nullptr, 3*page_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         // Make the first and last inaccessible
         mprotect(mem, page_size, PROT_NONE);
         mprotect(mem + 2*page_size, page_size, PROT_NONE);
+        return mem;
+#endif
+    }
+
+    void SetUp() override {
+        // Map 3 pages
+        mem = create_mapping_with_boundary_pages();
         generate_expected_values();
         num_elements = page_size / sizeof(T);
 
@@ -39,8 +73,17 @@ protected:
         }
     }
 
-    void TearDown() override {
+    void destroy_mapping() {
+#ifdef WIN32
+        VirtualFree(mem, 3*page_size, MEM_DECOMMIT);
+#else
         munmap(mem, 3*page_size);
+#endif
+
+    }
+
+    void TearDown() override {
+        destroy_mapping();
     }
 
     void generate_expected_values()
