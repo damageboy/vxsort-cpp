@@ -1,6 +1,8 @@
 #ifndef VXSORT_DEFS_H
 #define VXSORT_DEFS_H
 
+#include "compiler.h"
+
 #if _MSC_VER
 #ifdef _M_X86
 #define ARCH_X86
@@ -23,21 +25,12 @@
 #endif
 #endif
 
-#ifdef _MSC_VER
-#ifdef __clang__
-#define mess_up_cmov()
-#define INLINE __attribute__((always_inline))
-#define NOINLINE __attribute__((noinline))
-#else
-// MSVC
+#ifdef VXSORT_COMPILER_MSVC
 #include <intrin.h>
 #define mess_up_cmov() _ReadBarrier();
 #define INLINE __forceinline
 #define NOINLINE __declspec(noinline)
-#define VXSORT_COMPILER_MSVC 1
-#endif
 #else
-// GCC + Clang
 #define mess_up_cmov()
 #define INLINE __attribute__((always_inline))
 #define NOINLINE __attribute__((noinline))

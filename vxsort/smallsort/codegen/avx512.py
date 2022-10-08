@@ -309,15 +309,7 @@ class AVX512BitonicISA(BitonicISA):
 #ifndef BITONIC_MACHINE_AVX512_{t.upper()}_H
 #define BITONIC_MACHINE_AVX512_{t.upper()}_H
 
-
-#ifdef __GNUC__
-#ifdef __clang__
-#pragma clang attribute push (__attribute__((target("avx512f,avx512dq,avx512bw"))), apply_to = any(function))
-#else
-#pragma GCC push_options
-#pragma GCC target("avx512f")
-#endif
-#endif
+#include "../../vxsort_targets_enable_avx512.h"
 
 #include <limits>
 #include <immintrin.h>
@@ -356,13 +348,8 @@ public:
 #undef s2d
 #undef d2s
 
-#ifdef __GNUC__
-#ifdef __clang__
-#pragma clang attribute pop
-#else
-#pragma GCC pop_options
-#endif
-#endif
+#include "../../vxsort_targets_disable.h"
+
 #endif
 """)
 
@@ -560,7 +547,7 @@ public:
 
         g.clean_print(f"""    static INLINE void strided_min_max(TV& d01, TV& d02) {{
         TV tmp;
-        
+
         tmp = d01;
         d01 = {g.generate_min("d02", "d01")};
         d02 = {g.generate_max("d02", "tmp")};""")
