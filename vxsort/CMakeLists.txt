@@ -8,6 +8,7 @@ set(lib_SRC
 set(lib_HEADERS
         isa_detection.h
         alignment.h
+        compiler.h
         defs.h
         pack_machine.h
         vxsort.h

@@ -367,14 +367,8 @@ class AVX2BitonicISA(BitonicISA):
 #ifndef BITONIC_MACHINE_AVX2_{t.upper()}_H
 #define BITONIC_MACHINE_AVX2_{t.upper()}_H
 
-#ifdef __GNUC__
-#ifdef __clang__
-#pragma clang attribute push (__attribute__((target("avx2"))), apply_to = any(function))
-#else
-#pragma GCC push_options
-#pragma GCC target("avx2")
-#endif
-#endif
+
+#include "../../vxsort_targets_enable_avx2.h"
 
 #include <cassert>
 #include <limits>
@@ -414,13 +408,8 @@ public:
 #undef s2d
 #undef d2s
 
-#ifdef __GNUC__
-#ifdef __clang__
-#pragma clang attribute pop
-#else
-#pragma GCC pop_options
-#endif
-#endif
+#include "../../vxsort_targets_disable.h"
+
 #endif""");
 
     def generate_1v_basic_sorters(self, asc: bool):
@@ -475,7 +464,7 @@ public:
         min = {g.generate_min("s", "d01")};
         max = {g.generate_max("s", "d01")};
         d01 = {g.generate_blend("min", "max", 0b1111111100000000, 16, asc)};
-        
+
         s = {g.generate_shuffle_X4("d01")};
         min = {g.generate_min("s", "d01")};
         max = {g.generate_max("s", "d01")};
@@ -619,7 +608,7 @@ public:
 
         tmp = {g.generate_reverse("d02")};
         {g.crappity_crap_crap("d01", "tmp")}
-        d02 = {g.generate_max("d01", "tmp")};        
+        d02 = {g.generate_max("d01", "tmp")};
         d01 = {g.generate_min("d01", "tmp")};""")
         g.clean_print("    }\n")
 

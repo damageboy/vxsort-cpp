@@ -1,18 +1,7 @@
 #ifndef VXSORT_VXSORT_H
 #define VXSORT_VXSORT_H
 
-#ifdef __GNUC__
-#ifdef __clang__
-#pragma clang attribute push (__attribute__((target("popcnt"))), apply_to = any(function))
-#else
-#pragma GCC push_options
-#pragma GCC target("popcnt")
-#endif
-#endif
-
-
 #include <cassert>
-#include <immintrin.h>
 
 #include "alignment.h"
 #include "defs.h"
@@ -932,7 +921,5 @@ public:
 };
 
 }  // namespace vxsort
-
-#include "vxsort_targets_disable.h"
 
 #endif

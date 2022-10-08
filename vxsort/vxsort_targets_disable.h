@@ -1,8 +1,14 @@
+#include "compiler.h"
 
-#ifdef __GNUC__
-#ifdef __clang__
+#ifdef VXSORT_TARGET_PUSHED
+
+#if defined(VXSORT_COMPILER_CLANG) || defined(VXSORT_COMPILER_CLANGCL)
 #pragma clang attribute pop
-#else
+#endif
+
+#if defined(VXSORT_COMPILER_GCC)
 #pragma GCC pop_options
 #endif
+
+
 #endif
