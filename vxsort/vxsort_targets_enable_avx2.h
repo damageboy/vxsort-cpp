@@ -2,7 +2,6 @@
 
 #if defined(VXSORT_COMPILER_CLANG) || defined(VXSORT_COMPILER_CLANGCL)
 #define VXSORT_TARGET_PUSHED 1
-#warning "PUSH_AVX2"
 #pragma clang attribute push (__attribute__((target("avx2,popcnt"))), apply_to = any(function))
 #endif
 
