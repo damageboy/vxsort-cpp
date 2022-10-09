@@ -367,7 +367,6 @@ class AVX2BitonicISA(BitonicISA):
 #ifndef BITONIC_MACHINE_AVX2_{t.upper()}_H
 #define BITONIC_MACHINE_AVX2_{t.upper()}_H
 
-
 #include "../../vxsort_targets_enable_avx2.h"
 
 #include <cassert>
