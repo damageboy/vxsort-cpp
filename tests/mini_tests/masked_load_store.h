@@ -2,7 +2,7 @@
 #define VXSORT_MASKED_LOAD_STORE_TEST_H
 
 #include <gtest/gtest.h>
-#ifndef WIN32
+#ifndef _WIN32
 #include <sys/mman.h>
 #else
 #ifndef NOMINMAX
