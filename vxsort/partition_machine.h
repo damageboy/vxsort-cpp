@@ -2,9 +2,12 @@
 #define VXSORT_PARTITION_MACHINE_H
 
 #include <cstdint>
+#include <immintrin.h>
+
 #include "defs.h"
 #include "alignment.h"
 #include "vector_machine/machine_traits.h"
+
 
 #ifdef VXSORT_STATS
 #include "stats/vxsort_stats.h"
@@ -162,9 +165,8 @@ public:
         read_right -= N;
         const auto rt_mask = VMT::get_cmpgt_mask(rt_vec, P);
         const auto lt_mask = VMT::get_cmpgt_mask(lt_vec, P);
-        //const auto rt_popcount_right_part = std::max(_mm_popcnt_u32(rt_mask), right_align);
-        const auto rt_popcount_right_part = _mm_popcnt_u32(rt_mask);
-        const auto lt_popcount_right_part = _mm_popcnt_u32(lt_mask);
+        const auto rt_popcount_right_part = _mm_popcnt_u64(rt_mask);
+        const auto lt_popcount_right_part = _mm_popcnt_u64(lt_mask);
         const auto rt_popcount_left_part = N - rt_popcount_right_part;
         const auto lt_popcount_left_part = N - lt_popcount_right_part;
 
@@ -291,9 +293,8 @@ public:
         read_right -= N;
         const auto rt_mask = VMT::get_cmpgt_mask(rt_vec, P);
         const auto lt_mask = VMT::get_cmpgt_mask(lt_vec, P);
-        //const auto rt_popcount_right_part = std::max(_mm_popcnt_u32(rt_mask), right_align);
-        const auto rt_popcount_right_part = _mm_popcnt_u32(rt_mask);
-        const auto lt_popcount_right_part = _mm_popcnt_u32(lt_mask);
+        const auto rt_popcount_right_part = _mm_popcnt_u64(rt_mask);
+        const auto lt_popcount_right_part = _mm_popcnt_u64(lt_mask);
         const auto rt_popcount_left_part = N - rt_popcount_right_part;
         const auto lt_popcount_left_part = N - lt_popcount_right_part;
 
