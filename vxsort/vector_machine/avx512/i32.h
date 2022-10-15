@@ -55,17 +55,11 @@ public:
     static INLINE TV add(TV a, TV b) { return _mm512_add_epi32(a, b); }
     static INLINE TV sub(TV a, TV b) { return _mm512_sub_epi32(a, b); };
 
-    static INLINE TV pack_unordered(TV a, TV b) {
-        auto shifted = _mm512_slli_epi32(b, 16);
-        return _mm512_mask_blend_epi16(0b10101010101010101010101010101010, a, shifted);
-    }
+    static INLINE TV pack_unordered(TV a, TV b) { return _mm512_packs_epi32(a, b); }
 
     static INLINE void unpack_ordered(TV p, TV& u1, TV& u2) {
-        auto p01 = _mm512_extracti32x8_epi32(p, 0);
-        auto p02 = _mm512_extracti32x8_epi32(p, 1);
-
-        u1 = _mm512_cvtepi16_epi32(p01);
-        u2 = _mm512_cvtepi16_epi32(p02);
+        u1 = _mm512_cvtepi16_epi32(_mm512_extracti32x8_epi32(p, 0));
+        u2 = _mm512_cvtepi16_epi32(_mm512_extracti32x8_epi32(p, 1));
     }
 
     template <i32 Shift>
