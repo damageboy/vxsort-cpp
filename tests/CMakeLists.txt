@@ -21,6 +21,8 @@ if (${PROCESSOR_IS_X86})
             fullsort/fullsort.avx512.cpp
             mini_tests/masked_load_store.avx2.cpp
             mini_tests/masked_load_store.avx512.cpp
+            mini_tests/partition_machine.avx2.cpp
+            mini_tests/partition_machine.avx512.cpp
     )
 endif()
 
