@@ -14,7 +14,7 @@ namespace vxsort_tests {
 using namespace vxsort::types;
 using testing::Types;
 
-using VMT = vxsort::vector_machine;
+using VM = vxsort::vector_machine;
 
 struct BitonicMachineAVX512_i16 : public SortTest<i16> {};
 struct BitonicMachineAVX512_i32 : public SortTest<i32> {};
@@ -38,21 +38,21 @@ INSTANTIATE_TEST_SUITE_P(BitonicMachineAVX512, BitonicMachineAVX512_u64, bitonic
 INSTANTIATE_TEST_SUITE_P(BitonicMachineAVX512, BitonicMachineAVX512_f32, bitonic_machine_allvalues_avx512_32, PrintValue());
 INSTANTIATE_TEST_SUITE_P(BitonicMachineAVX512, BitonicMachineAVX512_f64, bitonic_machine_allvalues_avx512_64, PrintValue());
 
-TEST_P(BitonicMachineAVX512_i16, BitonicSortAVX512Asc) { bitonic_machine_sort_test<i16, VMT::AVX512, true>(V); }
-TEST_P(BitonicMachineAVX512_i32, BitonicSortAVX512Asc) { bitonic_machine_sort_test<i32, VMT::AVX512, true>(V); }
-TEST_P(BitonicMachineAVX512_i64, BitonicSortAVX512Asc) { bitonic_machine_sort_test<i64, VMT::AVX512, true>(V); }
-TEST_P(BitonicMachineAVX512_u16, BitonicSortAVX512Asc) { bitonic_machine_sort_test<u16, VMT::AVX512, true>(V); }
-TEST_P(BitonicMachineAVX512_u32, BitonicSortAVX512Asc) { bitonic_machine_sort_test<u32, VMT::AVX512, true>(V); }
-TEST_P(BitonicMachineAVX512_u64, BitonicSortAVX512Asc) { bitonic_machine_sort_test<u64, VMT::AVX512, true>(V); }
-TEST_P(BitonicMachineAVX512_f32, BitonicSortAVX512Asc) { bitonic_machine_sort_test<f32, VMT::AVX512, true>(V); }
-TEST_P(BitonicMachineAVX512_f64, BitonicSortAVX512Asc) { bitonic_machine_sort_test<f64, VMT::AVX512, true>(V); }
+TEST_P(BitonicMachineAVX512_i16, BitonicSortAVX512Asc) { bitonic_machine_sort_test<i16, VM::AVX512, true>(V); }
+TEST_P(BitonicMachineAVX512_i32, BitonicSortAVX512Asc) { bitonic_machine_sort_test<i32, VM::AVX512, true>(V); }
+TEST_P(BitonicMachineAVX512_i64, BitonicSortAVX512Asc) { bitonic_machine_sort_test<i64, VM::AVX512, true>(V); }
+TEST_P(BitonicMachineAVX512_u16, BitonicSortAVX512Asc) { bitonic_machine_sort_test<u16, VM::AVX512, true>(V); }
+TEST_P(BitonicMachineAVX512_u32, BitonicSortAVX512Asc) { bitonic_machine_sort_test<u32, VM::AVX512, true>(V); }
+TEST_P(BitonicMachineAVX512_u64, BitonicSortAVX512Asc) { bitonic_machine_sort_test<u64, VM::AVX512, true>(V); }
+TEST_P(BitonicMachineAVX512_f32, BitonicSortAVX512Asc) { bitonic_machine_sort_test<f32, VM::AVX512, true>(V); }
+TEST_P(BitonicMachineAVX512_f64, BitonicSortAVX512Asc) { bitonic_machine_sort_test<f64, VM::AVX512, true>(V); }
 
-//TEST_P(BitonicMachineAVX512_i32, BitonicSortAVX2Desc) { bitonic_machine_sort_test<i32, VMT::AVX512, false>(V); }
-//TEST_P(BitonicMachineAVX512_u32, BitonicSortAVX2Desc) { bitonic_machine_sort_test<u32, VMT::AVX512, false>(V); }
-//TEST_P(BitonicMachineAVX512_f32, BitonicSortAVX2Desc) { bitonic_machine_sort_test<f32, VMT::AVX512, false>(V); }
-//TEST_P(BitonicMachineAVX512_i64, BitonicSortAVX2Desc) { bitonic_machine_sort_test<i64, VMT::AVX512, false>(V); }
-//TEST_P(BitonicMachineAVX512_u64, BitonicSortAVX2Desc) { bitonic_machine_sort_test<u64, VMT::AVX512, false>(V); }
-//TEST_P(BitonicMachineAVX512_f64, BitonicSortAVX2Desc) { bitonic_machine_sort_test<f64, VMT::AVX512, false>(V); }
+//TEST_P(BitonicMachineAVX512_i32, BitonicSortAVX2Desc) { bitonic_machine_sort_test<i32, VM::AVX512, false>(V); }
+//TEST_P(BitonicMachineAVX512_u32, BitonicSortAVX2Desc) { bitonic_machine_sort_test<u32, VM::AVX512, false>(V); }
+//TEST_P(BitonicMachineAVX512_f32, BitonicSortAVX2Desc) { bitonic_machine_sort_test<f32, VM::AVX512, false>(V); }
+//TEST_P(BitonicMachineAVX512_i64, BitonicSortAVX2Desc) { bitonic_machine_sort_test<i64, VM::AVX512, false>(V); }
+//TEST_P(BitonicMachineAVX512_u64, BitonicSortAVX2Desc) { bitonic_machine_sort_test<u64, VM::AVX512, false>(V); }
+//TEST_P(BitonicMachineAVX512_f64, BitonicSortAVX2Desc) { bitonic_machine_sort_test<f64, VM::AVX512, false>(V); }
 
 struct BitonicAVX512_i16 : public SortTest<i16> {};
 struct BitonicAVX512_i32 : public SortTest<i32> {};
@@ -76,14 +76,14 @@ INSTANTIATE_TEST_SUITE_P(BitonicAVX512, BitonicAVX512_u64, bitonic_allvalues_avx
 INSTANTIATE_TEST_SUITE_P(BitonicAVX512, BitonicAVX512_f32, bitonic_allvalues_avx512_32, PrintValue());
 INSTANTIATE_TEST_SUITE_P(BitonicAVX512, BitonicAVX512_f64, bitonic_allvalues_avx512_64, PrintValue());
 
-TEST_P(BitonicAVX512_i16, BitonicSortAVX512) { bitonic_sort_test<i16, VMT::AVX512>(V); }
-TEST_P(BitonicAVX512_i32, BitonicSortAVX512) { bitonic_sort_test<i32, VMT::AVX512>(V); }
-TEST_P(BitonicAVX512_i64, BitonicSortAVX512) { bitonic_sort_test<i64, VMT::AVX512>(V); }
-TEST_P(BitonicAVX512_u16, BitonicSortAVX512) { bitonic_sort_test<u16, VMT::AVX512>(V); }
-TEST_P(BitonicAVX512_u32, BitonicSortAVX512) { bitonic_sort_test<u32, VMT::AVX512>(V); }
-TEST_P(BitonicAVX512_u64, BitonicSortAVX512) { bitonic_sort_test<u64, VMT::AVX512>(V); }
-TEST_P(BitonicAVX512_f32, BitonicSortAVX512) { bitonic_sort_test<f32, VMT::AVX512>(V); }
-TEST_P(BitonicAVX512_f64, BitonicSortAVX512) { bitonic_sort_test<f64, VMT::AVX512>(V); }
+TEST_P(BitonicAVX512_i16, BitonicSortAVX512) { bitonic_sort_test<i16, VM::AVX512>(V); }
+TEST_P(BitonicAVX512_i32, BitonicSortAVX512) { bitonic_sort_test<i32, VM::AVX512>(V); }
+TEST_P(BitonicAVX512_i64, BitonicSortAVX512) { bitonic_sort_test<i64, VM::AVX512>(V); }
+TEST_P(BitonicAVX512_u16, BitonicSortAVX512) { bitonic_sort_test<u16, VM::AVX512>(V); }
+TEST_P(BitonicAVX512_u32, BitonicSortAVX512) { bitonic_sort_test<u32, VM::AVX512>(V); }
+TEST_P(BitonicAVX512_u64, BitonicSortAVX512) { bitonic_sort_test<u64, VM::AVX512>(V); }
+TEST_P(BitonicAVX512_f32, BitonicSortAVX512) { bitonic_sort_test<f32, VM::AVX512>(V); }
+TEST_P(BitonicAVX512_f64, BitonicSortAVX512) { bitonic_sort_test<f64, VM::AVX512>(V); }
 
 }
 
