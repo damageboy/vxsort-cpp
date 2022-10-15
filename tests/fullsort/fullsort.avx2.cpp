@@ -12,7 +12,7 @@ namespace vxsort_tests {
 using namespace vxsort::types;
 using testing::Types;
 
-using VMT = vxsort::vector_machine;
+using VM = vxsort::vector_machine;
 using namespace vxsort;
 
 struct VxSortAVX2_i16 : public SortWithSlackTest<i16> {};
@@ -42,63 +42,63 @@ INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_i64, vxsort_i64_params_avx2, PrintSi
 INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_u64, vxsort_u64_params_avx2, PrintSizeAndSlack<u64>());
 INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_f64, vxsort_f64_params_avx2, PrintSizeAndSlack<f64>());
 
-//TEST_P(VxSortAVX2_i16, VxSortAVX2_1)  { vxsort_test<i16,  1, VMT::AVX2>(V); }
-//TEST_P(VxSortAVX2_i16, VxSortAVX2_2)  { vxsort_test<i16,  2, VMT::AVX2>(V); }
-//TEST_P(VxSortAVX2_i16, VxSortAVX2_4)  { vxsort_test<i16,  4, VMT::AVX2>(V); }
-//TEST_P(VxSortAVX2_i16, VxSortAVX2_8)  { vxsort_test<i16,  8, VMT::AVX2>(V); }
-//TEST_P(VxSortAVX2_i16, VxSortAVX2_12) { vxsort_test<i16, 12, VMT::AVX2>(V); }
+//TEST_P(VxSortAVX2_i16, VxSortAVX2_1)  { vxsort_test<i16,  1, VM::AVX2>(V); }
+//TEST_P(VxSortAVX2_i16, VxSortAVX2_2)  { vxsort_test<i16,  2, VM::AVX2>(V); }
+//TEST_P(VxSortAVX2_i16, VxSortAVX2_4)  { vxsort_test<i16,  4, VM::AVX2>(V); }
+//TEST_P(VxSortAVX2_i16, VxSortAVX2_8)  { vxsort_test<i16,  8, VM::AVX2>(V); }
+//TEST_P(VxSortAVX2_i16, VxSortAVX2_12) { vxsort_test<i16, 12, VM::AVX2>(V); }
 
-TEST_P(VxSortAVX2_i32, VxSortAVX2_1)  { vxsort_test<i32,  1, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_i32, VxSortAVX2_2)  { vxsort_test<i32,  2, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_i32, VxSortAVX2_4)  { vxsort_test<i32,  4, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_i32, VxSortAVX2_8)  { vxsort_test<i32,  8, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_i32, VxSortAVX2_12) { vxsort_test<i32, 12, VMT::AVX2>(V); }
+TEST_P(VxSortAVX2_i32, VxSortAVX2_1)  { vxsort_test<i32,  1, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_i32, VxSortAVX2_2)  { vxsort_test<i32,  2, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_i32, VxSortAVX2_4)  { vxsort_test<i32,  4, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_i32, VxSortAVX2_8)  { vxsort_test<i32,  8, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_i32, VxSortAVX2_12) { vxsort_test<i32, 12, VM::AVX2>(V); }
 
-//TEST_P(VxSortAVX2_u16, VxSortAVX2_1)  { vxsort_test<u16,  1, VMT::AVX2>(V); }
-//TEST_P(VxSortAVX2_u16, VxSortAVX2_2)  { vxsort_test<u16,  2, VMT::AVX2>(V); }
-//TEST_P(VxSortAVX2_u16, VxSortAVX2_4)  { vxsort_test<u16,  4, VMT::AVX2>(V); }
-//TEST_P(VxSortAVX2_u16, VxSortAVX2_8)  { vxsort_test<u16,  8, VMT::AVX2>(V); }
-//TEST_P(VxSortAVX2_u16, VxSortAVX2_12) { vxsort_test<u16, 12, VMT::AVX2>(V); }
+//TEST_P(VxSortAVX2_u16, VxSortAVX2_1)  { vxsort_test<u16,  1, VM::AVX2>(V); }
+//TEST_P(VxSortAVX2_u16, VxSortAVX2_2)  { vxsort_test<u16,  2, VM::AVX2>(V); }
+//TEST_P(VxSortAVX2_u16, VxSortAVX2_4)  { vxsort_test<u16,  4, VM::AVX2>(V); }
+//TEST_P(VxSortAVX2_u16, VxSortAVX2_8)  { vxsort_test<u16,  8, VM::AVX2>(V); }
+//TEST_P(VxSortAVX2_u16, VxSortAVX2_12) { vxsort_test<u16, 12, VM::AVX2>(V); }
 
-TEST_P(VxSortAVX2_u32, VxSortAVX2_1)  { vxsort_test<u32,  1, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_u32, VxSortAVX2_2)  { vxsort_test<u32,  2, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_u32, VxSortAVX2_4)  { vxsort_test<u32,  4, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_u32, VxSortAVX2_8)  { vxsort_test<u32,  8, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_u32, VxSortAVX2_12) { vxsort_test<u32, 12, VMT::AVX2>(V); }
+TEST_P(VxSortAVX2_u32, VxSortAVX2_1)  { vxsort_test<u32,  1, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_u32, VxSortAVX2_2)  { vxsort_test<u32,  2, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_u32, VxSortAVX2_4)  { vxsort_test<u32,  4, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_u32, VxSortAVX2_8)  { vxsort_test<u32,  8, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_u32, VxSortAVX2_12) { vxsort_test<u32, 12, VM::AVX2>(V); }
 
-TEST_P(VxSortAVX2_f32, VxSortAVX2_1)  { vxsort_test<f32,  1, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_f32, VxSortAVX2_2)  { vxsort_test<f32,  2, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_f32, VxSortAVX2_4)  { vxsort_test<f32,  4, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_f32, VxSortAVX2_8)  { vxsort_test<f32,  8, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_f32, VxSortAVX2_12) { vxsort_test<f32, 12, VMT::AVX2>(V); }
+TEST_P(VxSortAVX2_f32, VxSortAVX2_1)  { vxsort_test<f32,  1, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_f32, VxSortAVX2_2)  { vxsort_test<f32,  2, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_f32, VxSortAVX2_4)  { vxsort_test<f32,  4, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_f32, VxSortAVX2_8)  { vxsort_test<f32,  8, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_f32, VxSortAVX2_12) { vxsort_test<f32, 12, VM::AVX2>(V); }
 
-TEST_P(VxSortAVX2_i64, VxSortAVX2_1)  { vxsort_test<i64,  1, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_i64, VxSortAVX2_2)  { vxsort_test<i64,  2, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_i64, VxSortAVX2_4)  { vxsort_test<i64,  4, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_i64, VxSortAVX2_8)  { vxsort_test<i64,  8, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_i64, VxSortAVX2_12) { vxsort_test<i64, 12, VMT::AVX2>(V); }
+TEST_P(VxSortAVX2_i64, VxSortAVX2_1)  { vxsort_test<i64,  1, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_i64, VxSortAVX2_2)  { vxsort_test<i64,  2, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_i64, VxSortAVX2_4)  { vxsort_test<i64,  4, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_i64, VxSortAVX2_8)  { vxsort_test<i64,  8, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_i64, VxSortAVX2_12) { vxsort_test<i64, 12, VM::AVX2>(V); }
 
-TEST_P(VxSortAVX2_u64, VxSortAVX2_1)  { vxsort_test<u64,  1, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_u64, VxSortAVX2_2)  { vxsort_test<u64,  2, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_u64, VxSortAVX2_4)  { vxsort_test<u64,  4, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_u64, VxSortAVX2_8)  { vxsort_test<u64,  8, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_u64, VxSortAVX2_12) { vxsort_test<u64, 12, VMT::AVX2>(V); }
+TEST_P(VxSortAVX2_u64, VxSortAVX2_1)  { vxsort_test<u64,  1, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_u64, VxSortAVX2_2)  { vxsort_test<u64,  2, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_u64, VxSortAVX2_4)  { vxsort_test<u64,  4, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_u64, VxSortAVX2_8)  { vxsort_test<u64,  8, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_u64, VxSortAVX2_12) { vxsort_test<u64, 12, VM::AVX2>(V); }
 
-TEST_P(VxSortAVX2_f64, VxSortAVX2_1)  { vxsort_test<f64,  1, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_f64, VxSortAVX2_2)  { vxsort_test<f64,  2, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_f64, VxSortAVX2_4)  { vxsort_test<f64,  4, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_f64, VxSortAVX2_8)  { vxsort_test<f64,  8, VMT::AVX2>(V); }
-TEST_P(VxSortAVX2_f64, VxSortAVX2_12) { vxsort_test<f64, 12, VMT::AVX2>(V); }
+TEST_P(VxSortAVX2_f64, VxSortAVX2_1)  { vxsort_test<f64,  1, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_f64, VxSortAVX2_2)  { vxsort_test<f64,  2, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_f64, VxSortAVX2_4)  { vxsort_test<f64,  4, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_f64, VxSortAVX2_8)  { vxsort_test<f64,  8, VM::AVX2>(V); }
+TEST_P(VxSortAVX2_f64, VxSortAVX2_12) { vxsort_test<f64, 12, VM::AVX2>(V); }
 
 struct VxSortWithStridesAndHintsAVX2_i64 : public SortWithStrideTest<i64> {};
 auto vxsort_i64_stride_params_avx2  = ValuesIn(SizeAndStride<i64>::generate(1000000, 0x8L, 0x4000000L, 0x80000000L));
 INSTANTIATE_TEST_SUITE_P(VxSort, VxSortWithStridesAndHintsAVX2_i64, vxsort_i64_stride_params_avx2, PrintSizeAndStride<i64>());
 
-TEST_P(VxSortWithStridesAndHintsAVX2_i64, VxSortStridesAndHintsAVX2_1)  { vxsort_hinted_test<i64,  1, 3, VMT::AVX2>(V, MinValue, MaxValue); }
-TEST_P(VxSortWithStridesAndHintsAVX2_i64, VxSortStridesAndHintsAVX2_2)  { vxsort_hinted_test<i64,  2, 3, VMT::AVX2>(V, MinValue, MaxValue); }
-TEST_P(VxSortWithStridesAndHintsAVX2_i64, VxSortStridesAndHintsAVX2_4)  { vxsort_hinted_test<i64,  4, 3, VMT::AVX2>(V, MinValue, MaxValue); }
-TEST_P(VxSortWithStridesAndHintsAVX2_i64, VxSortStridesAndHintsAVX2_8)  { vxsort_hinted_test<i64,  8, 3, VMT::AVX2>(V, MinValue, MaxValue); }
-TEST_P(VxSortWithStridesAndHintsAVX2_i64, VxSortStridesAndHintsAVX2_12) { vxsort_hinted_test<i64, 12, 3, VMT::AVX2>(V, MinValue, MaxValue); }
+TEST_P(VxSortWithStridesAndHintsAVX2_i64, VxSortStridesAndHintsAVX2_1)  { vxsort_hinted_test<i64,  1, 3, VM::AVX2>(V, MinValue, MaxValue); }
+TEST_P(VxSortWithStridesAndHintsAVX2_i64, VxSortStridesAndHintsAVX2_2)  { vxsort_hinted_test<i64,  2, 3, VM::AVX2>(V, MinValue, MaxValue); }
+TEST_P(VxSortWithStridesAndHintsAVX2_i64, VxSortStridesAndHintsAVX2_4)  { vxsort_hinted_test<i64,  4, 3, VM::AVX2>(V, MinValue, MaxValue); }
+TEST_P(VxSortWithStridesAndHintsAVX2_i64, VxSortStridesAndHintsAVX2_8)  { vxsort_hinted_test<i64,  8, 3, VM::AVX2>(V, MinValue, MaxValue); }
+TEST_P(VxSortWithStridesAndHintsAVX2_i64, VxSortStridesAndHintsAVX2_12) { vxsort_hinted_test<i64, 12, 3, VM::AVX2>(V, MinValue, MaxValue); }
 
 }
 
