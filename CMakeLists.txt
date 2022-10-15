@@ -148,6 +148,7 @@ include(ConfigSafeGuards)
 CPMAddPackage("gh:google/googletest#main")
 CPMAddPackage("gh:fmtlib/fmt#8.1.1")
 CPMAddPackage("gh:google/cpu_features#main")
+CPMAddPackage("gh:okdshin/PicoSHA2#master")
 
 add_subdirectory(${PROJECT_SOURCE_DIR}/vxsort/)
 add_subdirectory(${PROJECT_SOURCE_DIR}/demo/)
