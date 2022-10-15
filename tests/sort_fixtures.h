@@ -1,5 +1,5 @@
-#ifndef VXSORT_FIXTURES_H
-#define VXSORT_FIXTURES_H
+#ifndef VXSORT_SORT_FIXTURES_H
+#define VXSORT_SORT_FIXTURES_H
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -21,7 +21,7 @@ using testing::WhenSorted;
 using testing::Types;
 
 template <typename T, int AlignTo = 0>
-struct SortTest : public testing::TestWithParam<int> {
+struct SortFixture : public testing::TestWithParam<int> {
 protected:
     std::vector<T> V;
 
@@ -45,8 +45,8 @@ struct PrintValue {
 template <typename T>
 struct SizeAndSlack {
 public:
-    size_t Size;
-    int Slack;
+    usize Size;
+    i32 Slack;
     T FirstValue;
     T ValueStride;
     bool Randomize;
@@ -85,7 +85,7 @@ public:
 };
 
 template <typename T, int AlignTo = 0>
-struct SortWithSlackTest : public testing::TestWithParam<SizeAndSlack<T>> {
+struct SortWithSlackFixture : public testing::TestWithParam<SizeAndSlack<T>> {
 protected:
     std::vector<T> V;
 
@@ -111,11 +111,10 @@ struct PrintSizeAndSlack {
     }
 };
 
-
 template <typename T>
 struct SizeAndStride {
 public:
-    size_t Size;
+    usize Size;
     T FirstValue;
     T ValueStride;
     bool Randomize;
@@ -132,8 +131,8 @@ public:
     }
 };
 
-template <typename T, int AlignTo = 0>
-struct SortWithStrideTest : public testing::TestWithParam<SizeAndStride<T>> {
+template <typename T, i32 AlignTo = 0>
+struct SortWithStrideFixture : public testing::TestWithParam<SizeAndStride<T>> {
 protected:
     std::vector<T> V;
     T MinValue;
@@ -158,7 +157,6 @@ public:
     }
 };
 
-
 template <typename T>
 struct PrintSizeAndStride {
     std::string operator()(const testing::TestParamInfo<SizeAndStride<T>>& info) const {
@@ -168,4 +166,4 @@ struct PrintSizeAndStride {
 };
 }
 
-#endif  // VXSORT_FIXTURES_H
+#endif  // VXSORT_SORT_FIXTURES_H

@@ -1,13 +1,13 @@
 #include "vxsort_targets_enable_avx2.h"
 
-#include "masked_load_store.h"
+#include "masked_load_store_test.h"
 
 namespace vxsort_tests {
 using namespace vxsort::types;
 using VM = vxsort::vector_machine;
 
 template <typename T>
-using MaskedLoadStoreDeathTest = MaskedLoadStoreTest<T, VM::NONE>;
+using MaskedLoadStoreDeathTest = PageWithLavaBoundariesFixture<T, VM::NONE>;
 
 using MaskedTypes = ::testing::Types<i32>;
 TYPED_TEST_SUITE(MaskedLoadStoreDeathTest, MaskedTypes);

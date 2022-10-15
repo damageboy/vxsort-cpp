@@ -5,7 +5,7 @@
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-#include "../fixtures.h"
+#include "../sort_fixtures.h"
 
 
 #include "isa_detection.h"

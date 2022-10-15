@@ -2,14 +2,14 @@
 
 #include <vector_machine/machine_traits.avx2.h>
 
-#include "masked_load_store.h"
+#include "masked_load_store_test.h"
 
 namespace vxsort_tests {
 using namespace vxsort::types;
 using VM = vxsort::vector_machine;
 
 template<typename T>
-using AVX2MaskedLoadStoreTest = MaskedLoadStoreTest<T, VM::AVX2>;
+using AVX2MaskedLoadStoreTest = PageWithLavaBoundariesFixture<T, VM::AVX2>;
 
 using MaskedTypes = ::testing::Types<i32, u32, i64, u64>;
 TYPED_TEST_SUITE(AVX2MaskedLoadStoreTest, MaskedTypes);

@@ -6,7 +6,7 @@
 #include <vector_machine/machine_traits.avx512.h>
 
 #include "fullsort_test.h"
-#include "../fixtures.h"
+#include "../sort_fixtures.h"
 
 namespace vxsort_tests {
 using namespace vxsort::types;
@@ -15,14 +15,14 @@ using testing::Types;
 using VM = vxsort::vector_machine;
 using namespace vxsort;
 
-struct VxSortAVX512_i16 : public SortWithSlackTest<i16> {};
-struct VxSortAVX512_i32 : public SortWithSlackTest<i32> {};
-struct VxSortAVX512_i64 : public SortWithSlackTest<i64> {};
-struct VxSortAVX512_u16 : public SortWithSlackTest<u16> {};
-struct VxSortAVX512_u32 : public SortWithSlackTest<u32> {};
-struct VxSortAVX512_u64 : public SortWithSlackTest<u64> {};
-struct VxSortAVX512_f32 : public SortWithSlackTest<f32> {};
-struct VxSortAVX512_f64 : public SortWithSlackTest<f64> {};
+struct VxSortAVX512_i16 : public SortWithSlackFixture<i16> {};
+struct VxSortAVX512_i32 : public SortWithSlackFixture<i32> {};
+struct VxSortAVX512_i64 : public SortWithSlackFixture<i64> {};
+struct VxSortAVX512_u16 : public SortWithSlackFixture<u16> {};
+struct VxSortAVX512_u32 : public SortWithSlackFixture<u32> {};
+struct VxSortAVX512_u64 : public SortWithSlackFixture<u64> {};
+struct VxSortAVX512_f32 : public SortWithSlackFixture<f32> {};
+struct VxSortAVX512_f64 : public SortWithSlackFixture<f64> {};
 
 auto vxsort_i16_params_avx512 = ValuesIn(SizeAndSlack<i16>::generate(10, 10000,   10, 32, 0x1000, 0x1));
 auto vxsort_i32_params_avx512 = ValuesIn(SizeAndSlack<i32>::generate(10, 1000000, 10, 32, 0x1000, 0x1));
@@ -90,7 +90,7 @@ TEST_P(VxSortAVX512_f64, VxSortAVX512_4)  { vxsort_test<f64,  4, VM::AVX512>(V);
 TEST_P(VxSortAVX512_f64, VxSortAVX512_8)  { vxsort_test<f64,  8, VM::AVX512>(V); }
 TEST_P(VxSortAVX512_f64, VxSortAVX512_12) { vxsort_test<f64, 12, VM::AVX512>(V); }
 
-struct VxSortWithStridesAndHintsAVX512_i64 : public SortWithStrideTest<i64> {};
+struct VxSortWithStridesAndHintsAVX512_i64 : public SortWithStrideFixture<i64> {};
 auto vxsort_i64_stride_params_avx512  = ValuesIn(SizeAndStride<i64>::generate(1000000, 0x8L, 0x1000000L, 0x80000000L));
 INSTANTIATE_TEST_SUITE_P(FullPackingSort, VxSortWithStridesAndHintsAVX512_i64, vxsort_i64_stride_params_avx512, PrintSizeAndStride<i64>());
 
