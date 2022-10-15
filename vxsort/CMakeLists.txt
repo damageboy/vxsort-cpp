@@ -15,7 +15,14 @@ set(lib_HEADERS
         stats/vxsort_stats.h
         vector_machine/machine_traits.h
         vxsort_targets_disable.h
-        partition_machine.h)
+        partition_machine.h
+        vxsort.avx2.h
+        vxsort.avx512.h
+        partition_machine.avx2.h
+        partition_machine.avx512.h
+        smallsort/bitonic_sort.avx2.h
+        smallsort/bitonic_sort.avx512.h
+        )
 
 if (${PROCESSOR_IS_X86})
     file(GLOB_RECURSE avx2_SRC       vector_machine/avx2/*.cpp smallsort/avx2/*.cpp)

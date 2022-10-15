@@ -2,8 +2,8 @@
 
 #include "gtest/gtest.h"
 
-#include <smallsort/avx2/bitonic_machine.avx2.h>
-#include <vector_machine/machine_traits.avx2.h>
+
+#include <vxsort.avx2.h>
 
 #include "fullsort_test.h"
 #include "../sort_fixtures.h"
