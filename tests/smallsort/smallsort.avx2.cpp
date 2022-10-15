@@ -7,20 +7,20 @@
 #include <vector_machine/machine_traits.avx2.h>
 
 #include "smallsort_test.h"
-#include "../fixtures.h"
+#include "../sort_fixtures.h"
 
 namespace vxsort_tests {
 using namespace vxsort::types;
 using VM = vxsort::vector_machine;
 
-struct BitonicMachineAVX2_i16    : public SortTest<i16> {};
-struct BitonicMachineAVX2_i32    : public SortTest<i32> {};
-struct BitonicMachineAVX2_i64    : public SortTest<i64> {};
-struct BitonicMachineAVX2_ui16   : public SortTest<u16> {};
-struct BitonicMachineAVX2_ui32   : public SortTest<u32> {};
-struct BitonicMachineAVX2_ui64   : public SortTest<u64> {};
-struct BitonicMachineAVX2_float  : public SortTest<f32> {};
-struct BitonicMachineAVX2_double : public SortTest<f64> {};
+struct BitonicMachineAVX2_i16    : public SortFixture<i16> {};
+struct BitonicMachineAVX2_i32    : public SortFixture<i32> {};
+struct BitonicMachineAVX2_i64    : public SortFixture<i64> {};
+struct BitonicMachineAVX2_ui16   : public SortFixture<u16> {};
+struct BitonicMachineAVX2_ui32   : public SortFixture<u32> {};
+struct BitonicMachineAVX2_ui64   : public SortFixture<u64> {};
+struct BitonicMachineAVX2_float  : public SortFixture<f32> {};
+struct BitonicMachineAVX2_double : public SortFixture<f64> {};
 
 auto bitonic_machine_allvalues_avx2_16 = ValuesIn(range(16, 64, 16));
 auto bitonic_machine_allvalues_avx2_32 = ValuesIn(range(8, 32, 8));
@@ -51,14 +51,14 @@ TEST_P(BitonicMachineAVX2_double, BitonicSortAVX2Asc) { bitonic_machine_sort_tes
 //TEST_P(BitonicMachineAVX2_float,  BitonicSortAVX2Desc) { bitonic_machine_sort_test<f32, VM::AVX2, false>(V); }
 //TEST_P(BitonicMachineAVX2_double, BitonicSortAVX2Desc) { bitonic_machine_sort_test<f64, VM::AVX2, false>(V); }
 
-struct BitonicAVX2_i16 : public SortTest<i16> {};
-struct BitonicAVX2_i32 : public SortTest<i32> {};
-struct BitonicAVX2_i64 : public SortTest<i64> {};
-struct BitonicAVX2_u16 : public SortTest<u16> {};
-struct BitonicAVX2_u32 : public SortTest<u32> {};
-struct BitonicAVX2_u64 : public SortTest<u64> {};
-struct BitonicAVX2_f32 : public SortTest<f32> {};
-struct BitonicAVX2_f64 : public SortTest<f64> {};
+struct BitonicAVX2_i16 : public SortFixture<i16> {};
+struct BitonicAVX2_i32 : public SortFixture<i32> {};
+struct BitonicAVX2_i64 : public SortFixture<i64> {};
+struct BitonicAVX2_u16 : public SortFixture<u16> {};
+struct BitonicAVX2_u32 : public SortFixture<u32> {};
+struct BitonicAVX2_u64 : public SortFixture<u64> {};
+struct BitonicAVX2_f32 : public SortFixture<f32> {};
+struct BitonicAVX2_f64 : public SortFixture<f64> {};
 
 auto bitonic_allvalues_avx2_16 = ValuesIn(range(1, 8192, 1));
 auto bitonic_allvalues_avx2_32 = ValuesIn(range(1, 4096, 1));

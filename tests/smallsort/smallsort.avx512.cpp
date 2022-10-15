@@ -8,7 +8,7 @@
 #include <vector_machine/machine_traits.avx512.h>
 
 #include "smallsort_test.h"
-#include "../fixtures.h"
+#include "../sort_fixtures.h"
 
 namespace vxsort_tests {
 using namespace vxsort::types;
@@ -16,14 +16,14 @@ using testing::Types;
 
 using VM = vxsort::vector_machine;
 
-struct BitonicMachineAVX512_i16 : public SortTest<i16> {};
-struct BitonicMachineAVX512_i32 : public SortTest<i32> {};
-struct BitonicMachineAVX512_i64 : public SortTest<i64> {};
-struct BitonicMachineAVX512_u16 : public SortTest<u16> {};
-struct BitonicMachineAVX512_u32 : public SortTest<u32> {};
-struct BitonicMachineAVX512_u64 : public SortTest<u64> {};
-struct BitonicMachineAVX512_f32 : public SortTest<f32> {};
-struct BitonicMachineAVX512_f64 : public SortTest<f64> {};
+struct BitonicMachineAVX512_i16 : public SortFixture<i16> {};
+struct BitonicMachineAVX512_i32 : public SortFixture<i32> {};
+struct BitonicMachineAVX512_i64 : public SortFixture<i64> {};
+struct BitonicMachineAVX512_u16 : public SortFixture<u16> {};
+struct BitonicMachineAVX512_u32 : public SortFixture<u32> {};
+struct BitonicMachineAVX512_u64 : public SortFixture<u64> {};
+struct BitonicMachineAVX512_f32 : public SortFixture<f32> {};
+struct BitonicMachineAVX512_f64 : public SortFixture<f64> {};
 
 auto bitonic_machine_allvalues_avx512_16 = ValuesIn(range(32, 128, 32));
 auto bitonic_machine_allvalues_avx512_32 = ValuesIn(range(16, 64, 16));
@@ -54,14 +54,14 @@ TEST_P(BitonicMachineAVX512_f64, BitonicSortAVX512Asc) { bitonic_machine_sort_te
 //TEST_P(BitonicMachineAVX512_u64, BitonicSortAVX2Desc) { bitonic_machine_sort_test<u64, VM::AVX512, false>(V); }
 //TEST_P(BitonicMachineAVX512_f64, BitonicSortAVX2Desc) { bitonic_machine_sort_test<f64, VM::AVX512, false>(V); }
 
-struct BitonicAVX512_i16 : public SortTest<i16> {};
-struct BitonicAVX512_i32 : public SortTest<i32> {};
-struct BitonicAVX512_i64 : public SortTest<i64> {};
-struct BitonicAVX512_u16 : public SortTest<u16> {};
-struct BitonicAVX512_u32 : public SortTest<u32> {};
-struct BitonicAVX512_u64 : public SortTest<u64> {};
-struct BitonicAVX512_f32 : public SortTest<f32> {};
-struct BitonicAVX512_f64 : public SortTest<f64> {};
+struct BitonicAVX512_i16 : public SortFixture<i16> {};
+struct BitonicAVX512_i32 : public SortFixture<i32> {};
+struct BitonicAVX512_i64 : public SortFixture<i64> {};
+struct BitonicAVX512_u16 : public SortFixture<u16> {};
+struct BitonicAVX512_u32 : public SortFixture<u32> {};
+struct BitonicAVX512_u64 : public SortFixture<u64> {};
+struct BitonicAVX512_f32 : public SortFixture<f32> {};
+struct BitonicAVX512_f64 : public SortFixture<f64> {};
 
 auto bitonic_allvalues_avx512_16 = ValuesIn(range(1, 8192, 1));
 auto bitonic_allvalues_avx512_32 = ValuesIn(range(1, 4096, 1));
