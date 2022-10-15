@@ -16,11 +16,11 @@ using vxsort::vector_machine;
 
 const auto processor_count = 1;
 
-static const int MIN_SORT = 256;
-static const int MAX_SORT = 1 << 20;
+static const i32 MIN_SORT = 256;
+static const i32 MAX_SORT = 1 << 20;
 
-static const int MIN_STRIDE = 1 << 3;
-static const int MAX_STRIDE = 1 << 27;
+static const i32 MIN_STRIDE = 1 << 3;
+static const i32 MAX_STRIDE = 1 << 27;
 
 template <class Q>
 static void BM_stdsort(benchmark::State& state) {
@@ -32,7 +32,7 @@ static void BM_stdsort(benchmark::State& state) {
     auto copies = generate_copies(ITERATIONS, n, v);
     auto begins = generate_array_beginnings(copies);
     auto ends = generate_array_beginnings(copies);
-    for (size_t i = 0; i < copies.size(); i++)
+    for (usize i = 0; i < copies.size(); i++)
         ends[i] = begins[i] + n - 1;
 
     vxsort::u64 total_cycles = 0;
@@ -53,7 +53,7 @@ static void BM_stdsort(benchmark::State& state) {
         state.counters["rdtsc-cycles/N"] = make_cycle_per_n_counter((f64)total_cycles / (f64)(n * ITERATIONS * state.iterations()));
 }
 
-template <class Q, vector_machine M, int U>
+template <class Q, vector_machine M, i32 U>
 static void BM_vxsort(benchmark::State& state) {
     if (!supports_vector_machine(M)) {
         state.SkipWithError("Current CPU does not support the minimal features for this test");
@@ -68,7 +68,7 @@ static void BM_vxsort(benchmark::State& state) {
     auto copies = generate_copies(ITERATIONS, n, v);
     auto begins = generate_array_beginnings(copies);
     auto ends = generate_array_beginnings(copies);
-    for (size_t i = 0; i < copies.size(); i++)
+    for (usize i = 0; i < copies.size(); i++)
         ends[i] = begins[i] + n - 1;
 
     auto sorter = ::vxsort::vxsort<Q, M, U>();
@@ -97,7 +97,7 @@ static void BM_vxsort(benchmark::State& state) {
 const i32 StridedSortSize = 1000000;
 const i64 StridedSortMinValue = 0x80000000LL;
 
-template <class Q, vector_machine M, int U>
+template <class Q, vector_machine M, i32 U>
 static void BM_vxsort_strided(benchmark::State& state) {
     if (!supports_vector_machine(M)) {
         state.SkipWithError(

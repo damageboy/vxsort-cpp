@@ -20,7 +20,7 @@ class pack_machine {
 
     using VMT = vxsort_machine_traits<T, M>;
     typedef typename VMT::TV TV;
-    static const int N = sizeof(TV) / sizeof(T);
+    static const i32 N = sizeof(TV) / sizeof(T);
     typedef alignment_hint<T, M> AH;
 
 public:

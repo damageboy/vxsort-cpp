@@ -13,7 +13,7 @@ public:
     static constexpr bool supports_compress_writes() { return false; }
     static constexpr bool supports_packing() { return false; }
 
-    template <int Shift>
+    template <i32 Shift>
     static constexpr bool can_pack(T) { return false; }
 
     static INLINE TLOADSTOREMASK generate_prefix_mask(i32 amount) {
@@ -28,14 +28,14 @@ public:
         return _mm256_cvtepi8_epi64(_mm_loadu_si128((__m128i*)(suffix_mask_table_64b + amount * N)));
     }
 
-    static INLINE TV load_vec(TV* p) { return _mm256_loadu_pd((double*)p); }
+    static INLINE TV load_vec(TV* p) { return _mm256_loadu_pd((f64 *)p); }
 
-    static INLINE void store_vec(TV* ptr, TV v) { _mm256_storeu_pd((double*)ptr, v); }
+    static INLINE void store_vec(TV* ptr, TV v) { _mm256_storeu_pd((f64 *)ptr, v); }
 
     static void store_compress_vec(TV* ptr, TV v, TMASK mask) { throw std::runtime_error("operation is unsupported"); }
 
     static INLINE TV load_partial_vec(TV *p, TV base, TLOADSTOREMASK mask) {
-        return i2d(_mm256_or_si256(d2i(_mm256_maskload_pd((double *) p, mask)),
+        return i2d(_mm256_or_si256(d2i(_mm256_maskload_pd((f64 *) p, mask)),
                                    _mm256_andnot_si256(mask, d2i(base))));
     }
 
@@ -56,8 +56,8 @@ public:
         return _mm256_movemask_pd(_mm256_cmp_pd(a, b, _CMP_GT_OS));
     }
 
-    static TV shift_right(TV v, int i) { return v; }
-    static TV shift_left(TV v, int i) { return v; }
+    static TV shift_right(TV v, i32 i) { return v; }
+    static TV shift_left(TV v, i32 i) { return v; }
 
     static INLINE TV add(TV a, TV b) { return _mm256_add_pd(a, b); }
     static INLINE TV sub(TV a, TV b) { return _mm256_sub_pd(a, b); };
@@ -65,9 +65,9 @@ public:
     static INLINE TV pack_unordered(TV, TV) { TV tmp = _mm256_set1_pd(0); return tmp; }
     static INLINE void unpack_ordered(TV, TV&, TV&) { }
 
-    template <int Shift>
+    template <i32 Shift>
     static T shift_n_sub(T v, T sub) { return v; }
 
-    template <int Shift>
+    template <i32 Shift>
     static T unshift_and_add(TPACK from, T add) { return add; }
 };

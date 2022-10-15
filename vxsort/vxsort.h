@@ -317,7 +317,7 @@ private:
     /// the read pointers in such a way that all reads use pointers aligned to
     /// a vector unit, which greatly reduces the amount of execution resources
     /// required by a modern processor to read the required data.
-    template<int InnerUnroll>
+    template<i32 InnerUnroll>
     T* vectorized_partition(T* const left, T* const right, const AH alignment)
     {
 //#ifdef NDEBUG
@@ -666,7 +666,7 @@ private:
     /// \param len
     /// \param base
     template<int UnpackUnroll>
-    void vectorized_unpack_backward(TPACK* const mem_end, size_t len, T base) {
+    void vectorized_unpack_backward(TPACK* const mem_end, usize len, T base) {
         auto constexpr MIN = T(std::numeric_limits<TPACK>::min());
         T offset = VMT::template shift_n_sub<Shift>(base, MIN);
 
@@ -794,7 +794,7 @@ private:
     /// \param base - the integer offset to add to each unpacked value
     ///               (for the purpose of unpacking)
     template<int UnpackUnroll>
-    void vectorized_unpack_forward(TPACK* const mem_end, size_t len, T base) {
+    void vectorized_unpack_forward(TPACK* const mem_end, usize len, T base) {
         auto constexpr MIN = T(std::numeric_limits<TPACK>::min());
         T offset = VMT::template shift_n_sub<Shift>(base, MIN);
 

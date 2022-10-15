@@ -6,7 +6,7 @@
 namespace vxsort {
 using namespace vxsort::types;
 
-int vxsort_stats_base::last_type = 0;
+i32 vxsort_stats_base::last_type = 0;
 std::array<vxsort_type, 6> vxsort_stats_base::registered_types;
 
 template<typename T>

@@ -31,7 +31,7 @@ static void insertionsort_cpp(T* lo, T* hi) {
 
 template <class Q>
 static void BM_insertion_sort(benchmark::State& state) {
-    static const int ITERATIONS = 1024;
+    static const i32 ITERATIONS = 1024;
     auto n = state.range(0);
     auto v = std::vector<Q>(n);
     generate_unique_values_vec(v, (Q)0x1000, (Q)8);
@@ -68,7 +68,7 @@ static void BM_bitonic_sort(benchmark::State& state) {
         return;
     }
 
-    static const int ITERATIONS = 1024;
+    static const i32 ITERATIONS = 1024;
     auto n = state.range(0);
     auto v = std::vector<Q>(n);
     generate_unique_values_vec(v, (Q)0x1000, (Q)0x8);

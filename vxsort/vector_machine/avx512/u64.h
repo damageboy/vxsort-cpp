@@ -14,7 +14,7 @@ public:
     static constexpr bool supports_compress_writes() { return true; }
     static constexpr bool supports_packing() { return true; }
 
-    template <int Shift>
+    template <i32 Shift>
     static constexpr bool can_pack(T span) {
         const auto PACK_LIMIT = (((TU) std::numeric_limits<u32>::max() + 1)) << Shift;
         return ((TU) span) < PACK_LIMIT;
@@ -53,8 +53,8 @@ public:
 
     static INLINE TMASK get_cmpgt_mask(TV a, TV b) { return _mm512_cmp_epu64_mask(a, b, _MM_CMPINT_GT); }
 
-    static TV shift_right(TV v, int i) { return _mm512_srli_epi64(v, i); }
-    static TV shift_left(TV v, int i) { return _mm512_slli_epi64(v, i); }
+    static TV shift_right(TV v, i32 i) { return _mm512_srli_epi64(v, i); }
+    static TV shift_left(TV v, i32 i) { return _mm512_slli_epi64(v, i); }
 
     static INLINE TV add(TV a, TV b) { return _mm512_add_epi64(a, b); }
     static INLINE TV sub(TV a, TV b) { return _mm512_sub_epi64(a, b); };
@@ -69,7 +69,7 @@ public:
         u2 = _mm512_cvtepu32_epi64(p02);
     }
 
-    template <int Shift>
+    template <i32 Shift>
     static T shift_n_sub(T v, T sub) {
         if (Shift > 0)
             v >>= Shift;
@@ -77,7 +77,7 @@ public:
         return v;
     }
 
-    template <int Shift>
+    template <i32 Shift>
     static T unshift_and_add(TPACK from, T add) {
         add += from;
 

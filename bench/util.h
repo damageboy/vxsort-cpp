@@ -72,7 +72,7 @@ std::vector<T> shuffled_seq(isize size, T start, T stride, std::mt19937_64& rng)
 template <typename T>
 std::vector<int> shuffled_16_values(isize size, T start, T stride, std::mt19937_64& rng) {
     std::vector<T> v; v.reserve(size);
-    for (int i = 0; i < size; ++i)
+    for (i32 i = 0; i < size; ++i)
         v.push_back(start + stride * (i % 16));
     std::shuffle(v.begin(), v.end(), rng);
     return v;
@@ -81,7 +81,7 @@ std::vector<int> shuffled_16_values(isize size, T start, T stride, std::mt19937_
 template <typename T>
 std::vector<int> all_equal(isize size, T start) {
     std::vector<T> v; v.reserve(size);
-    for (int i = 0; i < size; ++i)
+    for (i32 i = 0; i < size; ++i)
         v.push_back(start);
     return v;
 }

@@ -48,7 +48,7 @@ public:
         return false;
     }
 
-    template <int Shift>
+    template <i32 Shift>
     static constexpr bool can_pack(T) {
         static_assert(always_false<TV>, "must be specialized!");
         return false;
@@ -85,8 +85,8 @@ public:
     static TV broadcast(T pivot);
     static TMASK get_cmpgt_mask(TV a, TV b);
 
-    static TV shift_right(TV v, int i);
-    static TV shift_left(TV v, int i);
+    static TV shift_right(TV v, i32 i);
+    static TV shift_left(TV v, i32 i);
 
     static TV add(TV a, TV b);
     static TV sub(TV a, TV b);
@@ -97,13 +97,13 @@ public:
         static_assert(always_false<TV>, "must be specialized!");
     }
 
-    template <int Shift>
+    template <i32 Shift>
     static T shift_n_sub(T v, T) {
         static_assert(always_false<TV>, "must be specialized!");
         return v;
     }
 
-    template <int Shift>
+    template <i32 Shift>
     static T unshift_and_add(TPACK, T add) {
         static_assert(always_false<TV>, "must be specialized!");
         return add;

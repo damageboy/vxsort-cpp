@@ -18,7 +18,7 @@ using testing::Types;
 
 using ::vxsort::vector_machine;
 
-template <typename T, int Unroll, vector_machine M>
+template <typename T, i32 Unroll, vector_machine M>
 void vxsort_test(std::vector<T> V) {
     if (!::vxsort::supports_vector_machine(M)) {
         GTEST_SKIP_("Current CPU does not support the minimal features for this test");
@@ -44,7 +44,7 @@ void vxsort_test(std::vector<T> V) {
 
 }
 
-template <typename T, int Unroll, int Shift, vector_machine M>
+template <typename T, i32 Unroll, int Shift, vector_machine M>
 void vxsort_hinted_test(std::vector<T> V, T min_value, T max_value) {
     if (!::vxsort::supports_vector_machine(M)) {
         GTEST_SKIP_(
