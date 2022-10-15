@@ -85,6 +85,7 @@ static void BM_vxsort(benchmark::State& state) {
         total_cycles += (cycleclock::Now() - start);
     }
 
+    state.SetLabel(get_crypto_hash(begins[0], ends[0]));
     state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
 
     state.SetBytesProcessed(state.iterations() * n * ITERATIONS * sizeof(Q));

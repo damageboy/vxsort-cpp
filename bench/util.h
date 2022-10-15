@@ -20,15 +20,18 @@ Counter make_time_per_n_counter(i64 n);
 
 Counter make_cycle_per_n_counter(f64 n);
 
+std::string get_crypto_hash(void *start, void *end);
+
 void process_perf_counters(UserCounters &counters, i64 num_elements);
+
+extern std::random_device::result_type global_bench_random_seed;
 
 template <typename T>
 void generate_unique_values_vec(std::vector<T>& vec, T start, T stride) {
     for (isize i = 0; i < vec.size(); i++, start += stride)
         vec[i] = start;
 
-    std::random_device rd;
-    std::mt19937_64 g(rd());
+    std::mt19937_64 g(global_bench_random_seed);
 
     std::shuffle(vec.begin(), vec.end(), g);
 }

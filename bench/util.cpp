@@ -8,16 +8,34 @@
 #include <fmt/format.h>
 #include <defs.h>
 
+
+#include <picosha2.h>
+
+#include <random>
 #include <unordered_map>
 
 namespace vxsort_bench {
 using namespace vxsort::types;
+
+std::random_device global_bench_random_device;
+
+std::random_device::result_type global_bench_random_seed = global_bench_random_device();
+
 Counter make_time_per_n_counter(i64 n) {
     return {(double)n, Counter::kAvgThreadsRate | Counter::kIsIterationInvariantRate | Counter::kInvert, Counter::kIs1000};
 }
 
 Counter make_cycle_per_n_counter(double n) {
     return {n, Counter::kDefaults, Counter::kIs1000};
+}
+
+std::string get_crypto_hash(void *start, void *end) {
+    auto *begin = (char *) start;
+    auto *finish = (char *) end;
+    //auto length = finish - begin;
+    std::string hash(picosha2::k_digest_size * 2, '0');
+    std::string hash_hex_str = picosha2::hash256_hex_string(begin, finish);
+    return hash_hex_str;
 }
 
 std::unordered_map<std::string, std::string> perf_counter_names = {
