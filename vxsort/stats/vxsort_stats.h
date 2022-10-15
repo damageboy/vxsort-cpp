@@ -30,7 +30,7 @@ class vxsort_stats_base
 {
 public:
     static std::array<vxsort_type, 6> registered_types;
-    static int last_type;
+    static i32 last_type;
 protected:
     static void reset()
     {
@@ -127,13 +127,13 @@ public:
         _num_partitions++;
         _total_partitioned_size += n;
     }
-    static void bump_small_sorts(int n = 1) { _num_small_sorts++; }
-    static void bump_perms(size_t perms = 1) { _num_perms += perms; }
-    static void bump_vec_loads(size_t loads = 1) { _num_vec_loads += loads; }
-    static void bump_vec_stores(size_t stores = 1) { _num_vec_stores += stores; }
-    static void record_small_sort_size(size_t sort_size) { _small_sorts_size += sort_size; }
-    static void bump_packs(size_t size) { _packed_elements += size; }
-    static void bump_unpacks(size_t size) { _unpacked_elements += size; }
+    static void bump_small_sorts(i32 n = 1) { _num_small_sorts++; }
+    static void bump_perms(usize perms = 1) { _num_perms += perms; }
+    static void bump_vec_loads(usize loads = 1) { _num_vec_loads += loads; }
+    static void bump_vec_stores(usize stores = 1) { _num_vec_stores += stores; }
+    static void record_small_sort_size(usize sort_size) { _small_sorts_size += sort_size; }
+    static void bump_packs(usize size) { _packed_elements += size; }
+    static void bump_unpacks(usize size) { _unpacked_elements += size; }
 
     static void print_stats();
 };

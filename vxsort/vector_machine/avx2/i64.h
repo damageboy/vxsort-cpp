@@ -14,7 +14,7 @@ public:
     static constexpr bool supports_compress_writes() { return false; }
     static constexpr bool supports_packing() { return true; }
 
-    template <int Shift>
+    template <i32 Shift>
     static constexpr bool can_pack(T span) {
         const auto PACK_LIMIT = (((TU) std::numeric_limits<u32>::max() + 1)) << Shift;
         return ((TU) span) < PACK_LIMIT;
@@ -76,7 +76,7 @@ public:
         u2 = _mm256_cvtepi32_epi64(p02);
     }
 
-    template <int Shift>
+    template <i32 Shift>
     static T shift_n_sub(T v, T sub) {
         if (Shift > 0)
             v >>= Shift;
@@ -84,7 +84,7 @@ public:
         return v;
     }
 
-    template <int Shift>
+    template <i32 Shift>
     static T unshift_and_add(TPACK from, T add) {
         add += from;
         if (Shift > 0)
