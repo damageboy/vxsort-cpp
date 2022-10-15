@@ -2,8 +2,7 @@
 
 #include "BM_smallsort.h"
 
-#include <smallsort/avx512/bitonic_machine.avx512.h>
-#include <vector_machine/machine_traits.avx512.h>
+#include <smallsort/bitonic_sort.avx512.h>
 
 namespace vxsort_bench {
 using namespace vxsort::types;

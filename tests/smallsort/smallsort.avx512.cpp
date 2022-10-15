@@ -1,11 +1,8 @@
 #include "vxsort_targets_enable_avx512.h"
 
-#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
-#include <smallsort/avx512/bitonic_machine.avx512.h>
-#include <smallsort/bitonic_machine.h>
-#include <vector_machine/machine_traits.avx512.h>
+#include <smallsort/bitonic_sort.avx512.h>
 
 #include "smallsort_test.h"
 #include "../sort_fixtures.h"

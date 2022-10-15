@@ -3,8 +3,7 @@
 #include <random>
 #include <benchmark/benchmark.h>
 
-#include <smallsort/avx2/bitonic_machine.avx2.h>
-#include <vector_machine/machine_traits.avx2.h>
+#include <vxsort.avx2.h>
 
 #include "BM_fullsort.h"
 
