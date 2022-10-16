@@ -180,7 +180,7 @@ public:
         // A0|A0|A1|A1|A2|A2|A3|A3|A4|A4|A5|A5|A6|A6|A7|A7|
         // B0|B0|B1|B1|B2|B2|B3|B3|B4|B4|B5|B5|B6|B6|B7|B7|
         // A0|A1|A2|A3|B0|B1|B2|B3|A4|A5|A6|A7|B4|B5|B6|B7|
-        auto packed = _mm256_packus_epi32(u1, u2);
+        auto packed = _mm256_packs_epi32(u1, u2);
         packed = _mm256_permute4x64_epi64(packed, 0b11'01'10'00);
 
         auto p1 = _mm256_extracti128_si256(packed, 0);
