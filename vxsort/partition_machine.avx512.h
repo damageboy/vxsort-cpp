@@ -10,11 +10,9 @@
 #include "stats/vxsort_stats.h"
 #endif
 
-
 namespace vxsort {
 using namespace std;
 using namespace vxsort::types;
-
 
 template <typename T>
 struct partition_machine<T, vector_machine::AVX512> {
@@ -97,7 +95,6 @@ public:
 
         // adjust write position for vector writes
         spill_write_right -= N;
-
 
         auto max_base = VMT::broadcast(numeric_limits<T>::max());
         auto min_base = VMT::broadcast(numeric_limits<T>::min());
