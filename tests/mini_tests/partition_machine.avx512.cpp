@@ -19,6 +19,10 @@ TYPED_TEST(PartitionMachineAVX512Test, PartitioningWorks) {
     test_partition<TypeParam , VM::AVX512>(this);
 }
 
+TYPED_TEST(PartitionMachineAVX512Test, PartitionAlignmentWorks) {
+    test_partition_alignment<TypeParam , VM::AVX512>(this);
+}
+
 };
 
 #include "vxsort_targets_disable.h"
