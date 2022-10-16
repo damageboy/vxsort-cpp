@@ -378,8 +378,6 @@ private:
                (spill_write_left - spill_read_left) + // partitioned to left-spill
                (spill_read_right - (spill_write_right + N))); // partitioned to right-spill (+N for right-side vec reads)
 
-
-
         assert(((usize)read_left & ALIGN_MASK) == 0);
         assert(((usize)read_right & ALIGN_MASK) == 0);
         assert((((usize)read_right - (usize)read_left) % ALIGN) == 0);
