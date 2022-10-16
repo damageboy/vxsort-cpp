@@ -61,17 +61,11 @@ public:
     static INLINE TV add(TV a, TV b) { return _mm256_add_epi32(a, b); }
     static INLINE TV sub(TV a, TV b) { return _mm256_sub_epi32(a, b); };
 
-    static INLINE TV pack_unordered(TV a, TV b) {
-        auto shifted = _mm256_slli_epi32(b, 16);
-        return _mm256_blend_epi16(a, shifted, 0b10101010);
-    }
+    static INLINE TV pack_unordered(TV a, TV b) { return _mm256_packs_epi32(a, b); }
 
     static INLINE void unpack_ordered(TV p, TV& u1, TV& u2) {
-        auto p01 = _mm256_extracti128_si256(p, 0);
-        auto p02 = _mm256_extracti128_si256(p, 1);
-
-        u1 = _mm256_cvtepi16_epi32(p01);
-        u2 = _mm256_cvtepi16_epi32(p02);
+        u1 = _mm256_cvtepi16_epi32(_mm256_extracti128_si256(p, 0));
+        u2 = _mm256_cvtepi16_epi32(_mm256_extracti128_si256(p, 1));
     }
 
     template <i32 Shift>
