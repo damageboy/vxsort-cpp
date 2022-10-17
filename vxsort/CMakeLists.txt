@@ -2,6 +2,7 @@ set(TARGET_NAME ${CMAKE_PROJECT_NAME}_lib)
 
 set(lib_SRC
         isa_detection_sane.cpp
+        isa_detection.cpp
         stats/vxsort_stats.cpp
 )
 
