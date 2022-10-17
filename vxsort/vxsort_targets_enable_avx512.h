@@ -8,5 +8,5 @@
 #if defined(VXSORT_COMPILER_GCC)
 #define VXSORT_TARGET_PUSHED 1
 #pragma GCC push_options
-#pragma GCC target("avx512f,avx512dq,avx512bw,avx512vbmi2")
+#pragma GCC target("avx512f,avx512dq,avx512bw,avx512vbmi2,popcnt")
 #endif
