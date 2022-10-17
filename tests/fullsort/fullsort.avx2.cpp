@@ -33,9 +33,9 @@ auto vxsort_i64_params_avx2 = ValuesIn(SizeAndSlack<i64>::generate(10, 1000000, 
 auto vxsort_u64_params_avx2 = ValuesIn(SizeAndSlack<u64>::generate(10, 1000000, 10, 8, 0x1000, 0x1));
 auto vxsort_f64_params_avx2 = ValuesIn(SizeAndSlack<f64>::generate(10, 1000000, 10, 8, 1234.5, 0.1));
 
-INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_i16, vxsort_i16_params_avx2, PrintSizeAndSlack<i16>());
+//INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_i16, vxsort_i16_params_avx2, PrintSizeAndSlack<i16>());
 INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_i32, vxsort_i32_params_avx2, PrintSizeAndSlack<i32>());
-INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_u16, vxsort_u16_params_avx2, PrintSizeAndSlack<u16>());
+//INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_u16, vxsort_u16_params_avx2, PrintSizeAndSlack<u16>());
 INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_u32, vxsort_u32_params_avx2, PrintSizeAndSlack<u32>());
 INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_f32, vxsort_f32_params_avx2, PrintSizeAndSlack<f32>());
 INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_i64, vxsort_i64_params_avx2, PrintSizeAndSlack<i64>());
