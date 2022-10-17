@@ -4,8 +4,9 @@
 #include "cpuinfo_x86.h"
 using namespace cpu_features;
 static const X86Features features = GetX86Info().features;
-static const bool has_avx2 = CPU_FEATURES_COMPILED_X86_AVX2 || features.avx2;
-static const bool has_avx512 = CPU_FEATURES_COMPILED_X86_AVX2 || (features.avx512f && features.avx512bw);
+static const bool has_avx2 = CPU_FEATURES_COMPILED_X86_AVX2 || (features.avx2 && features.avx && features.popcnt && features.bmi2);
+static const bool has_avx512_32_64 = CPU_FEATURES_COMPILED_X86_AVX2 || (features.avx512f && features.avx512dq && features.avx512bw && features.popcnt);
+static const bool has_avx512_16 = CPU_FEATURES_COMPILED_X86_AVX2 || features.avx512vbmi2;
 #elif defined(CPU_FEATURES_ARCH_ARM)
 #include "cpuinfo_arm.h"
 using namespace cpu_features;
@@ -39,7 +40,7 @@ extern bool supports_vector_machine(vector_machine m)
         case AVX2:
             return has_avx2;
         case AVX512:
-            return has_avx512;
+            return has_avx512_32_64;
 #endif
 #if defined(CPU_FEATURES_ARCH_ANY_ARM)
         case NEON:
@@ -50,8 +51,41 @@ extern bool supports_vector_machine(vector_machine m)
             return has_sve;
 #endif
         default:
-            return false;
+            break;
     }
     return false;
 }
+
+extern bool supports_vector_machine(vector_machine m, usize width) {
+    switch (m) {
+        case NONE:
+            return true;
+#if defined(CPU_FEATURES_ARCH_X86)
+        case AVX2:
+            return has_avx2;
+        case AVX512:
+            switch (width) {
+                case 16:
+                    return has_avx512_16;
+                case 32:
+                case 64:
+                    return has_avx512_32_64;
+                default:
+                    break;
+            }
+            return false;
+#endif
+#if defined(CPU_FEATURES_ARCH_ANY_ARM)
+            case NEON:
+                return has_neon;
+#endif
+#if defined(CPU_FEATURES_ARCH_AARCH64)
+            case SVE:
+                return has_sve;
+#endif
+        default:
+            break;
+    }
+    return false;
+};
 } // namespace vxsort
