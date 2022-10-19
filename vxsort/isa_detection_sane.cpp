@@ -6,7 +6,8 @@ using namespace cpu_features;
 static const X86Features features = GetX86Info().features;
 static const bool has_avx2 = CPU_FEATURES_COMPILED_X86_AVX2 || (features.avx2 && features.avx && features.popcnt && features.bmi2);
 static const bool has_avx512_32_64 = CPU_FEATURES_COMPILED_X86_AVX2 || (features.avx512f && features.avx512dq && features.avx512bw && features.popcnt);
-static const bool has_avx512_16 = CPU_FEATURES_COMPILED_X86_AVX2 || features.avx512vbmi2;
+static const bool has_avx512_16 = has_avx512_32_64 && features.avx512vbmi2;
+//static const bool has_avx512_16_fp16 = has_avx512_16 && features.avx512_fp16;
 #elif defined(CPU_FEATURES_ARCH_ARM)
 #include "cpuinfo_arm.h"
 using namespace cpu_features;
@@ -56,36 +57,19 @@ extern bool supports_vector_machine(vector_machine m)
     return false;
 }
 
-extern bool supports_vector_machine(vector_machine m, usize width) {
-    switch (m) {
-        case NONE:
-            return true;
-#if defined(CPU_FEATURES_ARCH_X86)
-        case AVX2:
-            return has_avx2;
-        case AVX512:
-            switch (width) {
-                case 16:
-                    return has_avx512_16;
-                case 32:
-                case 64:
-                    return has_avx512_32_64;
-                default:
-                    break;
-            }
-            return false;
-#endif
-#if defined(CPU_FEATURES_ARCH_ANY_ARM)
-            case NEON:
-                return has_neon;
-#endif
-#if defined(CPU_FEATURES_ARCH_AARCH64)
-            case SVE:
-                return has_sve;
-#endif
+template<>
+bool supports_vector_machine<AVX512>(usize width) {
+    switch (width) {
+        case 16:
+            // We require AVX512VBMI2 for 16-bit partitioning
+            // since we use the _mm512_mask_compressstoreu_epi16 intrinsic
+            return has_avx512_16;
+        case 32:
+        case 64:
+            return has_avx512_32_64;
         default:
             break;
     }
     return false;
-};
+}
 } // namespace vxsort

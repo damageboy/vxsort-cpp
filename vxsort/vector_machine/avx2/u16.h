@@ -15,7 +15,7 @@ class vxsort_machine_traits<u16, AVX2> {
     static constexpr bool supports_packing() { return false; }
 
     template <i32 Shift>
-    static constexpr bool can_pack(T) { return false; }
+    static bool can_pack(T) { return false; }
 
     static INLINE TLOADSTOREMASK generate_prefix_mask(i32 amount) {
         assert(amount >= 0);

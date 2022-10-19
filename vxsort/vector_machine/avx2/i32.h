@@ -15,8 +15,8 @@ public:
     static constexpr bool supports_packing() { return false; }
 
     template <i32 Shift>
-    static constexpr bool can_pack(T span) {
-        const auto PACK_LIMIT = (((TU)std::numeric_limits<u16>::max() + 1)) << Shift;
+    static bool can_pack(T span) {
+        constexpr auto PACK_LIMIT = (((TU)std::numeric_limits<u16>::max() + 1)) << Shift;
         return ((TU)span) < PACK_LIMIT;
     }
 

@@ -9,6 +9,9 @@ namespace vxsort {
 extern bool init_isa_detection();
 extern bool supports_vector_machine(vector_machine m);
 
+template <vector_machine M>
+bool supports_vector_machine(usize width);
+
 } // namespace vxsort
 
 #endif  // VXSORT_ISA_DETECTION_H
