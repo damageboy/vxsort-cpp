@@ -9,6 +9,7 @@
 #include <cassert>
 #include <type_traits>
 #include "defs.h"
+#include "isa_detection.h"
 #include "machine_traits.h"
 
 namespace vxsort {

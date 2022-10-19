@@ -38,47 +38,96 @@ public:
 
     static constexpr i32 N = 1;
 
+    /// Indicates if this type/vector-machine combination supports
+    /// compressed writes (e.g. when vector elements are stored in a
+    /// packed fashion according to a predicate mask)
+    /// \return true when supported, false otherwise
     static constexpr bool supports_compress_writes() {
         static_assert(always_false<TV>, "must be specialized!");
         return false;
     }
 
+    /// Indicates if this type/vector-machine combination supports
+    /// packing to a lower bit-width type opportunistically during
+    /// sort operations and unpacking back to the original type/width
+    /// before returning to the caller
+    /// \return true when supported, false otherwise
     static constexpr bool supports_packing() {
         static_assert(always_false<TV>, "must be specialized!");
         return false;
     }
 
+    /// Check if the supplied range can be packed into a lower bit-width
+    /// primitive type (e.g. 32-bit integers can be packed into 16-bit)
+    /// while sorting
+    /// \param[in] range the range of the values inside the partition
+    /// \return true if the range can be packed, false otherwise
     template <i32 Shift>
-    static constexpr bool can_pack(T) {
+    static bool can_pack(T range) {
         static_assert(always_false<TV>, "must be specialized!");
         return false;
     }
 
-    static TV load_vec(TV*) {
+    /// Load a vector from memory
+    /// \param[in] p the pointer to the memory location to load from
+    /// \return the loaded vector
+    static TV load_vec(TV* p) {
         static_assert(always_false<TV>, "must be specialized!");
     }
 
-    static TLOADSTOREMASK generate_prefix_mask(i32) {
+    /// Generate a vector mask that can be used to loads N consecutive
+    /// elements from memory into the first N elements of a vector type, making off non-loaded
+    /// elements from being read/stored.
+    /// \param[in] n the number of elements to load
+    /// \return the generated mask
+    static TLOADSTOREMASK generate_prefix_mask(i32 n) {
         static_assert(always_false<TV>, "must be specialized!");
     }
 
+    /// Generate a vector mask that can be used to loads N consecutive
+    /// elements from memory into the last N elements of a vector type, making off non-loaded
+    /// elements from being read/stored.
     static TLOADSTOREMASK generate_suffix_mask(i32) {
         static_assert(always_false<TV>, "must be specialized!");
     }
 
-    static void store_vec(TV*, TV) {
+    /// Store a vector to memory
+    /// \param[in] p the pointer to the memory location to store to
+    /// \param[in] v the vector to store
+    static void store_vec(TV* p, TV v) {
         static_assert(always_false<TV>, "must be specialized!");
     }
 
-    static TV load_partial_vec(TV *, TV, TLOADSTOREMASK) {
+    /// Load a vector from memory, using a mask to control which elements
+    /// are to be skipped/not-read from
+    /// \param[in] p the pointer to the memory location to load from
+    /// \param[in] base A vector with elements to be used in-place of the masked-off elements
+    /// \param[in] mask the mask to control which elements are to be read
+    /// \return the loaded vector with a mix of elements from memory and the
+    ///         base vector according to the provided mask
+    static TV load_partial_vec(TV *p, TV base, TLOADSTOREMASK mask) {
         static_assert(always_false<TV>, "must be specialized!");
     }
 
-    static void store_masked_vec(TV *, TV, TLOADSTOREMASK) {
+    /// Store a vector to memory, using a mask to control which elements
+    /// are to be skipped/not-written to
+    /// \param[in] p the pointer to the memory location to store to
+    /// \param[in] v A vector with elements to be written to memory, according to the mask
+    /// \param[in] mask the mask to control which elements are to be read
+    static void store_masked_vec(TV *p, TV v, TLOADSTOREMASK mask) {
         static_assert(always_false<TV>, "must be specialized!");
     }
 
-    static void store_compress_vec(TV*, TV, TMASK) {
+    /// Store a vector to memory, using a mask to control which elements
+    /// are to be skipped/not-written to.
+    /// \note Compressed stores are used when the vector elements are stored in a packed fashion
+    ///       according to the provided mask, e.g. the compression mask instructs
+    ///       the vector machine to store the required elements in a packed fashion
+    ///       into memory.
+    /// \param[in] p the pointer to the memory location to store to
+    /// \param[in] v A vector with elements to be written to memory, according to the mask
+    /// \param[in] mask the mask to control which elements are to be read
+    static void store_compress_vec(TV* p, TV v, TMASK mask) {
         static_assert(always_false<TV>, "must be specialized!");
     }
     static TV partition_vector(TV v, i32 mask);

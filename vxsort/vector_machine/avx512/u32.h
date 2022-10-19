@@ -15,7 +15,13 @@ public:
     static constexpr bool supports_packing() { return false; }
 
     template <i32 Shift>
-    static constexpr bool can_pack(T) { return false; }
+    static bool can_pack(T span) {
+        if (!supports_vector_machine<AVX512>(16)) {
+            return false;
+        }
+        constexpr auto PACK_LIMIT = (((TU)std::numeric_limits<u16>::max() + 1)) << Shift;
+        return ((TU)span) < PACK_LIMIT;
+    }
 
     static INLINE TLOADSTOREMASK generate_prefix_mask(i32 amount) {
         assert(amount >= 0);
