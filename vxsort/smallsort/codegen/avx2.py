@@ -386,7 +386,7 @@ namespace smallsort {{
 using namespace vxsort::types;
 
 template<> struct bitonic_machine<{t}, AVX2> {{
-    static const int N = {self.vector_size()};
+    static const i32 N = {self.vector_size()};
     static constexpr {t} MAX = std::numeric_limits<{t}>::max();
 public:
     typedef {self.vector_type()} TV;
@@ -651,7 +651,7 @@ public:
         g = self
         for m in range(1, g.max_bitonic_sort_vectors() + 1):
             g.clean_print(f"""
-    static NOINLINE void sort_{m:02d}v_partial({type} *ptr, int remainder) {{
+    static NOINLINE void sort_{m:02d}v_partial({type} *ptr, i32 remainder) {{
         assert(remainder * N < sizeof(mask_table_{self.vector_size()}));
         const auto mask = _mm256_cvtepi8_epi{int(256 / self.vector_size())}(_mm_loadu_si128((__m128i*)(mask_table_{self.vector_size()} + remainder * N)));
 """)
@@ -688,7 +688,7 @@ public:
 
     #     s = f"""void vxsort::smallsort::bitonic<{t}, vector_machine::AVX2 >::sort({t} *ptr, size_t length) {{
     # const auto fullvlength = length / N;
-    # const int remainder = (int) (length - fullvlength * N);
+    # const i32 remainder = (int) (length - fullvlength * N);
     # const auto v = fullvlength + ((remainder > 0) ? 1 : 0);
     # switch(v) {{"""
     #     print(s, file=f_src)

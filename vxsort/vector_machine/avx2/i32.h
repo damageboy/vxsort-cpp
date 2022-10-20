@@ -45,7 +45,7 @@ public:
 
     static INLINE  void store_masked_vec(TV *p, TV v, TLOADSTOREMASK mask) { _mm256_maskstore_epi32((i32 *) p, mask, v); }
 
-    static INLINE TV partition_vector(TV v, int mask) {
+    static INLINE TV partition_vector(TV v, i32 mask) {
         assert(mask >= 0);
         assert(mask <= 255);
         return s2i(_mm256_permutevar8x32_ps(i2s(v), _mm256_cvtepi8_epi32(_mm_loadu_si128((__m128i*)(perm_table_32 + mask * 8)))));

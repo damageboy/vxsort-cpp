@@ -14,7 +14,7 @@
 
 namespace vxsort {
 
-template<typename T, vector_machine M, int Shift>
+template<typename T, vector_machine M, i32 Shift>
 class pack_machine {
     static_assert(Shift <= 31, "Shift must be in the range 0..31");
 
