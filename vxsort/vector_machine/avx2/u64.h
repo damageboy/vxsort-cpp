@@ -47,7 +47,7 @@ class vxsort_machine_traits<u64, AVX2> {
         _mm256_maskstore_epi64((long long *) p, mask, v);
     }
 
-    static INLINE TV partition_vector(TV v, int mask) {
+    static INLINE TV partition_vector(TV v, i32 mask) {
         assert(mask >= 0);
         assert(mask <= 15);
         return s2i(_mm256_permutevar8x32_ps(i2s(v), _mm256_cvtepu8_epi32(_mm_loadu_si128((__m128i*)(perm_table_64 + mask * 8)))));
@@ -59,8 +59,8 @@ class vxsort_machine_traits<u64, AVX2> {
         return _mm256_movemask_pd(i2d(_mm256_cmpgt_epi64(_mm256_xor_si256(top_bit, a), _mm256_xor_si256(top_bit, b))));
     }
 
-    static INLINE TV shift_right(TV v, int i) { return _mm256_srli_epi64(v, i); }
-    static INLINE TV shift_left(TV v, int i) { return _mm256_slli_epi64(v, i); }
+    static INLINE TV shift_right(TV v, i32 i) { return _mm256_srli_epi64(v, i); }
+    static INLINE TV shift_left(TV v, i32 i) { return _mm256_slli_epi64(v, i); }
 
     static INLINE TV add(TV a, TV b) { return _mm256_add_epi64(a, b); }
     static INLINE TV sub(TV a, TV b) { return _mm256_sub_epi64(a, b); };

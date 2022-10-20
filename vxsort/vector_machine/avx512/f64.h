@@ -41,7 +41,7 @@ public:
     }
 
     // Will never be called
-    static INLINE TV partition_vector(TV v, int mask) { return v; }
+    static INLINE TV partition_vector(TV v, i32 mask) { return v; }
 
     static void store_compress_vec(TV* ptr, TV v, TMASK mask) { _mm512_mask_compressstoreu_pd(ptr, mask, v); }
     static INLINE TV broadcast(double pivot) { return _mm512_set1_pd(pivot); }

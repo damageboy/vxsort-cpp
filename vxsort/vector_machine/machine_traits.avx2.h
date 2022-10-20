@@ -36,8 +36,8 @@ using namespace vxsort::types;
 // without generating an out of bounds read at all.
 // But, life is harsh, and we can't trust the compiler to do the right thing if it is not
 // contractual, hence this flustercuck
-const int M4_SIZE = 16 + 4 + 12;
-const int M8_SIZE = 64 + 8 + 8;
+const i32 M4_SIZE = 16 + 4 + 12;
+const i32 M8_SIZE = 64 + 8 + 8;
 
 extern const u8 prefix_mask_table_64b[M4_SIZE];
 extern const u8 prefix_mask_table_32b[M8_SIZE];

@@ -43,7 +43,7 @@ public:
         _mm256_maskstore_ps((float *) p, mask, v);
     }
 
-    static INLINE TV partition_vector(TV v, int mask) {
+    static INLINE TV partition_vector(TV v, i32 mask) {
         assert(mask >= 0);
         assert(mask <= 255);
         return _mm256_permutevar8x32_ps(v, _mm256_cvtepu8_epi32(_mm_loadu_si128((__m128i*)(perm_table_32 + mask * 8))));
