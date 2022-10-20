@@ -1,11 +1,11 @@
 template <>
-class vxsort_machine_traits<float, AVX512> {
+class vxsort_machine_traits<f32, AVX512> {
 public:
-    typedef float T;
+    typedef f32 T;
     typedef __m512 TV;
     typedef __mmask16 TLOADSTOREMASK;
     typedef __mmask16 TMASK;
-    typedef float TPACK;
+    typedef f32 TPACK;
 
     static constexpr i32 N = sizeof(TV) / sizeof(T);
     static_assert(is_powerof2(N), "vector-size / element-size must be a power of 2");
@@ -45,7 +45,7 @@ public:
 
     static void store_compress_vec(TV* ptr, TV v, TMASK mask) { _mm512_mask_compressstoreu_ps(ptr, mask, v); }
 
-    static INLINE TV broadcast(float pivot) { return _mm512_set1_ps(pivot); }
+    static INLINE TV broadcast(f32 pivot) { return _mm512_set1_ps(pivot); }
 
     static INLINE TMASK get_cmpgt_mask(TV a, TV b) { return _mm512_cmp_ps_mask(a, b, _CMP_GT_OS); }
 
