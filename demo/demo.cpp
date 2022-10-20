@@ -9,13 +9,14 @@ using namespace std;
 #include "isa_detection.h"
 
 using vxsort::vector_machine;
+using namespace vxsort::types;
 
-extern void do_avx2(int *begin, int *end);
-extern void do_avx512(int *begin, int *end);
+extern void do_avx2(i64 *begin, i64 *end);
+extern void do_avx512(i64 *begin, i64 *end);
 
-std::vector<int> generate_random_garbage(const size_t size) {
+std::vector<i64> generate_random_garbage(const usize size) {
 
-    auto vec = std::vector<int>(size);
+    auto vec = std::vector<i64>(size);
     std::iota(vec.begin(), vec.end(), 666);
 
     std::random_device rd;

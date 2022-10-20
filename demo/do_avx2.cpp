@@ -4,8 +4,8 @@
 
 using namespace vxsort::types;
 
-void do_avx2(int *begin, int *end) {
-  auto sorter = vxsort::vxsort<i32, vxsort::vector_machine::AVX2, 8>();
+void do_avx2(i64 *begin, i64 *end) {
+  auto sorter = vxsort::vxsort<i64, vxsort::vector_machine::AVX2, 8>();
   sorter.sort(begin, end);
 }
 #include "vxsort_targets_disable.h"
