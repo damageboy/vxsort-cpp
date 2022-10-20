@@ -1,11 +1,11 @@
 template <>
-class vxsort_machine_traits<double, AVX512> {
+class vxsort_machine_traits<f64, AVX512> {
 public:
-    typedef double T;
+    typedef f64 T;
     typedef __m512d TV;
     typedef __mmask8 TLOADSTOREMASK;
     typedef __mmask8 TMASK;
-    typedef double TPACK;
+    typedef f64 TPACK;
 
     static constexpr i32 N = sizeof(TV) / sizeof(T);
     static_assert(is_powerof2(N), "vector-size / element-size must be a power of 2");
@@ -44,7 +44,7 @@ public:
     static INLINE TV partition_vector(TV v, i32 mask) { return v; }
 
     static void store_compress_vec(TV* ptr, TV v, TMASK mask) { _mm512_mask_compressstoreu_pd(ptr, mask, v); }
-    static INLINE TV broadcast(double pivot) { return _mm512_set1_pd(pivot); }
+    static INLINE TV broadcast(T pivot) { return _mm512_set1_pd(pivot); }
     static INLINE TMASK get_cmpgt_mask(TV a, TV b) { return _mm512_cmp_pd_mask(a, b, _CMP_GT_OS); }
 
     static TV shift_right(TV v, i32 i) { return v; }
