@@ -64,8 +64,8 @@ public:
 
     static INLINE TMASK get_cmpgt_mask(TV a, TV b) { return _pext_u32(_mm256_movemask_epi8(_mm256_cmpgt_epi16(a, b)), 0x55555555); }
 
-    static TV shift_right(TV v, i32 i) { return _mm256_srli_epi16(v, i); }
-    static TV shift_left(TV v, i32 i) { return _mm256_slli_epi16(v, i); }
+    static INLINE TV shift_right(TV v, i32 i) { return _mm256_srli_epi16(v, i); }
+    static INLINE TV shift_left(TV v, i32 i) { return _mm256_slli_epi16(v, i); }
 
     static INLINE TV add(TV a, TV b) { return _mm256_add_epi16(a, b); }
     static INLINE TV sub(TV a, TV b) { return _mm256_sub_epi16(a, b); };

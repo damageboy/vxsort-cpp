@@ -57,8 +57,8 @@ public:
         return _mm256_movemask_ps(i2s(_mm256_cmpgt_epi32(_mm256_xor_si256(top_bit, a), _mm256_xor_si256(top_bit, b))));
     }
 
-    static TV shift_right(TV v, i32 i) { return _mm256_srli_epi32(v, i); }
-    static TV shift_left(TV v, i32 i) { return _mm256_slli_epi32(v, i); }
+    static INLINE TV shift_right(TV v, i32 i) { return _mm256_srli_epi32(v, i); }
+    static INLINE TV shift_left(TV v, i32 i) { return _mm256_slli_epi32(v, i); }
 
     static INLINE TV add(TV a, TV b) { return _mm256_add_epi32(a, b); }
     static INLINE TV sub(TV a, TV b) { return _mm256_sub_epi32(a, b); };
@@ -67,7 +67,7 @@ public:
     static INLINE void unpack_ordered(TV p, TV& u1, TV& u2) { }
 
     template <i32 Shift>
-    static T shift_n_sub(T v, T sub) {
+    static INLINE T shift_n_sub(T v, T sub) {
         if (Shift > 0)
             v >>= Shift;
         v -= sub;
@@ -75,7 +75,7 @@ public:
     }
 
     template <i32 Shift>
-    static T unshift_and_add(TPACK from, T add) {
+    static INLINE T unshift_and_add(TPACK from, T add) {
         add += from;
         if (Shift > 0)
             add = (T) (((TU) add) << Shift);

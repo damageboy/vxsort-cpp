@@ -56,8 +56,8 @@ public:
 
     static INLINE TMASK get_cmpgt_mask(TV a, TV b) { return _mm512_cmp_epu32_mask(a, b, _MM_CMPINT_GT); }
 
-    static TV shift_right(TV v, i32 i) { return _mm512_srli_epi32(v, i); }
-    static TV shift_left(TV v, i32 i) { return _mm512_slli_epi32(v, i); }
+    static INLINE TV shift_right(TV v, i32 i) { return _mm512_srli_epi32(v, i); }
+    static INLINE TV shift_left(TV v, i32 i) { return _mm512_slli_epi32(v, i); }
 
     static INLINE TV add(TV a, TV b) { return _mm512_add_epi32(a, b); }
     static INLINE TV sub(TV a, TV b) { return _mm512_sub_epi32(a, b); };
@@ -68,7 +68,7 @@ public:
         u2 = _mm512_cvtepu16_epi32(_mm512_extracti32x8_epi32(p, 1));
     }
     template <i32 Shift>
-    static T shift_n_sub(T v, T sub) {
+    static INLINE T shift_n_sub(T v, T sub) {
         if (Shift > 0)
             v >>= Shift;
         v -= sub;
@@ -76,7 +76,7 @@ public:
     }
 
     template <i32 Shift>
-    static T unshift_and_add(TPACK from, T add) {
+    static INLINE T unshift_and_add(TPACK from, T add) {
         add += from;
         if (Shift > 0)
             add = (T) (((TU) add) << Shift);

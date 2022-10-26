@@ -56,8 +56,8 @@ public:
         return _mm256_movemask_pd(_mm256_cmp_pd(a, b, _CMP_GT_OS));
     }
 
-    static TV shift_right(TV v, i32 i) { return v; }
-    static TV shift_left(TV v, i32 i) { return v; }
+    static INLINE TV shift_right(TV v, i32 i) { return v; }
+    static INLINE TV shift_left(TV v, i32 i) { return v; }
 
     static INLINE TV add(TV a, TV b) { return _mm256_add_pd(a, b); }
     static INLINE TV sub(TV a, TV b) { return _mm256_sub_pd(a, b); };
@@ -66,8 +66,8 @@ public:
     static INLINE void unpack_ordered(TV, TV&, TV&) { }
 
     template <i32 Shift>
-    static T shift_n_sub(T v, T sub) { return v; }
+    static INLINE T shift_n_sub(T v, T sub) { return v; }
 
     template <i32 Shift>
-    static T unshift_and_add(TPACK from, T add) { return add; }
+    static INLINE T unshift_and_add(TPACK from, T add) { return add; }
 };
