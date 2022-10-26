@@ -4,7 +4,7 @@ public:
     typedef i64 T;
     typedef __m256i TV;
     typedef __m256i TLOADSTOREMASK;
-    typedef u32 TMASK;
+    typedef u32 TCMPMASK;
     typedef i32 TPACK;
     typedef typename std::make_unsigned<T>::type TU;
 
@@ -36,7 +36,7 @@ public:
 
     static INLINE void store_vec(TV* ptr, TV v) { _mm256_storeu_si256(ptr, v); }
 
-    static void store_compress_vec(TV*, TV, TMASK) { throw std::runtime_error("operation is unsupported"); }
+    static void store_compress_vec(TV*, TV, TCMPMASK) { throw std::runtime_error("operation is unsupported"); }
 
     static INLINE TV load_partial_vec(TV *p, TV base, TLOADSTOREMASK mask) {
         return _mm256_or_si256(_mm256_maskload_epi64((const long long *) p, mask),
@@ -55,7 +55,7 @@ public:
 
     static INLINE TV broadcast(T pivot) { return _mm256_set1_epi64x(pivot); }
 
-    static INLINE TMASK get_cmpgt_mask(TV a, TV b) { return _mm256_movemask_pd(i2d(_mm256_cmpgt_epi64(a, b))); }
+    static INLINE TCMPMASK get_cmpgt_mask(TV a, TV b) { return _mm256_movemask_pd(i2d(_mm256_cmpgt_epi64(a, b))); }
 
     static INLINE TV shift_right(TV v, i32 i) { return _mm256_srli_epi64(v, i); }
     static INLINE TV shift_left(TV v, i32 i) { return _mm256_slli_epi64(v, i); }

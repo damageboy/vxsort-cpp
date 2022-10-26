@@ -4,7 +4,7 @@ class vxsort_machine_traits<u16, AVX2> {
     typedef u16 T;
     typedef __m256i TV;
     typedef i32 TLOADSTOREMASK;
-    typedef u32 TMASK;
+    typedef u32 TCMPMASK;
     typedef u16 TPACK;
     typedef typename std::make_unsigned<T>::type TU;
 
@@ -35,7 +35,7 @@ class vxsort_machine_traits<u16, AVX2> {
 
     static INLINE void store_vec(TV* ptr, TV v) { _mm256_storeu_si256(ptr, v); }
 
-    static void store_compress_vec(TV*, TV, TMASK) { throw std::runtime_error("operation is unsupported"); }
+    static void store_compress_vec(TV*, TV, TCMPMASK) { throw std::runtime_error("operation is unsupported"); }
 
     static INLINE TV load_partial_vec(TV *p, TV base, TLOADSTOREMASK mask) {
         // FML: There is only so much AVX2 stupidity one person can
@@ -62,7 +62,7 @@ class vxsort_machine_traits<u16, AVX2> {
 
     static INLINE TV broadcast(T pivot) { return _mm256_set1_epi16(pivot); }
 
-    static INLINE TMASK get_cmpgt_mask(TV a, TV b) {
+    static INLINE TCMPMASK get_cmpgt_mask(TV a, TV b) {
         __m256i top_bit = _mm256_set1_epi16(1U << 15);
         return _mm256_movemask_ps(i2s(_mm256_cmpgt_epi16(_mm256_xor_si256(top_bit, a), _mm256_xor_si256(top_bit, b))));
     }
