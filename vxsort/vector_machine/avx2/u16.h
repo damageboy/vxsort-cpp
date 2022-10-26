@@ -3,7 +3,7 @@ class vxsort_machine_traits<u16, AVX2> {
    public:
     typedef u16 T;
     typedef __m256i TV;
-    typedef int TLOADSTOREMASK;
+    typedef i32 TLOADSTOREMASK;
     typedef u32 TMASK;
     typedef u16 TPACK;
     typedef typename std::make_unsigned<T>::type TU;
