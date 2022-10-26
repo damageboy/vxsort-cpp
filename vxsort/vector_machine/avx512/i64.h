@@ -4,7 +4,7 @@ public:
     typedef i64 T;
     typedef __m512i TV;
     typedef __mmask8 TLOADSTOREMASK;
-    typedef __mmask8 TMASK;
+    typedef __mmask8 TCMPMASK;
     typedef i32 TPACK;
     typedef typename std::make_unsigned<T>::type TU;
 
@@ -47,11 +47,11 @@ public:
     // Will never be called
     static INLINE TV partition_vector(TV v, i32 mask) { return v; }
 
-    static void store_compress_vec(TV* ptr, TV v, TMASK mask) { _mm512_mask_compressstoreu_epi64(ptr, mask, v); }
+    static void store_compress_vec(TV* ptr, TV v, TCMPMASK mask) { _mm512_mask_compressstoreu_epi64(ptr, mask, v); }
 
     static INLINE TV broadcast(T pivot) { return _mm512_set1_epi64(pivot); }
 
-    static INLINE TMASK get_cmpgt_mask(TV a, TV b) { return _mm512_cmp_epi64_mask(a, b, _MM_CMPINT_GT); }
+    static INLINE TCMPMASK get_cmpgt_mask(TV a, TV b) { return _mm512_cmp_epi64_mask(a, b, _MM_CMPINT_GT); }
 
     static INLINE TV shift_right(TV v, i32 i) { return _mm512_srli_epi64(v, i); }
     static INLINE TV shift_left(TV v, i32 i) { return _mm512_slli_epi64(v, i); }

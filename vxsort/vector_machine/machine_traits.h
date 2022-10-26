@@ -33,7 +33,7 @@ struct vxsort_machine_traits {
 public:
     typedef T TV;
     typedef T TLOADSTOREMASK;
-    typedef T TMASK;
+    typedef T TCMPMASK;
     typedef T TPACK;
 
     static constexpr i32 N = 1;
@@ -142,12 +142,12 @@ public:
     /// \param[in] p the pointer to the memory location to store to
     /// \param[in] v A vector with elements to be written to memory, according to the mask
     /// \param[in] mask the mask to control which elements are to be read
-    static void store_compress_vec(TV* p, TV v, TMASK mask) {
+    static void store_compress_vec(TV* p, TV v, TCMPMASK mask) {
         static_assert(always_false<TV>, "must be specialized!");
     }
     static TV partition_vector(TV v, i32 mask);
     static TV broadcast(T pivot);
-    static TMASK get_cmpgt_mask(TV a, TV b);
+    static TCMPMASK get_cmpgt_mask(TV a, TV b);
 
     static TV shift_right(TV v, i32 i);
     static TV shift_left(TV v, i32 i);

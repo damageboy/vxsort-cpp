@@ -4,7 +4,7 @@ public:
     typedef f64 T;
     typedef __m512d TV;
     typedef __mmask8 TLOADSTOREMASK;
-    typedef __mmask8 TMASK;
+    typedef __mmask8 TCMPMASK;
     typedef f64 TPACK;
 
     static constexpr i32 N = sizeof(TV) / sizeof(T);
@@ -43,9 +43,9 @@ public:
     // Will never be called
     static INLINE TV partition_vector(TV v, i32 mask) { return v; }
 
-    static void store_compress_vec(TV* ptr, TV v, TMASK mask) { _mm512_mask_compressstoreu_pd(ptr, mask, v); }
+    static void store_compress_vec(TV* ptr, TV v, TCMPMASK mask) { _mm512_mask_compressstoreu_pd(ptr, mask, v); }
     static INLINE TV broadcast(T pivot) { return _mm512_set1_pd(pivot); }
-    static INLINE TMASK get_cmpgt_mask(TV a, TV b) { return _mm512_cmp_pd_mask(a, b, _CMP_GT_OS); }
+    static INLINE TCMPMASK get_cmpgt_mask(TV a, TV b) { return _mm512_cmp_pd_mask(a, b, _CMP_GT_OS); }
 
     static INLINE TV shift_right(TV v, i32 i) { return v; }
     static INLINE TV shift_left(TV v, i32 i) { return v; }

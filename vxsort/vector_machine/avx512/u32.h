@@ -4,7 +4,7 @@ public:
     typedef u32 T;
     typedef __m512i TV;
     typedef __mmask16 TLOADSTOREMASK;
-    typedef __mmask16 TMASK;
+    typedef __mmask16 TCMPMASK;
     typedef u32 TPACK;
     typedef typename std::make_unsigned<T>::type TU;
 
@@ -50,11 +50,11 @@ public:
     // Will never be called
     static INLINE TV partition_vector(TV v, i32 mask) { return v; }
 
-    static void store_compress_vec(TV* ptr, TV v, TMASK mask) { _mm512_mask_compressstoreu_epi32(ptr, mask, v); }
+    static void store_compress_vec(TV* ptr, TV v, TCMPMASK mask) { _mm512_mask_compressstoreu_epi32(ptr, mask, v); }
 
     static INLINE TV broadcast(T pivot) { return _mm512_set1_epi32(pivot); }
 
-    static INLINE TMASK get_cmpgt_mask(TV a, TV b) { return _mm512_cmp_epu32_mask(a, b, _MM_CMPINT_GT); }
+    static INLINE TCMPMASK get_cmpgt_mask(TV a, TV b) { return _mm512_cmp_epu32_mask(a, b, _MM_CMPINT_GT); }
 
     static INLINE TV shift_right(TV v, i32 i) { return _mm512_srli_epi32(v, i); }
     static INLINE TV shift_left(TV v, i32 i) { return _mm512_slli_epi32(v, i); }
