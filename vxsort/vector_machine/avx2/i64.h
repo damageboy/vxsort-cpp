@@ -53,7 +53,7 @@ public:
         return s2i(_mm256_permutevar8x32_ps(i2s(v), _mm256_cvtepu8_epi32(_mm_loadu_si128((__m128i*)(perm_table_64 + mask * 8)))));
     }
 
-    static INLINE TV broadcast(i64 pivot) { return _mm256_set1_epi64x(pivot); }
+    static INLINE TV broadcast(T pivot) { return _mm256_set1_epi64x(pivot); }
 
     static INLINE TMASK get_cmpgt_mask(TV a, TV b) { return _mm256_movemask_pd(i2d(_mm256_cmpgt_epi64(a, b))); }
 

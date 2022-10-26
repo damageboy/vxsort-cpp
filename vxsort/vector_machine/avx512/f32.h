@@ -45,7 +45,7 @@ public:
 
     static void store_compress_vec(TV* ptr, TV v, TMASK mask) { _mm512_mask_compressstoreu_ps(ptr, mask, v); }
 
-    static INLINE TV broadcast(f32 pivot) { return _mm512_set1_ps(pivot); }
+    static INLINE TV broadcast(T pivot) { return _mm512_set1_ps(pivot); }
 
     static INLINE TMASK get_cmpgt_mask(TV a, TV b) { return _mm512_cmp_ps_mask(a, b, _CMP_GT_OS); }
 

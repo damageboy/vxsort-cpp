@@ -50,7 +50,7 @@ public:
         return s2i(_mm256_permutevar8x32_ps(i2s(v), _mm256_cvtepu8_epi32(_mm_loadu_si128((__m128i*)(perm_table_32 + mask * 8)))));
     }
 
-    static INLINE TV broadcast(u32 pivot) { return _mm256_set1_epi32(pivot); }
+    static INLINE TV broadcast(T pivot) { return _mm256_set1_epi32(pivot); }
 
     static INLINE TMASK get_cmpgt_mask(TV a, TV b) {
         __m256i top_bit = _mm256_set1_epi32(1U << 31);
