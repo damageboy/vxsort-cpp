@@ -47,8 +47,8 @@ public:
     static INLINE TV broadcast(T pivot) { return _mm512_set1_pd(pivot); }
     static INLINE TMASK get_cmpgt_mask(TV a, TV b) { return _mm512_cmp_pd_mask(a, b, _CMP_GT_OS); }
 
-    static TV shift_right(TV v, i32 i) { return v; }
-    static TV shift_left(TV v, i32 i) { return v; }
+    static INLINE TV shift_right(TV v, i32 i) { return v; }
+    static INLINE TV shift_left(TV v, i32 i) { return v; }
 
     static INLINE TV add(TV a, TV b) { return _mm512_add_pd(a, b); }
     static INLINE TV sub(TV a, TV b) { return _mm512_sub_pd(a, b); };
