@@ -91,18 +91,18 @@ public:
         static_assert(always_false<TV>, "must be specialized!");
     }
 
-    /// Generate a vector mask that can be used to loads N consecutive
-    /// elements from memory into the last N elements of a vector type, making off non-loaded
+    /// Generate a vector mask that can be used to loads N-m consecutive
+    /// elements from memory into the last N-m elements of a vector type, making off non-loaded
     /// elements from being read/stored.
     /// \note This mask is mostly useful for accessing the <b>beginning</b> of an array, where the
     ///       the masked-off elements are potentially outside the array bounds and may cause a
     ///       page-fault/segmentation-fault when accessed.
-    /// \param[in] n the number of elements to mask-off (therefore discard) from the beginning of
+    /// \param[in] m the number of elements to mask-off (therefore discard) from the beginning of
     ///              the vector, while loading the other elements into the end of the vector.
     ///              a zero (0) value is a special value that denotes that all values
     ///              are to be used (e.g. 0 discarded)
     /// \return the generated mask
-    static TLOADSTOREMASK generate_suffix_mask(i32 n) {
+    static TLOADSTOREMASK generate_suffix_mask(i32 m) {
         static_assert(always_false<TV>, "must be specialized!");
     }
 

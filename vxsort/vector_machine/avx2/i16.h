@@ -28,7 +28,7 @@ public:
         assert(amount >= 0);
         assert(amount <= N);
 
-        return amount ? amount : N;
+        return amount ? -N + amount : -N;
     }
 
     static INLINE TV load_vec(TV* p) { return _mm256_lddqu_si256(p); }
@@ -40,10 +40,14 @@ public:
     static INLINE TV load_partial_vec(TV *p, TV base, TLOADSTOREMASK mask) {
         // FML: There is only so much AVX2 stupidity one person can
         //      take in their entire lifetime, I'm personally over this crap
-        std::array<T, N> max_vec;
-        max_vec.fill(std::numeric_limits<T>::max());
-        std::copy_n(reinterpret_cast<T *>(p), mask, max_vec.begin());
-        return _mm256_lddqu_si256((TV *)max_vec.data());
+        std::array<T, N> base_vec;
+        _mm256_storeu_si256((TV *)base_vec.data(), base);
+        auto pt = (T *)p;
+        auto psrc = mask > 0 ? pt : pt + N + mask;
+        auto pdest = mask > 0 ? base_vec.begin() : base_vec.end() + mask;
+        auto amount = abs(mask);
+        std::copy_n(psrc, amount, pdest);
+        return _mm256_lddqu_si256((TV *)base_vec.data());
     }
 
     static INLINE void store_masked_vec(TV *p, TV v, TLOADSTOREMASK mask) {
