@@ -3,6 +3,9 @@
 
 #include <gtest/gtest.h>
 
+#include <random>
+#include <algorithm>
+#include <span>
 #include <fmt/format.h>
 #include "mini_fixtures.h"
 
@@ -17,6 +20,61 @@ using VM = vxsort::vector_machine;
 
 template <typename T, VM M>
 void test_partition(PageWithLavaBoundariesFixture<T, M> *fixture)
+{
+    if (!::vxsort::supports_vector_machine(M)) {
+        GTEST_SKIP_("Current CPU does not support the minimal features for this test");
+        return;
+    }
+
+    using VMT = vxsort::vxsort_machine_traits<T, M>;
+    using PM = vxsort::partition_machine<T, M>;
+    static constexpr auto N = VMT::N;
+
+    for (auto p = 0; p < VMT::N; p++) {
+        auto *load_addr = fixture->page_with_data;
+        auto pivot = fixture->get_expected_value(load_addr + p) - 1;
+
+        auto s = std::span<T>(load_addr, N);
+        std::random_device rd;
+        std::mt19937 gen{rd()};
+        std::shuffle(s.begin(), s.end(), gen);
+
+        auto PV = VMT::broadcast(pivot);
+
+        auto data = VMT::load_vec((typename VMT::TV *) load_addr);
+
+        T spill_left[N*2];
+        T spill_right[N*2];
+
+        T* RESTRICT spill_left_end = spill_left;
+        // partition_block expects the left/right *write* pointers to point
+        // to the next vector write position, for right write pointer
+        // this means N elements BEFORE the end of the spill buffer
+        T* RESTRICT spill_right_start = spill_right + N;
+        T* RESTRICT spill_right_end = spill_right_start;
+
+        memset(spill_left, 0x66, sizeof(spill_left));
+        memset(spill_right, 0x66, sizeof(spill_right));
+
+        PM::partition_block(data, PV, spill_left_end, spill_right_end);
+
+        ASSERT_EQ(spill_left_end - spill_left, p);
+        ASSERT_EQ(spill_right_start - spill_right_end, N - p);
+
+        for (auto i = 0; i < p; ++i) {
+            ASSERT_TRUE(spill_left[i] <= pivot);
+        }
+
+        for (auto i = VMT::N - 1; i >= p; --i) {
+            ASSERT_TRUE(spill_right_start[i] > pivot);
+
+        }
+    }
+}
+
+
+template <typename T, VM M>
+void test_partition_stability(PageWithLavaBoundariesFixture<T, M> *fixture)
 {
     if (!::vxsort::supports_vector_machine(M)) {
         GTEST_SKIP_("Current CPU does not support the minimal features for this test");

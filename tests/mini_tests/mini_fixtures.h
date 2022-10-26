@@ -68,7 +68,7 @@ protected:
         num_elements = page_size / sizeof(T);
 
         page_with_data = reinterpret_cast<T *>(mem + page_size);
-        for (auto i = 0; i < page_size / sizeof(T); i++) {
+        for (usize i = 0; i < num_elements; i++) {
             auto *p = &page_with_data[i];
             *p = get_expected_value(p);
         }
