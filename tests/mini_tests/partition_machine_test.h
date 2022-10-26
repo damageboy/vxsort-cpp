@@ -93,7 +93,7 @@ void test_partition_alignment(PageWithLavaBoundariesFixture<T, M> *fixture) {
         T spill_right[N*2];
 
         T* RESTRICT spill_left_start = spill_left;
-        T* RESTRICT spill_left_start_end = spill_left;
+        T* RESTRICT spill_left_end = spill_left;
 
         // aligne_vectorized expects the left/right *write* pointers to point
         // to the boundary of the spill buffer, for right write pointer
@@ -115,7 +115,7 @@ void test_partition_alignment(PageWithLavaBoundariesFixture<T, M> *fixture) {
         PM::align_vectorized(left_masked_amount, right_unmasked_amount,
                              PV,
                              left_next, right_next,
-                             spill_left_start, spill_left_start_end,
+                             spill_left_start, spill_left_end,
                              spill_right_start, spill_right_end);
 
         // align vectorized API is build for continued
@@ -127,7 +127,7 @@ void test_partition_alignment(PageWithLavaBoundariesFixture<T, M> *fixture) {
         auto amount_read_left = left_next - left;
         auto amount_read_right = right - right_next;
 
-        auto amount_partitioned_left = spill_left_start_end - spill_left_start;
+        auto amount_partitioned_left = spill_left_end - spill_left_start;
         auto amount_partitioned_right = spill_right_start - spill_right_end;
 
         ASSERT_EQ(amount_partitioned_left + amount_partitioned_right,
