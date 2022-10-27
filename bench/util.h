@@ -10,6 +10,8 @@
 
 #include <defs.h>
 
+#include "stolen-cycleclock.h"
+
 using namespace benchmark;
 
 namespace vxsort_bench {
