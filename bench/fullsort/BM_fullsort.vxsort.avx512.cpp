@@ -5,7 +5,7 @@
 
 #include <vxsort.avx512.h>
 
-#include "BM_fullsort.h"
+#include "BM_fullsort.vxsort.h"
 
 namespace vxsort_bench {
 using namespace vxsort::types;

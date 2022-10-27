@@ -1,57 +1,19 @@
-#ifndef VXSORT_BM_FULLSORT_H
-#define VXSORT_BM_FULLSORT_H
+#ifndef VXSORT_BM_FULLSORT_VXSORT_H
+#define VXSORT_BM_FULLSORT_VXSORT_H
 
 #include <benchmark/benchmark.h>
 #include <algorithm>
 #include <random>
 #include <thread>
-#include "../stolen-cycleclock.h"
 #include "../util.h"
 
 #include <vxsort.h>
 
+#include "fullsort_params.h"
+
 namespace vxsort_bench {
 using namespace vxsort::types;
 using vxsort::vector_machine;
-
-const auto processor_count = 1;
-
-static const i32 MIN_SORT = 256;
-static const i32 MAX_SORT = 1 << 24;
-
-static const i32 MIN_STRIDE = 1 << 3;
-static const i32 MAX_STRIDE = 1 << 27;
-
-template <class Q>
-static void BM_stdsort(benchmark::State& state) {
-    auto n = state.range(0);
-    auto v = std::vector<Q>((i32)n);
-    const auto ITERATIONS = 10;
-
-    generate_unique_values_vec(v, (Q)0x1000, (Q)8);
-    auto copies = generate_copies(ITERATIONS, n, v);
-    auto begins = generate_array_beginnings(copies);
-    auto ends = generate_array_beginnings(copies);
-    for (usize i = 0; i < copies.size(); i++)
-        ends[i] = begins[i] + n - 1;
-
-    vxsort::u64 total_cycles = 0;
-    for (auto _ : state) {
-        state.PauseTiming();
-        refresh_copies(copies, v);
-        state.ResumeTiming();
-        auto start = cycleclock::Now();
-        for (auto i = 0; i < ITERATIONS; i++) {
-            std::sort(begins[i], ends[i]);
-        }
-        total_cycles += (cycleclock::Now() - start);
-    }
-
-    state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
-    process_perf_counters(state.counters, n * ITERATIONS);
-    if (!state.counters.contains("cycles/N"))
-        state.counters["rdtsc-cycles/N"] = make_cycle_per_n_counter((f64)total_cycles / (f64)(n * ITERATIONS * state.iterations()));
-}
 
 template <class Q, vector_machine M, i32 U>
 static void BM_vxsort(benchmark::State& state) {
@@ -87,9 +49,7 @@ static void BM_vxsort(benchmark::State& state) {
 
     state.SetLabel(get_crypto_hash(begins[0], ends[0]));
     state.counters["Time/N"] = make_time_per_n_counter(n * ITERATIONS);
-
     state.SetBytesProcessed(state.iterations() * n * ITERATIONS * sizeof(Q));
-
     process_perf_counters(state.counters, n * ITERATIONS);
     if (!state.counters.contains("cycles/N"))
         state.counters["rdtsc-cycles/N"] = make_cycle_per_n_counter((f64)total_cycles / (f64)(n * ITERATIONS * state.iterations()));
@@ -142,4 +102,4 @@ static void BM_vxsort_strided(benchmark::State& state) {
 }
 }
 
-#endif  // VXSORT_BM_FULLSORT_H
+#endif  // VXSORT_BM_FULLSORT_VXSORT_H
