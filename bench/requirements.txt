@@ -1,0 +1,3 @@
+kaleido
+plotly
+pandas
