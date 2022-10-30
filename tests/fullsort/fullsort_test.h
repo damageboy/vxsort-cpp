@@ -19,29 +19,26 @@ using testing::Types;
 using ::vxsort::vector_machine;
 
 template <typename T, i32 Unroll, vector_machine M>
-void vxsort_test(std::vector<T> V) {
+void vxsort_test(std::vector<T>& V) {
     if (!::vxsort::supports_vector_machine(M)) {
         GTEST_SKIP_("Current CPU does not support the minimal features for this test");
         return;
     }
 
     auto copy = std::vector<T>(V);
-
     auto begin = V.data();
     auto end = V.data() + V.size() - 1;
 
     auto sorter = ::vxsort::vxsort<T, M, Unroll>();
     sorter.sort(begin, end);
 
-    //EXPECT_THAT(V, WhenSorted(ElementsAreArray(V)));
     std::sort(copy.begin(), copy.end());
-    u64 size = copy.size();
-    for (auto i = 0ULL; i < size; ++i) {
+    usize size = copy.size();
+    for (usize i = 0; i < size; ++i) {
         if (copy[i] != V[i]) {
             GTEST_FAIL() << fmt::format("value at idx #{}  {} != {}", i, copy[i], V[i]);
         }
     }
-
 }
 
 template <typename T, i32 Unroll, int Shift, vector_machine M>
