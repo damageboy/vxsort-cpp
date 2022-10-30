@@ -61,12 +61,10 @@ def generate_per_type(f_header: IO, type, vector_isa, break_inline):
     g.generate_cross_min_max()
     g.generate_strided_min_max()
 
-    print("\n#ifdef BITONIC_TESTS", file=f_header)
     g.generate_entry_points_full_vectors(asc=True)
     g.generate_entry_points_full_vectors(asc=False)
     g.generate_master_entry_point_full(asc=True)
     g.generate_master_entry_point_full(asc=False)
-    print("\n#endif", file=f_header)
     g.generate_epilogue()
 
 

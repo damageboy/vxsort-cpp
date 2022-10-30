@@ -7,8 +7,6 @@ set(test_HEADERS
         fullsort/fullsort_test.h
 )
 
-add_compile_definitions("BITONIC_TESTS")
-
 list(APPEND test_SOURCES
         mini_tests/masked_load_store.sanity.cpp
 )
