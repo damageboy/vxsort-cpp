@@ -33,7 +33,7 @@ public:
 
     static INLINE void store_vec(TV* ptr, TV v) { _mm512_storeu_si512(ptr, v); }
 
-    static TV load_partial_vec(TV *ptr, TV base, TLOADSTOREMASK mask) {
+    static INLINE TV load_partial_vec(TV *ptr, TV base, TLOADSTOREMASK mask) {
         return _mm512_mask_loadu_epi16(base, mask, (T const *) ptr);
     }
 
@@ -44,7 +44,7 @@ public:
     // Will never be called
     static INLINE TV partition_vector(TV v, i32 mask) { return v; }
 
-    static void store_compress_vec(TV* ptr, TV v, TCMPMASK mask) { _mm512_mask_compressstoreu_epi16(ptr, mask, v); }
+    static INLINE void store_compress_vec(TV* ptr, TV v, TCMPMASK mask) { _mm512_mask_compressstoreu_epi16(ptr, mask, v); }
 
     static INLINE TV broadcast(T pivot) { return _mm512_set1_epi16(pivot); }
 
