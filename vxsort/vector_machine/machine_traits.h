@@ -145,19 +145,60 @@ public:
     static void store_compress_vec(TV* p, TV v, TCMPMASK mask) {
         static_assert(always_false<TV>, "must be specialized!");
     }
+
+
     static TV partition_vector(TV v, i32 mask);
-    static TV broadcast(T pivot);
+
+    /// Broadcast a scalar value to all elements of a vector
+    /// \param[in] v the scalar value to braodcast vector-wide
+    /// \return the vector containing the broadcasted value
+    static TV broadcast(T v);
+
+    /// perform a vectorized comparison between two vectors returning
+    /// a vector wide mask of the comparison results
+    /// \param[in] a the left hand side vector
+    /// \param[in] b the right hand side vector
+    /// \return The comparison result as a mask
     static TCMPMASK get_cmpgt_mask(TV a, TV b);
 
+    /// Perform arithmetic right-shift on a vector
+    /// \param[in] v the inpyt vector
+    /// \param[in] i the amout of bits to shift each element right by
+    /// \return the shifted vector
     static TV shift_right(TV v, i32 i);
+
+    /// Perform left-shift on a vector
+    /// \param[in] v the inpyt vector
+    /// \param[in] i the amout of bits to shift each element left by
+    /// \return the shifted vector
     static TV shift_left(TV v, i32 i);
 
+    /// Perform vector addition between two vectors
+    /// \param[in] a the first vector
+    /// \param[in] b the second vector
+    /// \return a vector containing the sum of the two input vectors
     static TV add(TV a, TV b);
+
+    /// Perform vector subtraction between two vectors
+    /// \param[in] a the first vector
+    /// \param[in] b the second vector
+    /// \return a vector containing the subtraction between the two input vectors
     static TV sub(TV a, TV b);
 
-    static TV pack_unordered(TV a, TV b);
+    /// Perform unordered vector packing between two vectors, halving the bit-width
+    /// of the input vectors
+    /// \param[in] u1 the first vector
+    /// \param[in] u2 the second vector
+    /// \return a vector containing the packed elements of the two input vectors
+    /// \note it is assumed that the order of packing between both vectors need not be preserved
+    static TV pack_unordered(TV u1, TV u2);
 
-    static void unpack_ordered(TV, TV&, TV&) {
+    /// Perform unordered vector packing between two vectors, halving the bit-width
+    /// of the input vectors
+    /// \param[in] p the packed input vector
+    /// \param[out] u1 a destination vector for the first half of the unpacked elements
+    /// \param[out] u2 a destination vector for the second half of the unpacked elements
+    static void unpack_ordered(TV p, TV& u1, TV& u2) {
         static_assert(always_false<TV>, "must be specialized!");
     }
 
