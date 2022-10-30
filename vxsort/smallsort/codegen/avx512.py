@@ -603,7 +603,7 @@ public:
 
         g.clean_print(f"""
     // This is generated for testing purposes only
-    static NOINLINE void sort_full_vectors_{sfx}({t} *ptr, size_t length) {{
+    static NOINLINE void sort_full_vectors_{sfx}({t} *ptr, usize length) {{
         assert(length % N == 0);
         switch(length / N) {{""")
 

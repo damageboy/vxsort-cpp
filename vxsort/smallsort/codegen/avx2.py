@@ -677,7 +677,7 @@ public:
 
         g.clean_print(f"""
     // This is generated for testing purposes only
-    static void sort_full_vectors_{sfx}({t} *ptr, size_t length) {{
+    static void sort_full_vectors_{sfx}({t} *ptr, usize length) {{
         assert(length % N == 0);
         switch(length / N) {{""")
 

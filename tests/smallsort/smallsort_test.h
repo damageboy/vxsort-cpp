@@ -27,14 +27,17 @@ void bitonic_machine_sort_test(std::vector<T> V) {
         GTEST_SKIP_("Current CPU does not support the minimal features for this test");
         return;
     }
+
+    using BM = vxsort::smallsort::bitonic_machine<T, M>;
+
     auto begin = V.data();
     auto size = V.size();
     auto v_copy = V;
 
     if (ascending)
-        vxsort::smallsort::bitonic_machine<T, M>::sort_full_vectors_ascending(begin, size);
+        BM::sort_full_vectors_ascending(begin, size);
     else
-        vxsort::smallsort::bitonic_machine<T, M>::sort_full_vectors_descending(begin, size);
+        BM::sort_full_vectors_descending(begin, size);
 
     std::sort(v_copy.begin(), v_copy.end());
 
@@ -53,15 +56,13 @@ void bitonic_sort_test(std::vector<T> V) {
         GTEST_SKIP_("Current CPU does not support the minimal features for this test");
         return;
     }
+
     auto begin = V.data();
     auto size = V.size();
     {
         auto v_copy = V;
-
         vxsort::smallsort::bitonic<T, M>::sort(begin, size);
-
         std::sort(v_copy.begin(), v_copy.end());
-
         EXPECT_THAT(V, ElementsAreArray(v_copy));
     }
 }
