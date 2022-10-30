@@ -5,6 +5,9 @@ set(TARGET_NAME ${CMAKE_PROJECT_NAME}_tests)
 set(test_HEADERS
         smallsort/smallsort_test.h
         fullsort/fullsort_test.h
+        mini_tests/pack_machine_test.h
+        mini_tests/partition_machine_test.h
+        mini_tests/masked_load_store_test.h
 )
 
 list(APPEND test_SOURCES
@@ -21,6 +24,8 @@ if (${PROCESSOR_IS_X86})
             mini_tests/masked_load_store.avx512.cpp
             mini_tests/partition_machine.avx2.cpp
             mini_tests/partition_machine.avx512.cpp
+            mini_tests/pack_machine.avx2.cpp
+            mini_tests/pack_machine.avx512.cpp
     )
 endif()
 

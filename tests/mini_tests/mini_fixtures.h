@@ -36,7 +36,7 @@ static inline usize get_page_size()
 
 static const i32 page_size = get_page_size();
 
-template <typename T, VM M>
+template <typename T, VM M, bool for_packing = false>
 class PageWithLavaBoundariesFixture : public ::testing::Test {
     static constexpr u8 GARBAGE_BYTE = 0x66;
     using VMT = vxsort::vxsort_machine_traits<T, M>;
@@ -89,11 +89,12 @@ protected:
 
     void generate_expected_values()
     {
+        static constexpr i32 value_width = for_packing ? sizeof(T) / 2 : sizeof(T);
         for (auto n = 0; n < N; n++) {
             T expected_byte = n+1;
             T expected_value = expected_byte;
 
-            for (auto i = 1; i < sizeof(T); i++)
+            for (auto i = 1; i < value_width; i++)
                 expected_value = expected_value << 8 | expected_byte;
 
             expected_values[n] = expected_value;
