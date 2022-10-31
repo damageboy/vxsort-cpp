@@ -5,14 +5,15 @@ public:
     typedef __m512i TV;
     typedef __mmask16 TLOADSTOREMASK;
     typedef __mmask16 TCMPMASK;
-    typedef u32 TPACK;
+    typedef u16 TPACK;
     typedef typename std::make_unsigned<T>::type TU;
+    static_assert(sizeof(TPACK)*2 == sizeof(T), "TPACK must be half-width of T");
 
     static constexpr i32 N = sizeof(TV) / sizeof(T);
     static_assert(is_powerof2(N), "vector-size / element-size must be a power of 2");
 
     static constexpr bool supports_compress_writes() { return true; }
-    static constexpr bool supports_packing() { return false; }
+    static constexpr bool supports_packing() { return true; }
 
     template <i32 Shift>
     static bool can_pack(T span) {
@@ -67,6 +68,7 @@ public:
         u1 = _mm512_cvtepu16_epi32(_mm512_extracti32x8_epi32(p, 0));
         u2 = _mm512_cvtepu16_epi32(_mm512_extracti32x8_epi32(p, 1));
     }
+
     template <i32 Shift>
     static INLINE T shift_n_sub(T v, T sub) {
         if (Shift > 0)
@@ -82,5 +84,4 @@ public:
             add = (T) (((TU) add) << Shift);
         return add;
     }
-
 };
