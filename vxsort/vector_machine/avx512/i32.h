@@ -7,6 +7,7 @@ public:
     typedef __mmask16 TCMPMASK;
     typedef i16 TPACK;
     typedef typename std::make_unsigned<T>::type TU;
+    static_assert(sizeof(TPACK)*2 == sizeof(T), "TPACK must be half-width of T");
 
     static constexpr i32 N = sizeof(TV) / sizeof(T);
     static_assert(is_powerof2(N), "vector-size / element-size must be a power of 2");
@@ -39,11 +40,11 @@ public:
 
     static INLINE void store_vec(TV* ptr, TV v) { _mm512_storeu_si512(ptr, v); }
 
-    static INLINE TV load_partial_vec(TV *p, TV base, TLOADSTOREMASK mask) { 
+    static INLINE TV load_partial_vec(TV *p, TV base, TLOADSTOREMASK mask) {
         return _mm512_mask_loadu_epi32(base, mask, (i32 const *) p);
     }
 
-    static INLINE void store_masked_vec(TV *p, TV v, TLOADSTOREMASK mask) { 
+    static INLINE void store_masked_vec(TV *p, TV v, TLOADSTOREMASK mask) {
         _mm512_mask_storeu_epi32(p, mask, v);
     }
 
@@ -63,7 +64,6 @@ public:
     static INLINE TV sub(TV a, TV b) { return _mm512_sub_epi32(a, b); };
 
     static INLINE TV pack_unordered(TV a, TV b) { return _mm512_packs_epi32(a, b); }
-
     static INLINE void unpack_ordered(TV p, TV& u1, TV& u2) {
         u1 = _mm512_cvtepi16_epi32(_mm512_extracti32x8_epi32(p, 0));
         u2 = _mm512_cvtepi16_epi32(_mm512_extracti32x8_epi32(p, 1));

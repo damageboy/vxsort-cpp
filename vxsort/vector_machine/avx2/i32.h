@@ -7,6 +7,7 @@ public:
     typedef u32 TCMPMASK;
     typedef i16 TPACK;
     typedef typename std::make_unsigned<T>::type TU;
+    static_assert(sizeof(TPACK)*2 == sizeof(T), "TPACK must be half-width of T");
 
     static constexpr i32 N = sizeof(TV) / sizeof(T);
     static_assert(is_powerof2(N), "vector-size / element-size must be a power of 2");
@@ -36,7 +37,7 @@ public:
 
     static INLINE void store_vec(TV* ptr, TV v) { _mm256_storeu_si256(ptr, v); }
 
-    static void store_compress_vec(TV*, TV, TCMPMASK) { throw std::runtime_error("operation is unsupported"); }
+    static INLINE void store_compress_vec(TV*, TV, TCMPMASK) { throw std::runtime_error("operation is unsupported"); }
 
     static INLINE TV load_partial_vec(TV *p, TV base, TLOADSTOREMASK mask) {
         return _mm256_or_si256(_mm256_maskload_epi32((i32 *) p, mask),
@@ -77,7 +78,7 @@ public:
     }
 
     template <i32 Shift>
-    static T INLINE unshift_and_add(TPACK from, T add) {
+    static INLINE T unshift_and_add(TPACK from, T add) {
         add += from;
         if (Shift > 0)
             add = (T) (((TU) add) << Shift);

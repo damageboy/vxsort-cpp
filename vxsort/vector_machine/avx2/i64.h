@@ -7,6 +7,7 @@ public:
     typedef u32 TCMPMASK;
     typedef i32 TPACK;
     typedef typename std::make_unsigned<T>::type TU;
+    static_assert(sizeof(TPACK)*2 == sizeof(T), "TPACK must be half-width of T");
 
     static constexpr i32 N = sizeof(TV) / sizeof(T);
     static_assert(is_powerof2(N), "vector-size / element-size must be a power of 2");

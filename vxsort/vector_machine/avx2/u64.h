@@ -7,6 +7,7 @@ class vxsort_machine_traits<u64, AVX2> {
     typedef u32 TCMPMASK;
     typedef u32 TPACK;
     typedef typename std::make_unsigned<T>::type TU;
+    static_assert(sizeof(TPACK)*2 == sizeof(T), "TPACK must be half-width of T");
 
     static constexpr i32 N = sizeof(TV) / sizeof(T);
     static_assert(is_powerof2(N), "vector-size / element-size must be a power of 2");
@@ -23,13 +24,13 @@ class vxsort_machine_traits<u64, AVX2> {
     static INLINE TLOADSTOREMASK generate_prefix_mask(i32 amount) {
         assert(amount >= 0);
         assert(amount <= N);
-        return _mm256_cvtepi8_epi64(_mm_loadu_si128((__m128i*)(prefix_mask_table_64b + amount * N)));
+        return _mm256_cvtepi8_epi64(_mm_loadu_si128((__m128i*)(prefix_mask_table_64b + N * amount)));
     }
 
     static INLINE TLOADSTOREMASK generate_suffix_mask(i32 amount) {
         assert(amount >= 0);
         assert(amount <= N);
-        return _mm256_cvtepi8_epi64(_mm_loadu_si128((__m128i*)(suffix_mask_table_64b + amount * N)));
+        return _mm256_cvtepi8_epi64(_mm_loadu_si128((__m128i*)(suffix_mask_table_64b + N * amount)));
     }
 
     static INLINE TV load_vec(TV* p) { return _mm256_lddqu_si256(p); }
@@ -39,7 +40,7 @@ class vxsort_machine_traits<u64, AVX2> {
     static void store_compress_vec(TV*, TV, TCMPMASK) { throw std::runtime_error("operation is unsupported"); }
 
     static INLINE TV load_partial_vec(TV *p, TV base, TLOADSTOREMASK mask) {
-        return _mm256_or_si256(_mm256_maskload_epi64((long long *) p, mask),
+        return _mm256_or_si256(_mm256_maskload_epi64((const long long *) p, mask),
                                _mm256_andnot_si256(mask, base));
     }
 
@@ -52,6 +53,7 @@ class vxsort_machine_traits<u64, AVX2> {
         assert(mask <= 15);
         return s2i(_mm256_permutevar8x32_ps(i2s(v), _mm256_cvtepu8_epi32(_mm_loadu_si128((__m128i*)(perm_table_64 + mask * 8)))));
     }
+
     static INLINE TV broadcast(T pivot) { return _mm256_set1_epi64x(pivot); }
 
     static INLINE TCMPMASK get_cmpgt_mask(TV a, TV b) {

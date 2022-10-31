@@ -28,7 +28,7 @@ class vxsort_machine_traits<u16, AVX2> {
         assert(amount >= 0);
         assert(amount <= N);
 
-        return amount != -N ? -N + amount : -N;
+        return amount ? -N + amount : -N;
     }
 
     static INLINE TV load_vec(TV* p) { return _mm256_lddqu_si256(p); }
@@ -70,11 +70,11 @@ class vxsort_machine_traits<u16, AVX2> {
     static INLINE TV shift_right(TV v, i32 i) { return _mm256_srli_epi16(v, i); }
     static INLINE TV shift_left(TV v, i32 i) { return _mm256_slli_epi16(v, i); }
 
-    static INLINE TV add(TV a, TV b) { return _mm256_add_epi32(a, b); }
-    static INLINE TV sub(TV a, TV b) { return _mm256_sub_epi32(a, b); };
+    static INLINE TV add(TV a, TV b) { return _mm256_add_epi16(a, b); }
+    static INLINE TV sub(TV a, TV b) { return _mm256_sub_epi16(a, b); };
 
-    static INLINE TV pack_unordered(TV a, TV b) { return a; }
-    static INLINE void unpack_ordered(TV p, TV& u1, TV& u2) { }
+    static INLINE TV pack_unordered(TV, TV) { throw std::runtime_error("operation is unsupported"); }
+    static INLINE void unpack_ordered(TV, TV&, TV&) { }
 
     template <i32 Shift>
     static INLINE T shift_n_sub(T v, T sub) {

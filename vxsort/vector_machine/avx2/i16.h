@@ -70,7 +70,7 @@ public:
     static INLINE TV add(TV a, TV b) { return _mm256_add_epi16(a, b); }
     static INLINE TV sub(TV a, TV b) { return _mm256_sub_epi16(a, b); };
 
-    static INLINE TV pack_unordered(TV, TV) { TV tmp = _mm256_set1_epi32(0); return tmp; }
+    static INLINE TV pack_unordered(TV, TV) { throw std::runtime_error("operation is unsupported"); }
     static INLINE void unpack_ordered(TV, TV&, TV&) { }
 
     template <i32 Shift>
@@ -82,7 +82,7 @@ public:
     }
 
     template <i32 Shift>
-    static T unshift_and_add(TPACK from, T add) {
+    static INLINE T unshift_and_add(TPACK from, T add) {
         add += from;
         if (Shift > 0)
             add = (T) (((TU) add) << Shift);
