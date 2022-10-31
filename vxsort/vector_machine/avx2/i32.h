@@ -13,7 +13,7 @@ public:
     static_assert(is_powerof2(N), "vector-size / element-size must be a power of 2");
 
     static constexpr bool supports_compress_writes() { return false; }
-    static constexpr bool supports_packing() { return false; }
+    static constexpr bool supports_packing() { return true; }
 
     template <i32 Shift>
     static bool can_pack(T span) {
