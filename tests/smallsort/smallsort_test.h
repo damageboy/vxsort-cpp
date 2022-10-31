@@ -22,7 +22,7 @@ using testing::Types;
 using vxsort::vector_machine;
 
 template <class T, vector_machine M, bool ascending>
-void bitonic_machine_sort_test(std::vector<T> V) {
+void bitonic_machine_sort_test(std::vector<T>& V) {
     if (!vxsort::supports_vector_machine(M)) {
         GTEST_SKIP_("Current CPU does not support the minimal features for this test");
         return;
@@ -30,9 +30,9 @@ void bitonic_machine_sort_test(std::vector<T> V) {
 
     using BM = vxsort::smallsort::bitonic_machine<T, M>;
 
+    auto v_copy = std::vector<T>(V);
     auto begin = V.data();
     auto size = V.size();
-    auto v_copy = V;
 
     if (ascending)
         BM::sort_full_vectors_ascending(begin, size);
@@ -40,35 +40,24 @@ void bitonic_machine_sort_test(std::vector<T> V) {
         BM::sort_full_vectors_descending(begin, size);
 
     std::sort(v_copy.begin(), v_copy.end());
-
     EXPECT_THAT(V, ElementsAreArray(v_copy));
-//
-
-//    if (ascending)
-//        EXPECT_THAT(V, WhenSortedBy(std::less<T>(), ElementsAreArray(V)));
-//    else
-//        EXPECT_THAT(V, WhenSortedBy(std::greater<T>(), ElementsAreArray(V)));
 }
 
 template <class T, vector_machine M>
-void bitonic_sort_test(std::vector<T> V) {
+void bitonic_sort_test(std::vector<T>& V) {
     if (!vxsort::supports_vector_machine(M)) {
         GTEST_SKIP_("Current CPU does not support the minimal features for this test");
         return;
     }
 
+    auto v_copy = std::vector<T>(V);
     auto begin = V.data();
     auto size = V.size();
-    {
-        auto v_copy = V;
-        vxsort::smallsort::bitonic<T, M>::sort(begin, size);
-        std::sort(v_copy.begin(), v_copy.end());
-        EXPECT_THAT(V, ElementsAreArray(v_copy));
-    }
+
+    vxsort::smallsort::bitonic<T, M>::sort(begin, size);
+    std::sort(v_copy.begin(), v_copy.end());
+    EXPECT_THAT(V, ElementsAreArray(v_copy));
 }
-
-
-
 }
 
 #endif  // VXSORT_SMALLSORT_TEST_H
