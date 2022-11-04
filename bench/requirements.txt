@@ -1,3 +1,5 @@
 kaleido
 plotly
 pandas
+humanize
+ipython

@@ -18,6 +18,15 @@ BENCHMARK_TEMPLATE(BM_bitonic_sort, i64, vm::AVX512)->DenseRange(2, 1024, 2)->Un
 BENCHMARK_TEMPLATE(BM_bitonic_sort, u64, vm::AVX512)->DenseRange(2, 1024, 2)->Unit(kNanosecond)->MinTime(0.1);
 BENCHMARK_TEMPLATE(BM_bitonic_sort, f64, vm::AVX512)->DenseRange(2, 1024, 2)->Unit(kNanosecond)->MinTime(0.1);
 
+BENCHMARK_TEMPLATE(BM_bitonic_machine, i16, vm::AVX512, 2)->Unit(kNanosecond)->MinTime(0.1);
+BENCHMARK_TEMPLATE(BM_bitonic_machine, u16, vm::AVX512, 2)->Unit(kNanosecond)->MinTime(0.1);
+BENCHMARK_TEMPLATE(BM_bitonic_machine, i32, vm::AVX512, 2)->Unit(kNanosecond)->MinTime(0.1);
+BENCHMARK_TEMPLATE(BM_bitonic_machine, u32, vm::AVX512, 2)->Unit(kNanosecond)->MinTime(0.1);
+BENCHMARK_TEMPLATE(BM_bitonic_machine, i64, vm::AVX512, 2)->Unit(kNanosecond)->MinTime(0.1);
+BENCHMARK_TEMPLATE(BM_bitonic_machine, u64, vm::AVX512, 2)->Unit(kNanosecond)->MinTime(0.1);
+BENCHMARK_TEMPLATE(BM_bitonic_machine, f32, vm::AVX512, 2)->Unit(kNanosecond)->MinTime(0.1);
+BENCHMARK_TEMPLATE(BM_bitonic_machine, f64, vm::AVX512, 2)->Unit(kNanosecond)->MinTime(0.1);
+
 }
 
 #include "vxsort_targets_disable.h"
