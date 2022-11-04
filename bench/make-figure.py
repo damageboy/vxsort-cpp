@@ -66,33 +66,48 @@ def make_vxsort_vs_all_frame(df_orig):
     return df
 
 
-def plot_vxsort_vs_all_frame(df):
-    cardinality = df.nunique(dropna=True)
+def plot_vxsort_vs_all_frame(df, speedup_baseline):
 
-    if cardinality['sorter'] == 1:
+    df['len_title'] = df.apply(lambda x: f"{humanize.naturalsize(x['len'], gnu=True, binary=True).replace('B', '')}", axis=1)
+
+    cardinality = df[['len_title', 'type', 'sorter_title']].nunique(dropna=True)
+
+    if cardinality['sorter_title'] == 1:
         raise ValueError("Only one sorter in the frame")
 
-    if cardinality['type'] > 1:
-        raise ValueError("vxsort vs. all plots must have only one type")
+    if cardinality['type'] == 1 and cardinality['len_title'] > 1:
+        title_suffix = f"({df['type'].unique()[0]})"
+        y_column = 'len_title'
+    elif cardinality['type'] > 1 and cardinality['len_title'] == 1:
+        title_suffix = f"({df['len_title'].unique()[0]} elements)"
+        y_column = 'type'
+    else:
+        raise ValueError(f"Can't figure out the comparison axis for the plot: {cardinality}")
 
-    df['len_title'] = df.apply(lambda x: f"{humanize.naturalsize(x['len'], gnu=True, binary=True).replace('B', '')}",
-                               axis=1)
+    if speedup_baseline:
+        baseline_df = df[df['sorter_title'] == speedup_baseline]
+        df['speedup'] = df.groupby(y_column)['rdtsc-cycles/N'].\
+            transform(lambda x: baseline_df[baseline_df[y_column] == x.name]['rdtsc-cycles/N'].values[0] / x)
+        x_column = 'speedup'
+    else:
+        x_column = 'rdtsc-cycles/N'
 
     fig = px.bar(df,
                  barmode='group',
                  orientation='h',
                  color='sorter_title',
-                 y='len_title',
-                 x='rdtsc-cycles/N',
+                 y=y_column,
+                 x=x_column,
                  width=1000, height=600,
                  labels={
                      "len_title": "Problem size",
                      "len": "Problem size",
                      "rdtsc-cycles/N": "cycles per element",
+                     "speedup": f"speedup over {speedup_baseline}",
                  },
                  template='plotly_dark')
 
-    fig.update_layout(title=make_title("vxsort vs. others"),
+    fig.update_layout(title=make_title(f"vxsort vs. others {title_suffix}"),
                       bargap=0.3, bargroupgap=0.2,
                       yaxis_tickangle=-30,
                       )
@@ -116,6 +131,7 @@ def parse_args():
     parser.add_argument('--format', choices=['svg', 'png', 'html'], default='svg')
     parser.add_argument('--query', action='append',
                         help='pandas query to filter the data-frame with before plotting')
+    parser.add_argument('--speedup', help='plot speedup vs. supplied baseline sorter')
     parser.add_argument('--debug-df', action='store_true',
                         help='just show the last data-frame before generating a figure and quit')
     parser.add_argument('-o', '--output', default=sys.stdout.buffer)
@@ -153,16 +169,18 @@ def make_figures():
     df = parse_csv_into_dataframe(args.filename)
 
     if args.mode == 'vxsort-types':
+        if args.speedup:
+            raise argparse.ArgumentError("Speedup mode is not supported for vxsort-types mode")
         plot_df = make_vxsort_types_frame(df)
         plot_df = apply_queries(plot_df, args.query)
         fig = plot_vxsort_types_frame(plot_df)
     elif args.mode == 'vxsort-vs-all':
         plot_df = make_vxsort_vs_all_frame(df)
-        if not args.query or len(arg.query) == 0:
-            args.query = ["len <= 1048576 & width == 32 & typecat == 'i' & (sorter != 'vxsort' | (unroll == 8))"]
+        if not args.query or len(args.query) == 0:
+            args.query = ["len <= 1048576 & width == 32 & typecat == 'i' & (sorter != 'vxsort' | unroll == 8)"]
 
         plot_df = apply_queries(plot_df, args.query)
-        fig = plot_vxsort_vs_all_frame(plot_df)
+        fig = plot_vxsort_vs_all_frame(plot_df, args.speedup)
 
     if args.debug_df:
         print(plot_df)

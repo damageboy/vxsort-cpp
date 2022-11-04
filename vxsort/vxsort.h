@@ -526,6 +526,7 @@ private:
         auto constexpr MIN = T(std::numeric_limits<TPACK>::min());
         auto offset = VMT::template shift_n_sub<Shift>(min_bounding, MIN);
         const TV offset_v = VMT::broadcast(offset);
+        //const TV offset_v = PKM::prepare_offset(min_bounding);
 
         auto * RESTRICT read_left = left;
         auto * RESTRICT read_right = right;
