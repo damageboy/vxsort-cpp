@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.24)
 
 project(vxsort)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -145,10 +145,27 @@ include(ConfigSafeGuards)
 # 3rd party deps
 #
 
-CPMAddPackage("gh:google/googletest#main")
-CPMAddPackage("gh:fmtlib/fmt#8.1.1")
-CPMAddPackage("gh:google/cpu_features#main")
+CPMAddPackage(
+        NAME googletest
+        GITHUB_REPOSITORY google/googletest
+        GIT_TAG release-1.12.1
+        VERSION 1.12.1
+        OPTIONS "INSTALL_GTEST OFF" "gtest_force_shared_crt"
+        OVERRIDE_FIND_PACKAGE
+)
+CPMAddPackage(
+        NAME cpu_features
+        GITHUB_REPOSITORY google/cpu_features
+        GIT_TAG main
+        OPTIONS "BUILD_TESTING OFF"
+)
+CPMAddPackage("gh:fmtlib/fmt#9.1.0")
 CPMAddPackage("gh:okdshin/PicoSHA2#master")
+
+include(EnableLocalGtestDiscovery)
+enable_testing()
+find_package(GTest)
+include(GoogleTest)
 
 add_subdirectory(${PROJECT_SOURCE_DIR}/vxsort/)
 add_subdirectory(${PROJECT_SOURCE_DIR}/demo/)
