@@ -1,6 +1,5 @@
 set(TARGET_NAME ${CMAKE_PROJECT_NAME}_tests)
 
-#include_directories(${gtest_SOURCE_DIR}/include ${gtest_SOURCE_DIR})
 
 set(test_HEADERS
         smallsort/smallsort_test.h
@@ -36,3 +35,7 @@ target_link_libraries(${TARGET_NAME}
         gtest
         gmock
         gmock_main)
+
+add_test(${TARGET_NAME} ${TARGET_NAME})
+
+gtest_discover_tests(${TARGET_NAME})
