@@ -13,6 +13,7 @@ option(VXSORT_USE_LIBCXX     "Build and test with libc++ stdlib. (Linux/macOS)" 
 option(VXSORT_ENABLE_LTO     "Build and test with link-time optimization"       OFF)
 option(VXSORT_GENERATE_STATS "Build auxiliary statistics collection code"       OFF)
 option(VXSORT_CCACHE         "Use ccache to speed up re-compilation"            OFF)
+set(VXSORT_USE_LINKER "" CACHE STRING "Custom linker for -fuse-ld=...")
 
 find_program(CCACHE_PROGRAM ccache)
 if(CCACHE_PROGRAM AND NOT ${DONT_USE_CCACHE})
@@ -27,6 +28,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(CheckCXXCompilerFlag)
 include(GetHostType)
 include(CPM)
+include(CheckLinkerFlag)
 
 # Set a default build type if none was specified
 set(default_build_type "Release")
@@ -95,6 +97,42 @@ else()
         add_compile_options(-fsanitize=address,bounds,alignment,shift,shift-exponent)
         add_link_options(-fsanitize=address,bounds,alignment,shift,shift-exponent)
     endif()
+
+    function(get_linker_candidates result)
+        set(candidates "")
+
+        if (CMAKE_C_COMPILER_ID STREQUAL "Clang")
+            string(REPLACE "." ";" clang_version_components ${CMAKE_C_COMPILER_VERSION})
+            list(GET clang_version_components 0 clang_major)
+            list(APPEND candidates lld-${clang_major} lld)
+        endif ()
+
+        set(${result} ${candidates} PARENT_SCOPE)
+    endfunction()
+
+    # Hack/best-effort: we need this for LTO/IPO, which is unconditionally enabled
+    # for Release/RelWithDebInfo below. System-default clang will work, but
+    # non-system-default clang may select the system-default lld when run through
+    # various symlinks. This will select the wrong lld version and break LTO.
+    if (NOT VXSORT_USE_LINKER)
+        get_linker_candidates(_candidates)
+        foreach (candidate ${_candidates})
+            set(varname "HAS_${candidate}")
+            string(REPLACE "-" "_" varname ${varname})
+            check_linker_flag(CXX "-fuse-ld=${candidate}" ${varname})
+            if (NOT ${varname})
+                continue()
+            endif ()
+
+            set(VXSORT_USE_LINKER ${candidate} CACHE STRING "Custom linker for -fuse-ld=..." FORCE)
+            break()
+        endforeach ()
+    endif ()
+
+    if (VXSORT_USE_LINKER)
+        add_link_options(-fuse-ld=${VXSORT_USE_LINKER})
+        message(STATUS "Overriding linker to ${VXSORT_USE_LINKER}")
+    endif ()
 
     if (VXSORT_USE_LIBCXX)
         if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
