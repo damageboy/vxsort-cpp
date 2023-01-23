@@ -8,6 +8,34 @@ set(test_HEADERS
         mini_tests/masked_load_store_test.h
 )
 
+list(APPEND i_sort_types
+        i16
+        i32
+        i64
+)
+
+list(APPEND u_sort_types
+        u16
+        u32
+        u64
+)
+
+list(APPEND f_sort_types
+        f32
+        f64
+)
+
+list(APPEND sort_types
+        i
+        u
+        f
+)
+
+list(APPEND x86_isas
+        avx2
+        avx512
+)
+
 list(APPEND test_SOURCES
         mini_tests/masked_load_store.sanity.cpp
 )
@@ -30,23 +58,28 @@ if (${PROCESSOR_IS_X86})
             mini_tests/partition_machine.avx512.cpp
             mini_tests/pack_machine.avx512.cpp
             )
+
+
+
+    foreach(v ${x86_isas})
+        foreach(tf ${sort_types})
+        string(TOUPPER ${v} vu)
+        add_executable(${TARGET_NAME}_${v}_${tf} ${test_${v}_SOURCES} ${test_HEADERS})
+
+        foreach(t ${${tf}_sort_types})
+            string(TOUPPER ${t} tu)
+            target_compile_definitions(${TARGET_NAME}_${v}_${tf} PRIVATE VXSORT_TEST_${vu}_${tu})
+        endforeach ()
+
+        target_link_libraries(${TARGET_NAME}_${v}_${tf}
+            ${CMAKE_PROJECT_NAME}_lib
+            gtest
+            gmock
+            gmock_main)
+
+        #gtest_discover_tests(${TARGET_NAME}_avx2)
+        endforeach()
+    endforeach()
+
 endif()
 
-add_executable(${TARGET_NAME}_avx2 ${test_avx2_SOURCES} ${test_HEADERS})
-
-target_link_libraries(${TARGET_NAME}_avx2
-        ${CMAKE_PROJECT_NAME}_lib
-        gtest
-        gmock
-        gmock_main)
-
-add_executable(${TARGET_NAME}_avx512 ${test_avx512_SOURCES} ${test_HEADERS})
-
-target_link_libraries(${TARGET_NAME}_avx512
-        ${CMAKE_PROJECT_NAME}_lib
-        gtest
-        gmock
-        gmock_main)
-
-gtest_discover_tests(${TARGET_NAME}_avx2)
-gtest_discover_tests(${TARGET_NAME}_avx512)
