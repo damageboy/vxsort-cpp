@@ -12,8 +12,8 @@ using VM = vxsort::vector_machine;
 template<typename T>
 using PackMachineAVX512Test = PackMachineTest<T, VM::AVX512>;
 
-using PackTypes = ::testing::Types<i16, u16, i32, u32, i64, u64>;
-TYPED_TEST_SUITE(PackMachineAVX512Test, PackTypes);
+using TestTypes = ::testing::Types<i16, u16, i32, u32, i64, u64>;
+TYPED_TEST_SUITE(PackMachineAVX512Test, TestTypes);
 
 TYPED_TEST(PackMachineAVX512Test, PackingWorks) {
     test_packunpack<TypeParam , VM::AVX512>(this);

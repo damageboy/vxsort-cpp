@@ -9,8 +9,8 @@ using VM = vxsort::vector_machine;
 template <typename T>
 using MaskedLoadStoreDeathTest = PageWithLavaBoundariesFixture<T, VM::NONE>;
 
-using MaskedTypes = ::testing::Types<i32>;
-TYPED_TEST_SUITE(MaskedLoadStoreDeathTest, MaskedTypes);
+using TestTypes = ::testing::Types<i32>;
+TYPED_TEST_SUITE(MaskedLoadStoreDeathTest, TestTypes);
 
 TYPED_TEST(MaskedLoadStoreDeathTest, IsSane) {
     EXPECT_EQ(*this->page_with_data, this->get_expected_value(this->page_with_data));

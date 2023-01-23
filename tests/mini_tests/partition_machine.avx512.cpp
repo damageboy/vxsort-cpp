@@ -12,8 +12,8 @@ using VM = vxsort::vector_machine;
 template<typename T>
 using PartitionMachineAVX512Test = PageWithLavaBoundariesFixture<T, VM::AVX512>;
 
-using MaskedTypes = ::testing::Types<i16, u16, i32, u32, i64, u64>;
-TYPED_TEST_SUITE(PartitionMachineAVX512Test, MaskedTypes);
+using TestTypes = ::testing::Types<i16, u16, i32, u32, i64, u64>;
+TYPED_TEST_SUITE(PartitionMachineAVX512Test, TestTypes);
 
 TYPED_TEST(PartitionMachineAVX512Test, PartitioningWorks) {
     test_partition<TypeParam , VM::AVX512>(this);
