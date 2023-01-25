@@ -1,7 +1,6 @@
 #ifndef VXSORT_SORT_FIXTURES_H
 #define VXSORT_SORT_FIXTURES_H
 
-#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "stats/vxsort_stats.h"
 #include "util.h"
@@ -11,13 +10,10 @@
 #include <iterator>
 #include <random>
 #include <stdlib.h>
-#include <fmt/format.h>
 
 namespace vxsort_tests {
 using namespace vxsort::types;
-using testing::ElementsAreArray;
 using testing::ValuesIn;
-using testing::WhenSorted;
 using testing::Types;
 
 template <typename T, int AlignTo = 0>
@@ -107,7 +103,7 @@ public:
 template <typename T>
 struct PrintSizeAndSlack {
     std::string operator()(const testing::TestParamInfo<SizeAndSlack<T>>& info) const {
-        return fmt::format("{}", info.param.Size + info.param.Slack);
+        return std::to_string(info.param.Size + info.param.Slack);
     }
 };
 
@@ -160,8 +156,7 @@ public:
 template <typename T>
 struct PrintSizeAndStride {
     std::string operator()(const testing::TestParamInfo<SizeAndStride<T>>& info) const {
-        //return fmt::format("{}|{}", info.param.Size, info.param.ValueStride);
-        return fmt::format("{}", info.param.ValueStride);
+        return std::to_string(info.param.ValueStride);
     }
 };
 }

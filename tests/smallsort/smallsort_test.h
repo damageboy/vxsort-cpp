@@ -3,21 +3,14 @@
 
 #include <functional>
 
-#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "../sort_fixtures.h"
 
-
 #include "isa_detection.h"
 #include "smallsort/bitonic_sort.h"
+#include "fmt/format.h"
 
 namespace vxsort_tests {
-
-using testing::ElementsAreArray;
-using testing::ValuesIn;
-using testing::WhenSorted;
-using testing::WhenSortedBy;
-using testing::Types;
 
 using vxsort::vector_machine;
 
@@ -40,7 +33,11 @@ void bitonic_machine_sort_test(std::vector<T>& V) {
         BM::sort_full_vectors_descending(begin, size);
 
     std::sort(v_copy.begin(), v_copy.end());
-    EXPECT_THAT(V, ElementsAreArray(v_copy));
+    for (usize i = 0; i < size; ++i) {
+        if (v_copy[i] != V[i]) {
+            GTEST_FAIL() << fmt::format("value at idx #{}  {} != {}", i, v_copy[i], V[i]);
+        }
+    }
 }
 
 template <class T, vector_machine M>
@@ -56,7 +53,11 @@ void bitonic_sort_test(std::vector<T>& V) {
 
     vxsort::smallsort::bitonic<T, M>::sort(begin, size);
     std::sort(v_copy.begin(), v_copy.end());
-    EXPECT_THAT(V, ElementsAreArray(v_copy));
+    for (usize i = 0; i < size; ++i) {
+        if (v_copy[i] != V[i]) {
+            GTEST_FAIL() << fmt::format("value at idx #{}  {} != {}", i, v_copy[i], V[i]);
+        }
+    }
 }
 }
 
