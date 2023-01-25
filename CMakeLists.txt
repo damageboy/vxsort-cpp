@@ -13,6 +13,7 @@ option(VXSORT_USE_LIBCXX     "Build and test with libc++ stdlib. (Linux/macOS)" 
 option(VXSORT_ENABLE_LTO     "Build and test with link-time optimization"       OFF)
 option(VXSORT_GENERATE_STATS "Build auxiliary statistics collection code"       OFF)
 option(VXSORT_CCACHE         "Use ccache to speed up re-compilation"            OFF)
+option(VXSORT_TIMETRACE      "Produce Clang Time-Trace .json files"             OFF)
 set(VXSORT_USE_LINKER "" CACHE STRING "Custom linker for -fuse-ld=...")
 
 find_program(CCACHE_PROGRAM ccache)
@@ -96,6 +97,14 @@ else()
     if (${VXSORT_USE_SANITIZERS})
         add_compile_options(-fsanitize=address,bounds,alignment,shift,shift-exponent)
         add_link_options(-fsanitize=address,bounds,alignment,shift,shift-exponent)
+    endif()
+
+    if(${VXSORT_TIMETRACE})
+      if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        add_compile_options(-ftime-trace)
+      else()
+        message(ERROR "Only clang supports time-tracing")
+      endif()
     endif()
 
     function(get_linker_candidates result)
