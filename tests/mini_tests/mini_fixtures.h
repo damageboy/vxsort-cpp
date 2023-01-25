@@ -91,13 +91,13 @@ protected:
     {
         static constexpr i32 value_width = for_packing ? sizeof(T) / 2 : sizeof(T);
         for (auto n = 0; n < N; n++) {
-            T expected_byte = n+1;
-            T expected_value = expected_byte;
+            u64 expected_byte = n+1;
+            u64 expected_value = expected_byte;
 
             for (auto i = 1; i < value_width; i++)
                 expected_value = expected_value << 8 | expected_byte;
 
-            expected_values[n] = expected_value;
+            memcpy(&(expected_values[n]), &expected_value, sizeof(T));
         }
     }
 

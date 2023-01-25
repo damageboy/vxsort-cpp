@@ -11,7 +11,17 @@ using VM = vxsort::vector_machine;
 template<typename T>
 using AVX2MaskedLoadStoreTest = PageWithLavaBoundariesFixture<T, VM::AVX2>;
 
-using TestTypes = ::testing::Types<i16, u16, i32, u32, i64, u64>;
+using TestTypes = ::testing::Types<
+#ifdef VXSORT_TEST_AVX2_I16
+        i16, i32, i64
+#endif
+#ifdef VXSORT_TEST_AVX2_U16
+        u16, u32, u64
+#endif
+#ifdef VXSORT_TEST_AVX2_F32
+        f32, f64
+#endif
+>;
 TYPED_TEST_SUITE(AVX2MaskedLoadStoreTest, TestTypes);
 
 TYPED_TEST(AVX2MaskedLoadStoreTest, PrefixLoadOnPageBoundaryWorks) {
