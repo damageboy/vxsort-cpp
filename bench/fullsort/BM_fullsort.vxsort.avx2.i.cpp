@@ -16,19 +16,16 @@ BENCHMARK_TEMPLATE(BM_vxsort, i16, vm::AVX2,  1)->RangeMultiplier(2)->Range(MIN_
 BENCHMARK_TEMPLATE(BM_vxsort, i16, vm::AVX2,  2)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
 BENCHMARK_TEMPLATE(BM_vxsort, i16, vm::AVX2,  4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
 BENCHMARK_TEMPLATE(BM_vxsort, i16, vm::AVX2,  8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_vxsort, i16, vm::AVX2, 12)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
 
 BENCHMARK_TEMPLATE(BM_vxsort, i32, vm::AVX2,  1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
 BENCHMARK_TEMPLATE(BM_vxsort, i32, vm::AVX2,  2)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
 BENCHMARK_TEMPLATE(BM_vxsort, i32, vm::AVX2,  4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
 BENCHMARK_TEMPLATE(BM_vxsort, i32, vm::AVX2,  8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_vxsort, i32, vm::AVX2, 12)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
 
 BENCHMARK_TEMPLATE(BM_vxsort, i64, vm::AVX2,  1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
 BENCHMARK_TEMPLATE(BM_vxsort, i64, vm::AVX2,  1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
 BENCHMARK_TEMPLATE(BM_vxsort, i64, vm::AVX2,  4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
 BENCHMARK_TEMPLATE(BM_vxsort, i64, vm::AVX2,  8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_vxsort, i64, vm::AVX2, 12)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
 }
 
 #include "vxsort_targets_disable.h"

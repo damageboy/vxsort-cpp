@@ -17,13 +17,11 @@ BENCHMARK_TEMPLATE(BM_vxsort, f32, vm::AVX512,  1)->RangeMultiplier(2)->Range(MI
 BENCHMARK_TEMPLATE(BM_vxsort, f32, vm::AVX512,  2)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
 BENCHMARK_TEMPLATE(BM_vxsort, f32, vm::AVX512,  4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
 BENCHMARK_TEMPLATE(BM_vxsort, f32, vm::AVX512,  8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_vxsort, f32, vm::AVX512, 12)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
 
 BENCHMARK_TEMPLATE(BM_vxsort, f64, vm::AVX512,  1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
 BENCHMARK_TEMPLATE(BM_vxsort, f64, vm::AVX512,  2)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
 BENCHMARK_TEMPLATE(BM_vxsort, f64, vm::AVX512,  4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
 BENCHMARK_TEMPLATE(BM_vxsort, f64, vm::AVX512,  8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_vxsort, f64, vm::AVX512, 12)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
 
 }
 

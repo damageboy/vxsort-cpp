@@ -15,7 +15,6 @@ using vm = vxsort::vector_machine;
 BENCHMARK_TEMPLATE(BM_vxsort_strided, i64, vm::AVX512,  1)->RangeMultiplier(2)->Range(MIN_STRIDE, MAX_STRIDE)->Unit(kMillisecond)->ThreadRange(1, processor_count);
 BENCHMARK_TEMPLATE(BM_vxsort_strided, i64, vm::AVX512,  4)->RangeMultiplier(2)->Range(MIN_STRIDE, MAX_STRIDE)->Unit(kMillisecond)->ThreadRange(1, processor_count);
 BENCHMARK_TEMPLATE(BM_vxsort_strided, i64, vm::AVX512,  8)->RangeMultiplier(2)->Range(MIN_STRIDE, MAX_STRIDE)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_vxsort_strided, i64, vm::AVX512, 12)->RangeMultiplier(2)->Range(MIN_STRIDE, MAX_STRIDE)->Unit(kMillisecond)->ThreadRange(1, processor_count);
 
 }
 
