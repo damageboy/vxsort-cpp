@@ -1,7 +1,6 @@
 #ifndef VXSORT_PACK_MACHINE_TEST_H
 #define VXSORT_PACK_MACHINE_TEST_H
 
-#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <random>
@@ -18,7 +17,6 @@
 namespace vxsort_tests {
 using namespace vxsort::types;
 using VM = vxsort::vector_machine;
-using testing::UnorderedElementsAreArray;
 
 template <typename T, VM M>
 using PackMachineTest = PageWithLavaBoundariesFixture<T, M, true>;
@@ -65,7 +63,15 @@ void test_packunpack(PackMachineTest<T, M> *fixture)
     VMT::store_vec((typename VMT::TV *) spill, u1);
     VMT::store_vec((typename VMT::TV *) spill+1, u2);
 
-    EXPECT_THAT(spill, UnorderedElementsAreArray(s));
+    std::vector<T> orig(s.begin(), s.end());
+    for (auto u : spill) {
+        auto it = std::find(orig.begin(), orig.end(), u);
+        if (it == orig.end()) {
+            GTEST_FAIL() << fmt::format("Expected to find unpacked value {} in {}", u, fmt::join(s, ", "));
+        }
+        orig.erase(it);
+    }
+    ASSERT_EQ(orig.size(), 0);
 }
 
 };
