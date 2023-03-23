@@ -1,7 +1,8 @@
 #include "vxsort_targets_enable_avx2.h"
 
-#include <partition_machine.avx2.h>
+#include <gtest/gtest.h>
 
+#include <partition_machine.avx2.h>
 #include "partition_machine_test.h"
 
 namespace vxsort_tests {

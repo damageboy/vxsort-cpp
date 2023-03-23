@@ -1,8 +1,9 @@
 #include "vxsort_targets_enable_avx2.h"
 
+#include "masked_load_store_test.h"
+
 #include <vector_machine/machine_traits.avx2.h>
 
-#include "masked_load_store_test.h"
 
 namespace vxsort_tests {
 using namespace vxsort::types;

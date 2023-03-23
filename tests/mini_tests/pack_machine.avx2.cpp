@@ -1,9 +1,12 @@
 #include "vxsort_targets_enable_avx2.h"
 
-#include <pack_machine.h>
+#include <gtest/gtest.h>
+
 #include <vector_machine/machine_traits.avx2.h>
+#include <pack_machine.h>
 
 #include "pack_machine_test.h"
+
 
 namespace vxsort_tests {
 using namespace vxsort::types;

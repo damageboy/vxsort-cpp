@@ -1,7 +1,9 @@
 #include "vxsort_targets_enable_avx512.h"
 
-#include <pack_machine.h>
+#include <gtest/gtest.h>
+
 #include <vector_machine/machine_traits.avx512.h>
+#include <pack_machine.h>
 
 #include "pack_machine_test.h"
 
