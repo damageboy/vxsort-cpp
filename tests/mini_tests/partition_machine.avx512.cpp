@@ -1,7 +1,8 @@
 #include "vxsort_targets_enable_avx512.h"
 
+#include <gtest/gtest.h>
+
 #include <partition_machine.avx512.h>
-#include <vector_machine/machine_traits.avx512.h>
 
 #include "partition_machine_test.h"
 

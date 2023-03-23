@@ -1,8 +1,6 @@
 #ifndef VXSORT_PACK_MACHINE_TEST_H
 #define VXSORT_PACK_MACHINE_TEST_H
 
-#include <gtest/gtest.h>
-
 #include <random>
 #include <algorithm>
 #include <span>
