@@ -1,6 +1,5 @@
 #include "vxsort_targets_enable_avx2.h"
 
-#include <random>
 #include <benchmark/benchmark.h>
 
 #include <vxsort.avx2.h>

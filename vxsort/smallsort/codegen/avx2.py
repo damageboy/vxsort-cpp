@@ -381,8 +381,7 @@ class AVX2BitonicISA(BitonicISA):
 #define s2d _mm256_castps_pd
 #define d2s _mm256_castpd_ps
 
-namespace vxsort {{
-namespace smallsort {{
+namespace vxsort::smallsort {{
 using namespace vxsort::types;
 
 template<> struct bitonic_machine<{t}, AVX2> {{
@@ -397,7 +396,6 @@ public:
     def generate_epilogue(self):
         self.clean_print(f"""
 }};
-}}
 }}
 
 #undef i2d

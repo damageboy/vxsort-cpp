@@ -30,7 +30,7 @@ extern std::random_device::result_type global_bench_random_seed;
 
 template <typename T>
 void generate_unique_values_vec(std::vector<T>& vec, T start, T stride) {
-    for (isize i = 0; i < vec.size(); i++, start += stride)
+    for (usize i = 0; i < vec.size(); i++, start += stride)
         vec[i] = start;
 
     std::mt19937_64 g(global_bench_random_seed);
@@ -42,7 +42,7 @@ template <typename T, typename U=T>
 std::vector<U *> generate_array_beginnings(std::vector<std::vector<T>> &copies) {
     const auto num_copies = copies.size();
     std::vector<U*> begins(num_copies);
-    for (isize i = 0; i < num_copies; i++)
+    for (usize i = 0; i < num_copies; i++)
         begins[i] = (U*)copies[i].data();
     return begins;
 }
@@ -52,32 +52,32 @@ void refresh_copies(std::vector<std::vector<T>> &copies, std::vector<T>& orig) {
     const auto begin = orig.begin();
     const auto end = orig.end();
     const auto num_copies = copies.size();
-    for (isize i = 0; i < num_copies; i++)
+    for (usize i = 0; i < num_copies; i++)
         copies[i].assign(begin, end);
 }
 
 template <typename T>
-std::vector<std::vector<T>> generate_copies(isize num_copies, i64 n, std::vector<T>& orig) {
+std::vector<std::vector<T>> generate_copies(usize num_copies, i64 n, std::vector<T>& orig) {
     std::vector<std::vector<T>> copies(num_copies);
-    for (isize i = 0; i < num_copies; i++)
+    for (usize i = 0; i < num_copies; i++)
         copies[i] = std::vector<T>(n);
     refresh_copies(copies, orig);
     return copies;
 }
 
 template <typename T>
-std::vector<T> shuffled_seq(isize size, T start, T stride, std::mt19937_64& rng) {
+std::vector<T> shuffled_seq(usize size, T start, T stride, std::mt19937_64& rng) {
     std::vector<T> v; v.reserve(size);
-    for (isize i = 0; i < size; ++i)
+    for (usize i = 0; i < size; ++i)
         v.push_back(start + stride * i);
     std::shuffle(v.begin(), v.end(), rng);
     return v;
 }
 
 template <typename T>
-std::vector<int> shuffled_16_values(isize size, T start, T stride, std::mt19937_64& rng) {
+std::vector<int> shuffled_16_values(usize size, T start, T stride, std::mt19937_64& rng) {
     std::vector<T> v; v.reserve(size);
-    for (i32 i = 0; i < size; ++i)
+    for (usize i = 0; i < size; ++i)
         v.push_back(start + stride * (i % 16));
     std::shuffle(v.begin(), v.end(), rng);
     return v;

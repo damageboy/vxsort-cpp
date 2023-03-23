@@ -1,8 +1,6 @@
 #include <algorithm>
 #include <numeric>
 #include <random>
-#include <fcntl.h>
-#include <ctime>
 
 using namespace std;
 

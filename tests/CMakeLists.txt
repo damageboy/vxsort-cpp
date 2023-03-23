@@ -73,9 +73,8 @@ if (${PROCESSOR_IS_X86})
 
         target_link_libraries(${TARGET_NAME}_${v}_${tf}
             ${CMAKE_PROJECT_NAME}_lib
-            gtest
-            gmock
-            gmock_main)
+                GTest::gtest_main
+                )
 
         #gtest_discover_tests(${TARGET_NAME}_avx2)
         endforeach()
