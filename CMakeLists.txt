@@ -195,9 +195,9 @@ include(ConfigSafeGuards)
 CPMAddPackage(
         NAME googletest
         GITHUB_REPOSITORY google/googletest
-        GIT_TAG release-1.12.1
-        VERSION 1.12.1
-        OPTIONS "INSTALL_GTEST OFF" "gtest_force_shared_crt"
+        GIT_TAG v1.13.0
+        VERSION 1.13.0
+        OPTIONS "BUILD_GMOCK OFF" "INSTALL_GTEST OFF" "gtest_force_shared_crt"
         OVERRIDE_FIND_PACKAGE
 )
 CPMAddPackage(
