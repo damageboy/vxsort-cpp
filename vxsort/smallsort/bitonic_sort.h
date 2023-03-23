@@ -1,7 +1,6 @@
 #ifndef BITONIC_SORT_H
 #define BITONIC_SORT_H
 
-#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <cassert>
@@ -9,14 +8,20 @@
 #include "vector_machine/machine_traits.h"
 #include "bitonic_machine.h"
 
-namespace vxsort {
-namespace smallsort {
+namespace vxsort::smallsort {
 using namespace std;
 using namespace vxsort::types;
 
 #ifdef VXSORT_COMPILER_MSVC
 #define __builtin_clzl __lzcnt64
 #endif
+
+template<typename T>
+    inline const T&
+    min(const T& a, const T& b)
+{
+        return b < a ? b : a;
+}
 
 template <typename T, vector_machine M>
 struct bitonic {
@@ -52,14 +57,14 @@ public:
     // How many vectors in the last group of up to 4 vectors
     auto last_chunk_v = slack_v;
 
-    auto * RESTRICT p_start = (TV*)ptr;
+    auto *p_start = (TV*)ptr;
     const auto p_end_inplace = p_start + ((v/4) * 4);
     const auto p_virtual_end = p_end_inplace + ((slack_v > 0) ? 4 : 0);
     v += (remainder > 0) ? 1 : 0;
 
     auto p_exit_loop = p_end_inplace;
 
-    TV * RESTRICT p = p_start;
+    TV *p = p_start;
     TV d01, d02, d03, d04;
 
     for (; p < p_exit_loop; p += 4) {
@@ -104,8 +109,8 @@ public:
     last_chunk_v = slack_v;
     p_exit_loop = p_end_inplace;
 
-    TV* RESTRICT p1;
-    TV* RESTRICT p2;
+    TV *p1;
+    TV *p2;
     TV *p2_end;
     i32 half_stride;
 
@@ -115,7 +120,7 @@ public:
             half_stride = i / 2;
             p1 = p + half_stride - 1;
             p2 = p + half_stride;
-            p2_end = std::min(p + i, p_virtual_end);
+            p2_end = min(p + i, p_virtual_end);
             for (; p2 < p2_end; p1 -= 4, p2 += 4) {
                 if (p2 >= p_end_inplace) {
                     p2 = slack;
@@ -157,7 +162,7 @@ public:
             for (auto p = p_start; p < p_virtual_end; p += j) {
                 p1 = p;
                 p2 = p + half_stride;
-                p2_end = std::min(p + j, p_virtual_end);
+                p2_end = min(p + j, p_virtual_end);
                 for (; p2 < p2_end; p1 += 4, p2 += 4) {
                     if (p2 >= p_end_inplace) {
                         p2 = slack;
@@ -250,6 +255,5 @@ public:
     }
 }
 };
-}  // namespace smallsort
-}  // namespace vxsort
+}  // namespace vxsort::smallsort   
 #endif

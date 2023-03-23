@@ -1,12 +1,11 @@
-#ifndef BITONIC_MACHINE_H
-#define BITONIC_MACHINE_H
+#ifndef VXSORT_BITONIC_MACHINE_H
+#define VXSORT_BITONIC_MACHINE_H
 
 #include <cstdint>
 #include "../defs.h"
 #include "vector_machine/machine_traits.h"
 
-namespace vxsort {
-namespace smallsort {
+namespace vxsort::smallsort {
 using namespace std;
 
 template <typename T, vector_machine M>
@@ -27,6 +26,5 @@ public:
     static void sort_full_vectors_ascending(T *ptr, usize length);
     static void sort_full_vectors_descending(T *ptr, usize length);
 };
-}  // namespace smallsort
 }  // namespace vxsort
 #endif

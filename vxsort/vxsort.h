@@ -10,7 +10,6 @@
 #include "partition_machine.h"
 #include "pack_machine.h"
 #include "smallsort/bitonic_sort.h"
-#include <algorithm>
 #include <cstring>
 
 #ifdef VXSORT_STATS
