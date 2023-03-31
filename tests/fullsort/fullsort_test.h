@@ -2,6 +2,7 @@
 #define VXSORT_FULLSORT_TEST_H
 
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <vector>
 #include <fmt/format.h>
 
