@@ -30,7 +30,7 @@ void test_packunpack(PackMachineTest<T, M> *fixture)
     using VMT = vxsort::vxsort_machine_traits<T, M>;
 
     if (!VMT::supports_packing()) {
-        GTEST_SKIP_("Current CPU does not support the minimal features for this test");
+        GTEST_SKIP_("primitive type does not support packing");
         return;
     }
 
