@@ -3,7 +3,6 @@
 #include "gtest/gtest.h"
 
 #include <vxsort.avx512.h>
-
 #include "fullsort_test.h"
 #include "../sort_fixtures.h"
 

@@ -4,9 +4,7 @@
 
 #include <vector_machine/machine_traits.avx2.h>
 #include <pack_machine.h>
-
 #include "pack_machine_test.h"
-
 
 namespace vxsort_tests {
 using namespace vxsort::types;
