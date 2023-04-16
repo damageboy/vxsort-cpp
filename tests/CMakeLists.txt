@@ -1,5 +1,7 @@
 set(TARGET_NAME ${CMAKE_PROJECT_NAME}_tests)
 
+include(GoogleTest)
+
 set(test_HEADERS
         smallsort/smallsort_test.h
         fullsort/fullsort_test.h
@@ -76,7 +78,7 @@ if (${PROCESSOR_IS_X86})
                 GTest::gtest_main
                 )
 
-        #gtest_discover_tests(${TARGET_NAME}_avx2)
+        add_test(${TARGET_NAME}_${v}_${tf} ${TARGET_NAME}_${v}_${tf})
         endforeach()
     endforeach()
 
