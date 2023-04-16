@@ -38,7 +38,6 @@ static const i32 page_size = get_page_size();
 
 template <typename T, VM M, bool for_packing = false>
 class PageWithLavaBoundariesFixture : public ::testing::Test {
-    static constexpr u8 GARBAGE_BYTE = 0x66;
     using VMT = vxsort::vxsort_machine_traits<T, M>;
     static constexpr i32 N = VMT::N;
     static_assert(N < 256, "N must be < 256");
@@ -89,15 +88,10 @@ protected:
 
     void generate_expected_values()
     {
-        static constexpr i32 value_width = for_packing ? sizeof(T) / 2 : sizeof(T);
+        static constexpr T max_value = for_packing ? (T)std::numeric_limits<typename VMT::TPACK>::max() : (T)std::numeric_limits<T>::max();
         for (auto n = 0; n < N; n++) {
-            u64 expected_byte = n+1;
-            u64 expected_value = expected_byte;
-
-            for (auto i = 1; i < value_width; i++)
-                expected_value = expected_value << 8 | expected_byte;
-
-            memcpy(&(expected_values[n]), &expected_value, sizeof(T));
+            expected_values[n] = (T)n+1;
+            ASSERT_LE(expected_values[n], max_value);
         }
     }
 
