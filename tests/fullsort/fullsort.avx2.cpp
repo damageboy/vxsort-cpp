@@ -2,9 +2,7 @@
 
 #include "gtest/gtest.h"
 
-
 #include <vxsort.avx2.h>
-
 #include "fullsort_test.h"
 #include "../sort_fixtures.h"
 

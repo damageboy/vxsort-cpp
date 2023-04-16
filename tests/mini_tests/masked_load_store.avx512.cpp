@@ -1,7 +1,6 @@
 #include "vxsort_targets_enable_avx512.h"
 
 #include "masked_load_store_test.h"
-
 #include <vector_machine/machine_traits.avx512.h>
 
 namespace vxsort_tests {

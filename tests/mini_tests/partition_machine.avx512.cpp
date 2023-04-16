@@ -3,7 +3,6 @@
 #include <gtest/gtest.h>
 
 #include <partition_machine.avx512.h>
-
 #include "partition_machine_test.h"
 
 namespace vxsort_tests {
