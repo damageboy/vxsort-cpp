@@ -16,6 +16,3 @@ target_link_libraries(${TARGET_NAME}
 configure_file(run.sh run.sh COPYONLY)
 configure_file(run.cmd run.cmd COPYONLY)
 configure_file(make-figure.py make-figure.py COPYONLY)
-
-add_test(${TARGET_NAME} ${TARGET_NAME})
-

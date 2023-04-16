@@ -209,10 +209,8 @@ CPMAddPackage(
 CPMAddPackage("gh:fmtlib/fmt#9.1.0")
 CPMAddPackage("gh:okdshin/PicoSHA2#master")
 
-include(EnableLocalGtestDiscovery)
 enable_testing()
 find_package(GTest)
-include(GoogleTest)
 
 add_subdirectory(${PROJECT_SOURCE_DIR}/vxsort/)
 add_subdirectory(${PROJECT_SOURCE_DIR}/demo/)
