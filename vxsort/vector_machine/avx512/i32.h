@@ -6,6 +6,7 @@ public:
     typedef __mmask16 TLOADSTOREMASK;
     typedef __mmask16 TCMPMASK;
     typedef i16 TPACK;
+    typedef typename std::make_unsigned<TPACK>::type TUPACK;
     typedef typename std::make_unsigned<T>::type TU;
     static_assert(sizeof(TPACK)*2 == sizeof(T), "TPACK must be half-width of T");
 
@@ -20,7 +21,7 @@ public:
         if (!supports_vector_machine<AVX512>(16)) {
             return false;
         }
-        constexpr auto PACK_LIMIT = (((TU)std::numeric_limits<u16>::max() + 1)) << Shift;
+        constexpr auto PACK_LIMIT = (((TU)std::numeric_limits<TUPACK>::max() + 1)) << Shift;
         return ((TU)span) < PACK_LIMIT;
     }
 
