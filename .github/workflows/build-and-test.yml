@@ -35,18 +35,12 @@ jobs:
             cc: "clang",
             cxx: "clang++"
           }
-        #- {
-        #    name: "macOS Latest - GCC",
-        #    os: macos-latest,
-        #    cc: "gcc",
-        #    cxx: "g++"
-        #  }
-        #- {
-        #    name: "macOS Latest - Clang",
-        #    os: macos-latest,
-        #    cc: "clang",
-        #    cxx: "clang++"
-        #  }        
+        - {
+            name: "macOS Latest - Clang",
+            os: macos-latest,
+            cc: "clang",
+            cxx: "clang++"
+          }        
 
     steps:
     - name: Checkout
