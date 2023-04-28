@@ -1,6 +1,6 @@
 template <>
 class vxsort_machine_traits<u16, AVX2> {
-   public:
+public:
     typedef u16 T;
     typedef __m256i TV;
     typedef i32 TLOADSTOREMASK;
@@ -54,17 +54,20 @@ class vxsort_machine_traits<u16, AVX2> {
         memcpy(p, &v, sizeof(T) * mask);
     }
 
-    static INLINE TV partition_vector(TV v, i32 mask) {
-        assert(mask >= 0);
-        assert(mask <= 255);
-        return s2i(_mm256_permutevar8x32_ps(i2s(v), _mm256_cvtepu8_epi32(_mm_loadu_si128((__m128i*)(perm_table_32 + mask * 8)))));
+    static INLINE TV partition_vector(TV, i32) {
+        // Should never be called, since we "hijack" 16b/avx2 partitioning with template
+        // specializtion with partition_machine<T>
+        throw std::runtime_error("operation is unsupported");
     }
 
     static INLINE TV broadcast(T pivot) { return _mm256_set1_epi16(pivot); }
 
     static INLINE TCMPMASK get_cmpgt_mask(TV a, TV b) {
         __m256i top_bit = _mm256_set1_epi16(1U << 15);
-        return _mm256_movemask_ps(i2s(_mm256_cmpgt_epi16(_mm256_xor_si256(top_bit, a), _mm256_xor_si256(top_bit, b))));
+        return _pext_u32(
+                _mm256_movemask_epi8(_mm256_cmpgt_epi16(_mm256_xor_si256(top_bit, a),
+                                                            _mm256_xor_si256(top_bit, b))),
+                0x55555555);
     }
 
     static INLINE TV shift_right(TV v, i32 i) { return _mm256_srli_epi16(v, i); }
