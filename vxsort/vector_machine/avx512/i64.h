@@ -6,6 +6,7 @@ public:
     typedef __mmask8 TLOADSTOREMASK;
     typedef __mmask8 TCMPMASK;
     typedef i32 TPACK;
+    typedef typename std::make_unsigned<TPACK>::type TUPACK;
     typedef typename std::make_unsigned<T>::type TU;
     static_assert(sizeof(TPACK)*2 == sizeof(T), "TPACK must be half-width of T");
 
@@ -17,7 +18,7 @@ public:
 
     template <i32 Shift>
     static bool can_pack(T span) {
-        constexpr auto PACK_LIMIT = (((TU) std::numeric_limits<u32>::max() + 1)) << Shift;
+        constexpr auto PACK_LIMIT = (((TU) std::numeric_limits<TUPACK>::max() + 1)) << Shift;
         return ((TU) span) < PACK_LIMIT;
     }
 
