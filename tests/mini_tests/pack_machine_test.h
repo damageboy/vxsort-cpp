@@ -50,7 +50,6 @@ void test_packunpack(PackMachineTest<T, M> *fixture)
     auto offset = VMT::template shift_n_sub<0>(*min, MIN);
     const auto offset_v = VMT::broadcast(offset);
 
-
     auto packed_v = PM::pack_vectors(d1, d2, offset_v);
 
     typename VMT::TV u1, u2;
