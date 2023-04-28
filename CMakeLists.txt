@@ -17,7 +17,7 @@ option(VXSORT_TIMETRACE      "Produce Clang Time-Trace .json files"             
 set(VXSORT_USE_LINKER "" CACHE STRING "Custom linker for -fuse-ld=...")
 
 find_program(CCACHE_PROGRAM ccache)
-if(CCACHE_PROGRAM AND NOT ${DONT_USE_CCACHE})
+if(CCACHE_PROGRAM AND ${VXSORT_CCACHE})
     message("ccache detected - using ccache to cache object files across compilations")
     set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CCACHE_PROGRAM}")
 endif()
