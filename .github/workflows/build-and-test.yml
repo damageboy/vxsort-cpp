@@ -144,7 +144,11 @@ jobs:
       id: check_avx2_macos
       if: startsWith(runner.os, 'macOS')
       continue-on-error: true
-      run: sysctl -a | grep AVX2
+      run: |
+        sysctl hw.model
+        sysctl kern.version
+        sysctl machdep.cpu.leaf7_features
+        sysctl machdep.cpu.leaf7_features | grep -i AVX2
     #- name: Run tests
     #  shell: cmake -P {0}
     #  if:  ${{ !startsWith(runner.os, 'macOS') || !steps.check_avx2_macos.outcome == 'failure' }}
