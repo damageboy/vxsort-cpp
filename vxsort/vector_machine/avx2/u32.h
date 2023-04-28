@@ -13,7 +13,7 @@ public:
     static_assert(is_powerof2(N), "vector-size / element-size must be a power of 2");
 
     static constexpr bool supports_compress_writes() { return false; }
-    static constexpr bool supports_packing() { return false; }
+    static constexpr bool supports_packing() { return true; }
 
     template <i32 Shift>
     static bool can_pack(T span) {
@@ -49,7 +49,7 @@ public:
     static INLINE TV partition_vector(TV v, i32 mask) {
         assert(mask >= 0);
         assert(mask <= 255);
-        return s2i(_mm256_permutevar8x32_ps(i2s(v), _mm256_cvtepu8_epi32(_mm_loadu_si128((__m128i*)(perm_table_32 + mask * 8)))));
+        return s2i(_mm256_permutevar8x32_ps(i2s(v), _mm256_cvtepi8_epi32(_mm_loadu_si128((__m128i*)(perm_table_32 + mask * 8)))));
     }
 
     static INLINE TV broadcast(T pivot) { return _mm256_set1_epi32(pivot); }
