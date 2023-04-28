@@ -78,7 +78,7 @@ public:
     static INLINE void unpack_ordered(TV, TV&, TV&) { }
 
     template <i32 Shift>
-    static T shift_n_sub(T v, T sub) {
+    static INLINE T shift_n_sub(T v, T sub) {
         if (Shift > 0)
             v >>= Shift;
         v -= sub;
