@@ -70,6 +70,16 @@ jobs:
         lscpu
         lscpu | grep 'Flags:' | grep -i avx2
         lscpu | grep 'Flags:' | grep -i avx512f
+    - name: Check for AVX2/512 on Windows
+      id: check_avx2_windows
+      shell: bash
+      if: startsWith(runner.os, 'Windows')
+      continue-on-error: true
+      run: |
+        aria2c "https://download.sysinternals.com/files/Coreinfo.zip" -o CoreInfo.zip
+        unzip CoreInfo.zip
+        rm CoreInfo.zip
+        ./CoreInfo64.exe -f
     - name: Download ccache
       id: ccache
       shell: bash
@@ -80,7 +90,6 @@ jobs:
     - name: Prepare ccache timestamp
       id: ccache_cache_timestamp
       shell: bash
-      #shell: cmake -P {0}
       run: |
         echo "timestamp=$(date -u '+%Y-%m-%d-%H;%M;%S')" > $GITHUB_OUTPUT
     - name: ccache cache files
@@ -90,76 +99,26 @@ jobs:
         key: ${{ matrix.config.name }}-ccache-${{ steps.ccache_cache_timestamp.outputs.timestamp }}
         restore-keys: |
           ${{ matrix.config.name }}-ccache-
+    - name: Setup VS env
+      uses: egor-tensin/vs-shell@v2
+      if: startsWith(runner.os, 'Windows')
+      with:
+        arch: x64
     - name: Configure
-      shell: cmake -P {0}
+      shell: bash
       run: |
-        set(ENV{CC} ${{ matrix.config.cc }})
-        set(ENV{CXX} ${{ matrix.config.cxx }})
-        if ("${{ runner.os }}" STREQUAL "Windows" AND NOT "x${{ matrix.config.environment_script }}" STREQUAL "x")
-          execute_process(
-            COMMAND "${{ matrix.config.environment_script }}" && set
-            OUTPUT_FILE environment_script_output.txt
-          )
-          file(STRINGS environment_script_output.txt output_lines)
-          foreach(line IN LISTS output_lines)
-            if (line MATCHES "^([a-zA-Z0-9_-]+)=(.*)$")
-              set(ENV{${CMAKE_MATCH_1}} "${CMAKE_MATCH_2}")
-            endif()
-          endforeach()
-        endif()
-        set(path_separator ":")
-        if ("${{ runner.os }}" STREQUAL "Windows")
-          set(path_separator ";")
-        endif()
-        set(ENV{PATH} "$ENV{GITHUB_WORKSPACE}${path_separator}$ENV{PATH}")
-        execute_process(
-          COMMAND cmake
-            -S .
-            -B build
-            -DCMAKE_BUILD_TYPE=$ENV{BUILD_TYPE}
-            -DVXSORT_CCACHE=ON
-            -G Ninja
-          RESULT_VARIABLE result
-        )
-        if (NOT result EQUAL 0)
-          message(FATAL_ERROR "Bad exit status: ${result}")
-        endif()
+        export CC=${{ matrix.config.cc }} CXX=${{ matrix.config.cxx }}
+        cmake -S . -B build -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DVXSORT_CCACHE=ON -G Ninja
     - name: Build
-      shell: cmake -P {0}
+      shell: bash
       run: |
-        set(ENV{NINJA_STATUS} "[%f/%t %o/sec] ")
-        if ("${{ runner.os }}" STREQUAL "Windows" AND NOT "x${{ matrix.config.environment_script }}" STREQUAL "x")
-          file(STRINGS environment_script_output.txt output_lines)
-          foreach(line IN LISTS output_lines)
-            if (line MATCHES "^([a-zA-Z0-9_-]+)=(.*)$")
-              set(ENV{${CMAKE_MATCH_1}} "${CMAKE_MATCH_2}")
-            endif()
-          endforeach()
-        endif()
-        set(path_separator ":")
-        if ("${{ runner.os }}" STREQUAL "Windows")
-          set(path_separator ";")
-        endif()
-        set(ENV{PATH} "$ENV{GITHUB_WORKSPACE}${path_separator}$ENV{PATH}")
-        file(TO_CMAKE_PATH "$ENV{GITHUB_WORKSPACE}" ccache_basedir)
-        set(ENV{CCACHE_BASEDIR} "${ccache_basedir}")
-        set(ENV{CCACHE_DIR} "${ccache_basedir}/.ccache")
-        set(ENV{CCACHE_COMPRESS} "true")
-        set(ENV{CCACHE_COMPRESSLEVEL} "6")
-        set(ENV{CCACHE_MAXSIZE} "400M")
-        if ("${{ matrix.config.cxx }}" STREQUAL "cl")
-          set(ENV{CCACHE_MAXSIZE} "600M")
-        endif()
-        execute_process(COMMAND ccache -p)
-        execute_process(COMMAND ccache -z)
-        execute_process(
-          COMMAND cmake --build build
-          RESULT_VARIABLE result
-        )
-        if (NOT result EQUAL 0)
-          message(FATAL_ERROR "Bad exit status")
-        endif()
-        execute_process(COMMAND ccache -s)
+        export NINJA_STATUS="[%f/%t %o/sec]"
+        export PATH="${GITHUB_WORKSPACE}:$PATH"
+        export CCACHE_BASEDIR="${GITHUB_WORKSPACE}" CCACHE_DIR="${GITHUB_WORKSPACE}/.ccache" CCACHE_COMPRESS="true" CCACHE_COMPRESSLEVEL="6" CCACHE_MAXSIZE="600M" CCACHE_COMPILERCHECK="content"
+        ccache -p
+        ccache -z
+        cmake --build build
+        ccache -s
     - name: Upload .ccache to cache
       uses: actions/cache/save@v3
       if: always()
