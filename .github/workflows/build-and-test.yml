@@ -44,20 +44,37 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v1
+      uses: actions/checkout@v3.5.2
 
     - name: Setup Ninja
       uses: ashutoshvarma/setup-ninja@master
       with:
         version: 1.11.1
 
+    - name: Check for AVX2/512 on macOS
+      id: check_avx2_macos
+      if: startsWith(runner.os, 'macOs')
+      continue-on-error: true
+      run: |
+        sysctl hw.model
+        sysctl kern.version
+        sysctl machdep.cpu.leaf7_features
+        sysctl machdep.cpu.leaf7_features | grep -i AVX2
+    - name: Check for AVX2/512 on Linux
+      id: check_avx2_linux
+      if: startsWith(runner.os, 'Linux')
+      continue-on-error: true
+      run: |
+        lscpu
+        lscpu | grep 'Flags:' | grep -i avx2
+        lscpu | grep 'Flags:' | grep -i avx512f
     - name: Download ccache
       id: ccache
-      shell: cmake -P {0}
+      shell: bash
       run: |
-        set(ccache_url "https://github.com/cristianadam/ccache/releases/download/v$ENV{CCACHE_VERSION}/${{ runner.os }}.tar.xz")
-        file(DOWNLOAD "${ccache_url}" ./ccache.tar.xz SHOW_PROGRESS)
-        execute_process(COMMAND ${CMAKE_COMMAND} -E tar xvf ./ccache.tar.xz)
+        aria2c "https://github.com/cristianadam/ccache/releases/download/v${CCACHE_VERSION}/${{ runner.os }}.tar.xz" -o ccache.tar.xz
+        tar xf ./ccache.tar.xz
+        rm ccache.tar.xz
     - name: Prepare ccache timestamp
       id: ccache_cache_timestamp
       shell: cmake -P {0}
@@ -141,15 +158,6 @@ jobs:
           message(FATAL_ERROR "Bad exit status")
         endif()
         execute_process(COMMAND ccache -s)
-    - name: Verify AVX2 on macOS
-      id: check_avx2_macos
-      if: startsWith(runner.os, 'macOS')
-      continue-on-error: true
-      run: |
-        sysctl hw.model
-        sysctl kern.version
-        sysctl machdep.cpu.leaf7_features
-        sysctl machdep.cpu.leaf7_features | grep -i AVX2
     - name: Run tests
       shell: bash
       working-directory: build
