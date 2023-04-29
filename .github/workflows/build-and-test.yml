@@ -160,6 +160,12 @@ jobs:
           message(FATAL_ERROR "Bad exit status")
         endif()
         execute_process(COMMAND ccache -s)
+    - name: Upload .ccache to cache
+      uses: actions/cache/save@v3
+      if: always()
+      with:
+        path: .ccache
+        key: ${{ matrix.config.name }}-ccache-${{ steps.ccache_cache_timestamp.outputs.timestamp }}
     - name: Run tests
       shell: bash
       working-directory: build
@@ -168,10 +174,9 @@ jobs:
         export GTEST_OUTPUT="xml:junit/"
         ctest -J
     - name: Test Report
-      working-directory: build
       uses: dorny/test-reporter@v1
-      if: success() || failure()    # run this step even if previous step failed
+      if: success() || failure()
       with:
-        name: VxSort Tests
+        name: tests/${{ matrix.config.name}}
         path: build/tests/junit/*.xml
         reporter: java-junit
