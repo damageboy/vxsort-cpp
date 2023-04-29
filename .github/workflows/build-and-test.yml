@@ -1,6 +1,6 @@
 name: Build and Test
 
-on: 
+on:
   - push
   - pull_request
 
@@ -40,7 +40,7 @@ jobs:
             os: macos-latest,
             cc: "clang",
             cxx: "clang++"
-          }        
+          }
 
     steps:
     - name: Checkout
@@ -70,7 +70,7 @@ jobs:
         path: .ccache
         key: ${{ matrix.config.name }}-ccache-${{ steps.ccache_cache_timestamp.outputs.timestamp }}
         restore-keys: |
-          ${{ matrix.config.name }}-ccache-        
+          ${{ matrix.config.name }}-ccache-
     - name: Configure
       shell: cmake -P {0}
       run: |
@@ -150,18 +150,10 @@ jobs:
         sysctl kern.version
         sysctl machdep.cpu.leaf7_features
         sysctl machdep.cpu.leaf7_features | grep -i AVX2
-    #- name: Run tests
-    #  shell: cmake -P {0}
-    #  if:  ${{ !startsWith(runner.os, 'macOS') || !steps.check_avx2_macos.outcome == 'failure' }}
-    #  run: |
-    #    include(ProcessorCount)
-    #    ProcessorCount(N)
-    #    set(ENV{CTEST_OUTPUT_ON_FAILURE} "ON")
-    #    execute_process(
-    #      COMMAND ./tests/vxsort_tests
-    #      WORKING_DIRECTORY build
-    #      RESULT_VARIABLE result
-    #    )
-    #    if (NOT result EQUAL 0)
-    #      message(FATAL_ERROR "Running tests failed!")
-    #    endif()
+    - name: Run tests
+      shell: bash
+      working-directory: build
+      if:  ${{ !startsWith(runner.os, 'macOS') || !steps.check_avx2_macos.outcome == 'failure' }}
+      run: |
+        export GTEST_OUTPUT="xml:junit/"
+        ctest -J
