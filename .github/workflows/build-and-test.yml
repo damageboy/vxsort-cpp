@@ -167,3 +167,11 @@ jobs:
       run: |
         export GTEST_OUTPUT="xml:junit/"
         ctest -J
+    - name: Test Report
+      working-directory: build
+      uses: dorny/test-reporter@v1
+      if: success() || failure()    # run this step even if previous step failed
+      with:
+        name: VxSort Tests
+        path: build/tests/junit/*.xml
+        reporter: java-junit
