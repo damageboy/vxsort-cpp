@@ -52,6 +52,7 @@ jobs:
         version: 1.11.1
 
     - name: Check for AVX2/512 on macOS
+      shell: bash
       id: check_avx2_macos
       if: startsWith(runner.os, 'macOs')
       continue-on-error: true
@@ -61,6 +62,7 @@ jobs:
         sysctl machdep.cpu.leaf7_features
         sysctl machdep.cpu.leaf7_features | grep -i AVX2
     - name: Check for AVX2/512 on Linux
+      shell: bash
       id: check_avx2_linux
       if: startsWith(runner.os, 'Linux')
       continue-on-error: true
@@ -77,10 +79,10 @@ jobs:
         rm ccache.tar.xz
     - name: Prepare ccache timestamp
       id: ccache_cache_timestamp
-      shell: cmake -P {0}
+      shell: bash
+      #shell: cmake -P {0}
       run: |
-        string(TIMESTAMP current_date "%Y-%m-%d-%H;%M;%S" UTC)
-        file(WRITE "$ENV{GITHUB_OUTPUT}" "timestamp=${TIMESTAMP}")
+        echo "timestamp=$(date -u '+%Y-%m-%d-%H;%M;%S')" > $GITHUB_OUTPUT
     - name: ccache cache files
       uses: actions/cache@v3.3.1
       with:
