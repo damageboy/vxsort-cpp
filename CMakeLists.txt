@@ -193,6 +193,12 @@ include(ConfigSafeGuards)
 #
 
 CPMAddPackage(
+        NAME backward-cpp
+        GITHUB_REPOSITORY bombela/backward-cpp
+        GIT_TAG master
+)
+
+CPMAddPackage(
         NAME googletest
         GITHUB_REPOSITORY google/googletest
         GIT_TAG v1.13.0

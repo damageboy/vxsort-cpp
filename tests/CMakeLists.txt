@@ -39,6 +39,7 @@ list(APPEND x86_isas
 )
 
 list(APPEND test_SOURCES
+        gtest_main.cpp
         mini_tests/masked_load_store.sanity.cpp
 )
 
@@ -75,8 +76,9 @@ if (${PROCESSOR_IS_X86})
 
         target_link_libraries(${TARGET_NAME}_${v}_${tf}
             ${CMAKE_PROJECT_NAME}_lib
-                GTest::gtest_main
-                )
+            Backward::Backward
+            GTest::gtest
+            )
 
         add_test(${TARGET_NAME}_${v}_${tf} ${TARGET_NAME}_${v}_${tf})
         endforeach()
