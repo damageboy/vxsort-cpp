@@ -6,7 +6,7 @@
 #include "gtest/gtest.h"
 #include "../sort_fixtures.h"
 
-#include "isa_detection.h"
+#include "../test_isa.h"
 #include "smallsort/bitonic_sort.h"
 #include "fmt/format.h"
 
@@ -16,10 +16,7 @@ using vxsort::vector_machine;
 
 template <class T, vector_machine M, bool ascending>
 void bitonic_machine_sort_test(std::vector<T>& V) {
-    if (!vxsort::supports_vector_machine(M)) {
-        GTEST_SKIP_("Current CPU does not support the minimal features for this test");
-        return;
-    }
+    VXSORT_TEST_ISA();
 
     using BM = vxsort::smallsort::bitonic_machine<T, M>;
 
@@ -42,10 +39,7 @@ void bitonic_machine_sort_test(std::vector<T>& V) {
 
 template <class T, vector_machine M>
 void bitonic_sort_test(std::vector<T>& V) {
-    if (!vxsort::supports_vector_machine(M)) {
-        GTEST_SKIP_("Current CPU does not support the minimal features for this test");
-        return;
-    }
+    VXSORT_TEST_ISA();
 
     auto v_copy = std::vector<T>(V);
     auto begin = V.data();

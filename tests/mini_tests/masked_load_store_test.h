@@ -6,7 +6,7 @@
 
 #include "defs.h"
 #include "vector_machine/machine_traits.h"
-#include "isa_detection.h"
+#include "../test_isa.h"
 #include "alignment.h"
 
 namespace vxsort_tests {
@@ -16,10 +16,7 @@ using VM = vxsort::vector_machine;
 template <typename T, VM M>
 void test_prefix_mask_load_on_page_boundary(PageWithLavaBoundariesFixture<T, M> *fixture)
 {
-    if (!::vxsort::supports_vector_machine(M)) {
-        GTEST_SKIP_("Current CPU does not support the minimal features for this test");
-        return;
-    }
+    VXSORT_TEST_ISA();
 
     using VMT = vxsort::vxsort_machine_traits<T, M>;
     static constexpr auto MAX = std::numeric_limits<T>::max();
@@ -41,10 +38,7 @@ void test_prefix_mask_load_on_page_boundary(PageWithLavaBoundariesFixture<T, M> 
 template <typename T, VM M>
 void test_suffix_mask_load_on_page_boundary(PageWithLavaBoundariesFixture<T, M> *fixture)
 {
-    if (!::vxsort::supports_vector_machine(M)) {
-        GTEST_SKIP_("Current CPU does not support the minimal features for this test");
-        return;
-    }
+    VXSORT_TEST_ISA()
 
     using VMT = vxsort::vxsort_machine_traits<T, M>;
     static constexpr auto MAX = std::numeric_limits<T>::max();
@@ -66,10 +60,7 @@ void test_suffix_mask_load_on_page_boundary(PageWithLavaBoundariesFixture<T, M> 
 template <typename T, VM M>
 void test_left_alignment_and_masked_loads(PageWithLavaBoundariesFixture<T, M> *fixture)
 {
-    if (!::vxsort::supports_vector_machine(M)) {
-        GTEST_SKIP_("Current CPU does not support the minimal features for this test");
-        return;
-    }
+    VXSORT_TEST_ISA();
 
     using VMT = vxsort::vxsort_machine_traits<T, M>;
     using AH = vxsort::alignment_hint<T, M>;
@@ -101,10 +92,7 @@ void test_left_alignment_and_masked_loads(PageWithLavaBoundariesFixture<T, M> *f
 template <typename T, VM M>
 void test_right_alignment_and_masked_loads(PageWithLavaBoundariesFixture<T, M> *fixture)
 {
-    if (!::vxsort::supports_vector_machine(M)) {
-        GTEST_SKIP_("Current CPU does not support the minimal features for this test");
-        return;
-    }
+    VXSORT_TEST_ISA();
 
     using VMT = vxsort::vxsort_machine_traits<T, M>;
     using AH = vxsort::alignment_hint<T, M>;

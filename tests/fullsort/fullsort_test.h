@@ -6,7 +6,7 @@
 #include <vector>
 #include <fmt/format.h>
 
-#include "isa_detection.h"
+#include "../test_isa.h"
 #include "vxsort.h"
 
 namespace vxsort_tests {
@@ -15,10 +15,7 @@ using ::vxsort::vector_machine;
 
 template <typename T, i32 Unroll, vector_machine M>
 void vxsort_test(std::vector<T>& V) {
-    if (!::vxsort::supports_vector_machine(M)) {
-        GTEST_SKIP_("Current CPU does not support the minimal features for this test");
-        return;
-    }
+    VXSORT_TEST_ISA();
 
     auto v_copy = std::vector<T>(V);
     auto begin = V.data();
@@ -38,11 +35,7 @@ void vxsort_test(std::vector<T>& V) {
 
 template <typename T, i32 Unroll, int Shift, vector_machine M>
 void vxsort_hinted_test(std::vector<T>& V, T min_value, T max_value) {
-    if (!::vxsort::supports_vector_machine(M)) {
-        GTEST_SKIP_(
-                "Current CPU does not support the minimal features for this test");
-        return;
-    }
+    VXSORT_TEST_ISA();
 
     auto v_copy = std::vector<T>(V);
     auto begin = V.data();

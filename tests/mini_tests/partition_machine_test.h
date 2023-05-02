@@ -9,7 +9,7 @@
 
 #include "defs.h"
 #include "vector_machine/machine_traits.h"
-#include "isa_detection.h"
+#include "../test_isa.h"
 #include "alignment.h"
 
 namespace vxsort_tests {
@@ -19,10 +19,7 @@ using VM = vxsort::vector_machine;
 template <typename T, VM M>
 void test_partition(PageWithLavaBoundariesFixture<T, M> *fixture)
 {
-    if (!::vxsort::supports_vector_machine(M)) {
-        GTEST_SKIP_("Current CPU does not support the minimal features for this test");
-        return;
-    }
+    VXSORT_TEST_ISA();
 
     using VMT = vxsort::vxsort_machine_traits<T, M>;
     using PM = vxsort::partition_machine<T, M>;
@@ -74,10 +71,7 @@ void test_partition(PageWithLavaBoundariesFixture<T, M> *fixture)
 template <typename T, VM M>
 void test_partition_stability(PageWithLavaBoundariesFixture<T, M> *fixture)
 {
-    if (!::vxsort::supports_vector_machine(M)) {
-        GTEST_SKIP_("Current CPU does not support the minimal features for this test");
-        return;
-    }
+    VXSORT_TEST_ISA();
 
     using VMT = vxsort::vxsort_machine_traits<T, M>;
     using PM = vxsort::partition_machine<T, M>;
@@ -123,11 +117,9 @@ void test_partition_stability(PageWithLavaBoundariesFixture<T, M> *fixture)
 }
 
 template <typename T, VM M>
-void test_partition_alignment(PageWithLavaBoundariesFixture<T, M> *fixture) {
-    if (!::vxsort::supports_vector_machine(M)) {
-        GTEST_SKIP_("Current CPU does not support the minimal features for this test");
-        return;
-    }
+void test_partition_alignment(PageWithLavaBoundariesFixture<T, M> *fixture)
+{
+    VXSORT_TEST_ISA();
 
     using VMT = vxsort::vxsort_machine_traits<T, M>;
     using PM = vxsort::partition_machine<T, M>;
