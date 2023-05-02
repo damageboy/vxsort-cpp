@@ -8,7 +8,7 @@ set(test_HEADERS
         mini_tests/pack_machine_test.h
         mini_tests/partition_machine_test.h
         mini_tests/masked_load_store_test.h
-)
+        test_isa.h)
 
 list(APPEND i_sort_types
         i16

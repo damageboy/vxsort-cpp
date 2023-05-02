@@ -58,14 +58,19 @@ extern bool supports_vector_machine(vector_machine m)
 }
 
 template<>
+bool supports_vector_machine<AVX2>(usize) {
+    return has_avx2;
+}
+
+template<>
 bool supports_vector_machine<AVX512>(usize width) {
     switch (width) {
-        case 16:
+        case 2:
             // We require AVX512VBMI2 for 16-bit partitioning
             // since we use the _mm512_mask_compressstoreu_epi16 intrinsic
             return has_avx512_16;
-        case 32:
-        case 64:
+        case 4:
+        case 8:
             return has_avx512_32_64;
         default:
             break;

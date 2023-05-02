@@ -18,7 +18,7 @@ public:
 
     template <i32 Shift>
     static bool can_pack(T span) {
-        if (!supports_vector_machine<AVX512>(16)) {
+        if (!supports_vector_machine<AVX512>(sizeof(TPACK))) {
             return false;
         }
         constexpr auto PACK_LIMIT = (((TU)std::numeric_limits<TUPACK>::max() + 1)) << Shift;

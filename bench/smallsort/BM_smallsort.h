@@ -3,7 +3,7 @@
 #include <thread>
 #include <benchmark/benchmark.h>
 
-#include <isa_detection.h>
+#include "../bench_isa.h"
 #include <smallsort/bitonic_sort.h>
 
 #include "../stolen-cycleclock.h"
@@ -17,10 +17,7 @@ const auto processor_count = std::thread::hardware_concurrency();
 
 template <class Q, vxsort::vector_machine M>
 static void BM_bitonic_sort(benchmark::State& state) {
-    if (!vxsort::supports_vector_machine(M)) {
-        state.SkipWithError("Current CPU does not support the minimal features for this test");
-        return;
-    }
+    VXSORT_BENCH_ISA();
 
     using BM = vxsort::smallsort::bitonic<Q, M>;
 
@@ -53,12 +50,10 @@ static void BM_bitonic_sort(benchmark::State& state) {
 
 template <class Q, vxsort::vector_machine M, int N>
 static void BM_bitonic_machine(benchmark::State& state) {
+    VXSORT_BENCH_ISA();
+
     static_assert(N > 0, "N must be greater than 0");
     static_assert(N <= 4, "N cannot exceet 4");
-    if (!vxsort::supports_vector_machine(M)) {
-        state.SkipWithError("Current CPU does not support the minimal features for this test");
-        return;
-    }
 
     using BM = vxsort::smallsort::bitonic_machine<Q, M>;
 

@@ -9,7 +9,7 @@
 
 #include "defs.h"
 #include "vector_machine/machine_traits.h"
-#include "isa_detection.h"
+#include "../test_isa.h"
 #include "alignment.h"
 
 namespace vxsort_tests {
@@ -22,10 +22,7 @@ using PackMachineTest = PageWithLavaBoundariesFixture<T, M, true>;
 template <typename T, VM M>
 void test_packunpack(PackMachineTest<T, M> *fixture)
 {
-    if (!::vxsort::supports_vector_machine(M)) {
-        GTEST_SKIP_("Current CPU does not support the minimal features for this test");
-        return;
-    }
+    VXSORT_TEST_ISA();
 
     using VMT = vxsort::vxsort_machine_traits<T, M>;
 

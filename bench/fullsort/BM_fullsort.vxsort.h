@@ -6,6 +6,7 @@
 #include <random>
 #include <thread>
 #include "../util.h"
+#include "../bench_isa.h"
 
 #include <vxsort.h>
 
@@ -17,10 +18,7 @@ using vxsort::vector_machine;
 
 template <class Q, vector_machine M, i32 U>
 static void BM_vxsort(benchmark::State& state) {
-    if (!supports_vector_machine(M)) {
-        state.SkipWithError("Current CPU does not support the minimal features for this test");
-        return;
-    }
+    VXSORT_BENCH_ISA();
 
     auto n = state.range(0);
     auto v = std::vector<Q>((i32)n);
@@ -60,11 +58,7 @@ const i64 StridedSortMinValue = 0x80000000LL;
 
 template <class Q, vector_machine M, i32 U>
 static void BM_vxsort_strided(benchmark::State& state) {
-    if (!supports_vector_machine(M)) {
-        state.SkipWithError(
-                "Current CPU does not support the minimal features for this test");
-        return;
-    }
+    VXSORT_BENCH_ISA();
 
     auto n = StridedSortSize;
     auto stride = state.range(0);
