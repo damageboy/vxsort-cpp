@@ -24,6 +24,11 @@ void test_packunpack(PackMachineTest<T, M> *fixture)
 {
     VXSORT_TEST_ISA();
 
+    if (!::vxsort::supports_vector_machine<M>(sizeof(T)/2)) {
+        GTEST_SKIP_("Current CPU does not support the minimal features for this test");
+        return;
+    }
+
     using VMT = vxsort::vxsort_machine_traits<T, M>;
 
     if (!VMT::supports_packing()) {
