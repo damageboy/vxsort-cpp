@@ -79,7 +79,7 @@ jobs:
         aria2c "https://download.sysinternals.com/files/Coreinfo.zip" -o CoreInfo.zip
         unzip CoreInfo.zip
         rm CoreInfo.zip
-        ./CoreInfo64.exe -f
+        ./CoreInfo64.exe -accepteula -f
     - name: Download ccache
       id: ccache
       shell: bash
