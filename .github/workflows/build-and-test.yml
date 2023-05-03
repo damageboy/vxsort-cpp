@@ -21,7 +21,6 @@ jobs:
             os: windows-latest,
             cc: "cl",
             cxx: "cl",
-            environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
           }
         - {
             name: "Ubuntu-GCC",
@@ -46,40 +45,62 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v3.5.2
 
+    - name: Setup VS env
+      uses: egor-tensin/vs-shell@v2
+      if: startsWith(runner.os, 'Windows')
+      with:
+        arch: x64
+
     - name: Setup Ninja
       uses: ashutoshvarma/setup-ninja@master
       with:
         version: 1.11.1
 
-    - name: Check for AVX2/512 on macOS
+    - name: Check for AVX2/512
       shell: bash
-      id: check_avx2_macos
-      if: startsWith(runner.os, 'macOs')
+      id: check_cpu
       continue-on-error: true
       run: |
-        sysctl hw.model
-        sysctl kern.version
-        sysctl machdep.cpu.leaf7_features
-        sysctl machdep.cpu.leaf7_features | grep -i AVX2
-    - name: Check for AVX2/512 on Linux
-      shell: bash
-      id: check_avx2_linux
-      if: startsWith(runner.os, 'Linux')
-      continue-on-error: true
+        runner_os=${{ runner.os }}
+        set +e
+        case ${runner_os} in
+          macOS)
+            sysctl hw.model
+            sysctl kern.version
+            sysctl machdep.cpu.leaf7_features > leaf7_features.txt
+            cat leaf_features.txt
+            grep -q -E '\s+AVX2\s+' leaf7_features.txt
+            [[ $? == 0 ]] && has_avx2=1 || has_avx2=0
+            grep -q -E '\s+AVX512\s+' leaf7_features.txt
+            [[ $? == 0 ]] && has_avx512=1 || has_avx512=0
+            ;;
+          Linux)
+            lscpu
+            grep -q -E '^flags\s*:.*\bavx2\b' /proc/cpuinfo
+            [[ $? == 0 ]] && has_avx2=1 || has_avx2=0
+            grep -q -E '^flags\s*:.*\bavx512f\b' /proc/cpuinfo
+            [[ $? == 0 ]] && has_avx512=1 || has_avx512=0
+            ;;
+          Windows)
+            aria2c "https://download.sysinternals.com/files/Coreinfo.zip" -o CoreInfo.zip
+            unzip CoreInfo.zip
+            rm CoreInfo.zip
+            ./CoreInfo64.exe -accepteula -f | iconv -t utf-8 > coreinfo.txt
+            cat coreinfo.txt
+            grep -q -E '^AVX2\s+\*' coreinfo.txt
+            [[ $? == 0 ]] && has_avx2=1 || has_avx2=0            
+            grep -q -E '^AVX-512-F\s+\*' coreinfo.txt
+            [[ $? == 0 ]] && has_avx512=1 || has_avx512=0            
+            ;;
+        esac
+        echo "has_avx2=${has_avx2}" >> $GITHUB_OUTPUT
+        echo "has_avx512=${has_avx512}" >> $GITHUB_OUTPUT
+ 
+    - name: show cpu support
       run: |
-        lscpu
-        lscpu | grep 'Flags:' | grep -i avx2
-        lscpu | grep 'Flags:' | grep -i avx512f
-    - name: Check for AVX2/512 on Windows
-      id: check_avx2_windows
-      shell: bash
-      if: startsWith(runner.os, 'Windows')
-      continue-on-error: true
-      run: |
-        aria2c "https://download.sysinternals.com/files/Coreinfo.zip" -o CoreInfo.zip
-        unzip CoreInfo.zip
-        rm CoreInfo.zip
-        ./CoreInfo64.exe -accepteula -f
+        echo avx2=${{ steps.check_cpu.outputs.has_avx2 }}
+        echo avx512=${{ steps.check_cpu.outputs.has_avx512 }}
+
     - name: Download ccache
       id: ccache
       shell: bash
@@ -87,28 +108,28 @@ jobs:
         aria2c "https://github.com/cristianadam/ccache/releases/download/v${CCACHE_VERSION}/${{ runner.os }}.tar.xz" -o ccache.tar.xz
         tar xf ./ccache.tar.xz
         rm ccache.tar.xz
+ 
     - name: Prepare ccache timestamp
-      id: ccache_cache_timestamp
+      id: ccache_timestamp
       shell: bash
       run: |
         echo "timestamp=$(date -u '+%Y-%m-%d-%H;%M;%S')" > $GITHUB_OUTPUT
+
     - name: ccache cache files
       uses: actions/cache@v3.3.1
       with:
         path: .ccache
-        key: ${{ matrix.config.name }}-ccache-${{ steps.ccache_cache_timestamp.outputs.timestamp }}
+        key: ${{ matrix.config.name }}-ccache-${{ steps.ccache_timestamp.outputs.timestamp }}
         restore-keys: |
           ${{ matrix.config.name }}-ccache-
-    - name: Setup VS env
-      uses: egor-tensin/vs-shell@v2
-      if: startsWith(runner.os, 'Windows')
-      with:
-        arch: x64
+ 
     - name: Configure
       shell: bash
       run: |
         export CC=${{ matrix.config.cc }} CXX=${{ matrix.config.cxx }}
+        export PATH="${GITHUB_WORKSPACE}:$PATH"
         cmake -S . -B build -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DVXSORT_CCACHE=ON -G Ninja
+ 
     - name: Build
       shell: bash
       run: |
@@ -119,22 +140,33 @@ jobs:
         ccache -z
         cmake --build build
         ccache -s
+ 
     - name: Upload .ccache to cache
       uses: actions/cache/save@v3
       if: always()
       with:
         path: .ccache
-        key: ${{ matrix.config.name }}-ccache-${{ steps.ccache_cache_timestamp.outputs.timestamp }}
+        key: ${{ matrix.config.name }}-ccache-${{ steps.ccache_timestamp.outputs.timestamp }}
+ 
     - name: Run tests
       shell: bash
       working-directory: build
-      if:  ${{ !startsWith(runner.os, 'macOS') || !steps.check_avx2_macos.outcome == 'failure' }}
+      if:  steps.check_cpu.outputs.has_avx2 == 1 || steps.check_cpu.outputs.has_avx512 == 1
       run: |
         export GTEST_OUTPUT="xml:junit/"
+        set +e
         ctest -J
+        rc=$?
+        echo ctest returned $?
+        if [[ $? != 0 ]]; then
+          echo Error log:
+          echo ==========
+          cat ./Testing/Temporary/LastTest.log
+        fi
+
     - name: Test Report
       uses: dorny/test-reporter@v1
-      if: success() || failure()
+      if:  steps.check_cpu.outputs.has_avx2 == 1 || steps.check_cpu.outputs.has_avx512 == 1
       with:
         name: tests/${{ matrix.config.name}}
         path: build/tests/junit/*.xml
