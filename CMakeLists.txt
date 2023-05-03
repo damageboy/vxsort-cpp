@@ -181,7 +181,7 @@ else()
         add_compile_definitions(VXSORT_STATS)
     endif()
 
-    set(CMAKE_CXX_FLAGS_RELEASE "-O2 -fomit-frame-pointer -DNDEBUG -fsave-optimization-record")
+    set(CMAKE_CXX_FLAGS_RELEASE "-O2 -fomit-frame-pointer -DNDEBUG")
 endif()
 
 # Guard against in-source builds and bad build-type strings
