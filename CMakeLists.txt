@@ -19,7 +19,7 @@ set(VXSORT_USE_LINKER "" CACHE STRING "Custom linker for -fuse-ld=...")
 find_program(CCACHE_PROGRAM ccache)
 if(CCACHE_PROGRAM AND ${VXSORT_CCACHE})
     message("ccache detected - using ccache to cache object files across compilations")
-    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CCACHE_PROGRAM}")
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CCACHE_PROGRAM}")    
 endif()
 
 # Make sure we can import out CMake functions
@@ -61,7 +61,10 @@ if (CLR_CMAKE_HOST_WIN32)
 endif (CLR_CMAKE_HOST_WIN32)
 
 if(MSVC)
-    add_compile_options(/Zi /FC /Zc:strictStrings /EHs)
+    add_compile_options(/FC /Zc:strictStrings /EHs)
+    add_compile_options(
+    "$<$<CONFIG:DEBUG>:/Zi>"
+    "$<$<CONFIG:Release>:/Z7>")
 
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
@@ -74,7 +77,6 @@ if(MSVC)
     add_link_options($<$<CONFIG:RELEASE>:/OPT:REF>)
     add_link_options($<$<CONFIG:RELEASE>:/OPT:ICF>)
     if (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        add_link_options($<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:/PDBCOMPRESS>)
         set(CMAKE_STATIC_LINKER_FLAGS_RELEASE "${CMAKE_STATIC_LINKER_FLAGS_RELEASE} /LTCG")
         add_link_options($<$<CONFIG:RELEASE>:/LTCG>)
     endif()
