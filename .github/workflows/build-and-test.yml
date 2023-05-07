@@ -5,7 +5,7 @@ on:
   - pull_request
 
 env:
-  CCACHE_VERSION: 4.7.3
+  CCACHE_VERSION: 4.8
   BUILD_TYPE: Release
 
 jobs:
@@ -88,26 +88,41 @@ jobs:
             ./CoreInfo64.exe -accepteula -f | iconv -t utf-8 > coreinfo.txt
             cat coreinfo.txt
             grep -q -E '^AVX2\s+\*' coreinfo.txt
-            [[ $? == 0 ]] && has_avx2=1 || has_avx2=0            
+            [[ $? == 0 ]] && has_avx2=1 || has_avx2=0
             grep -q -E '^AVX-512-F\s+\*' coreinfo.txt
-            [[ $? == 0 ]] && has_avx512=1 || has_avx512=0            
+            [[ $? == 0 ]] && has_avx512=1 || has_avx512=0
             ;;
         esac
         echo "has_avx2=${has_avx2}" >> $GITHUB_OUTPUT
         echo "has_avx512=${has_avx512}" >> $GITHUB_OUTPUT
  
-    - name: show cpu support
-      run: |
-        echo avx2=${{ steps.check_cpu.outputs.has_avx2 }}
-        echo avx512=${{ steps.check_cpu.outputs.has_avx512 }}
+    #- name: show cpu support
+    #  run: |
+    #    echo avx2=${{ steps.check_cpu.outputs.has_avx2 }}
+    #    echo avx512=${{ steps.check_cpu.outputs.has_avx512 }}
 
     - name: Download ccache
       id: ccache
       shell: bash
       run: |
-        aria2c "https://github.com/cristianadam/ccache/releases/download/v${CCACHE_VERSION}/${{ runner.os }}.tar.xz" -o ccache.tar.xz
-        tar xf ./ccache.tar.xz
-        rm ccache.tar.xz
+        runner_os=${{ runner.os }}
+        case ${runner_os} in
+          macOS)
+            aria2c https://github.com/ccache/ccache/releases/download/v${CCACHE_VERSION}/ccache-${CCACHE_VERSION}-darwin.tar.gz -o ccache.tar.gz
+            tar xf ccache.tar.gz --strip-components=1 ccache-${CCACHE_VERSION}-darwin/ccache
+            rm ccache.tar.gz
+            ;;
+          Linux)
+            aria2c https://github.com/ccache/ccache/releases/download/v${CCACHE_VERSION}/ccache-${CCACHE_VERSION}-linux-x86_64.tar.xz -o ccache.tar.xz
+            tar xf ccache.tar.xz --strip-components=1 ccache-${CCACHE_VERSION}-linux-x86_64/ccache
+            rm ccache.tar.xz
+            ;;
+          Windows)
+            aria2c https://github.com/ccache/ccache/releases/download/v${CCACHE_VERSION}/ccache-${CCACHE_VERSION}-windows-x86_64.zip -o ccache.zip
+            unzip -j ccache.zip ccache-${CCACHE_VERSION}-windows-x86_64/ccache.exe
+            rm ccache.zip
+            ;;
+        esac
  
     - name: Prepare ccache timestamp
       id: ccache_timestamp
