@@ -2,7 +2,6 @@ name: Build and Test
 
 on:
   - push
-  - pull_request
 
 env:
   CCACHE_VERSION: 4.8
@@ -133,7 +132,9 @@ jobs:
     - name: ccache cache files
       uses: actions/cache@v3.3.1
       with:
-        path: .ccache
+        path: |
+          .ccache
+          .cpm
         key: ${{ matrix.config.name }}-ccache-${{ steps.ccache_timestamp.outputs.timestamp }}
         restore-keys: |
           ${{ matrix.config.name }}-ccache-
@@ -143,6 +144,7 @@ jobs:
       run: |
         export CC=${{ matrix.config.cc }} CXX=${{ matrix.config.cxx }}
         export PATH="${GITHUB_WORKSPACE}:$PATH"
+        export CPM_SOURCE_CACHE="${GITHUB_WORKSPACE}/.cpm"
         cmake -S . -B build -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DVXSORT_CCACHE=ON -G Ninja
  
     - name: Build
@@ -151,6 +153,7 @@ jobs:
         export NINJA_STATUS="[%f/%t %o/sec]"
         export PATH="${GITHUB_WORKSPACE}:$PATH"
         export CCACHE_BASEDIR="${GITHUB_WORKSPACE}" CCACHE_DIR="${GITHUB_WORKSPACE}/.ccache" CCACHE_COMPRESS="true" CCACHE_COMPRESSLEVEL="6" CCACHE_MAXSIZE="600M" CCACHE_COMPILERCHECK="content"
+        export CPM_SOURCE_CACHE="${GITHUB_WORKSPACE}/.cpm"
         ccache -p
         ccache -z
         cmake --build build
@@ -160,7 +163,9 @@ jobs:
       uses: actions/cache/save@v3
       if: always()
       with:
-        path: .ccache
+        path: |
+          .ccache
+          .cpm
         key: ${{ matrix.config.name }}-ccache-${{ steps.ccache_timestamp.outputs.timestamp }}
  
     - name: Run tests
@@ -170,7 +175,7 @@ jobs:
       run: |
         export GTEST_OUTPUT="xml:junit/"
         set +e
-        ctest -J
+        ctest -J $(nproc)
         rc=$?
         echo ctest returned $?
         if [[ $? != 0 ]]; then
@@ -212,5 +217,53 @@ jobs:
 
       - name: Publish Test Results
         uses: EnricoMi/publish-unit-test-result-action@v2
+        id: test
         with:
           files: "artifacts/**/*.xml"
+ 
+      - name: Set badge properties
+        id: badgeprops
+        shell: bash
+        run: |
+          conclusion="${{ fromJSON( steps.test.outputs.json ).conclusion }}"
+          case "${conclusion}" in
+            success)
+              color="31c653"
+              ;;
+            failure)
+              color="800000"
+              ;;
+            neutral)
+              color="696969"
+              ;;
+          esac
+          
+          num_suites="${{ fromJSON( steps.test.outputs.json ).stats.suites }}"
+          num_tests="${{ fromJSON( steps.test.outputs.json ).stats.tests }}"
+          num_runs="${{ fromJSON( steps.test.outputs.json ).stats.runs }}"
+          num_tests_skip="${{ fromJSON( steps.test.outputs.json ).stats.tests_skip }}"
+          num_runs_skip="${{ fromJSON( steps.test.outputs.json ).stats.runs_skip }}"
+          cat << EOF >> $GITHUB_OUTPUT
+          color=${color}
+          badge_text=${num_suites} suites / $(printf "%'d" ${num_tests}) tests ($(printf "%'d" ${num_tests_skip}) skipped) / $(printf "%'d" ${num_runs}) executions ($(printf "%'d" ${num_runs_skip}) skipped): ${conclusion}
+          EOF
+
+      - name: Create badge
+        uses: emibcn/badge-action@d6f51ff11b5c3382b3b88689ae2d6db22d9737d1
+        with:
+          label: Tests
+          status: '${{ steps.badgeprops.outputs.badge_text }}'
+          color: ${{ steps.badgeprops.outputs.color }}
+          path: vxsort-test-badge.svg
+
+      - name: Upload badge to Gist
+        # Upload only for master branch
+        if: >
+          github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'master' ||
+          github.event_name != 'workflow_run' && github.ref == 'refs/heads/master'
+        uses: andymckay/append-gist-action@1fbfbbce708a39bd45846f0955ed5521f2099c6d
+        with:
+          token: ${{ secrets.GIST_TOKEN }}
+          gistURL: https://gist.githubusercontent.com/damageboy/dfd9d01f2c710f96b444532b92539321
+          file: vxsort-test-badge.svg
+
