@@ -1,7 +1,9 @@
 # vxsort-cpp
 
 [![Build and Test](https://github.com/damageboy/vxsort-cpp/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/damageboy/vxsort-cpp/actions/workflows/build-and-test.yml)
-![Latest Test Status](https://gist.githubusercontent.com/damageboy/dfd9d01f2c710f96b444532b92539321/raw/vxsort-test-badge.svg)
+![Latest Test Status](https://gist.githubusercontent.com/damageboy/dfd9d01f2c710f96b444532b92539321/raw/vxsort-suites-badge.svg)
+![Latest Test Status](https://gist.githubusercontent.com/damageboy/dfd9d01f2c710f96b444532b92539321/raw/vxsort-tests-badge.svg)
+![Latest Test Status](https://gist.githubusercontent.com/damageboy/dfd9d01f2c710f96b444532b92539321/raw/vxsort-runs-badge.svg)
 
 ## What
 
