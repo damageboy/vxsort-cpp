@@ -226,37 +226,69 @@ jobs:
         shell: bash
         run: |
           conclusion="${{ fromJSON( steps.test.outputs.json ).conclusion }}"
-          case "${conclusion}" in
-            success)
-              color="31c653"
-              ;;
-            failure)
-              color="800000"
-              ;;
-            neutral)
-              color="696969"
-              ;;
-          esac
-          
           num_suites="${{ fromJSON( steps.test.outputs.json ).stats.suites }}"
           num_tests="${{ fromJSON( steps.test.outputs.json ).stats.tests }}"
           num_runs="${{ fromJSON( steps.test.outputs.json ).stats.runs }}"
           num_tests_skip="${{ fromJSON( steps.test.outputs.json ).stats.tests_skip }}"
           num_runs_skip="${{ fromJSON( steps.test.outputs.json ).stats.runs_skip }}"
+          runs_error="${{ fromJSON( steps.test.outputs.json ).stats.runs_error }}"
+          runs_fail="${{ fromJSON( steps.test.outputs.json ).stats.runs_fail }}"
+          tests_fail="${{ fromJSON( steps.test.outputs.json ).stats.tests_fail }}"
+          tests_error="${{ fromJSON( steps.test.outputs.json ).stats.tests_error }}"
+
+          case "${conclusion}" in
+            success)
+              color="31c653"
+              conclusion_suite_text="${conclusion}"
+              conclusion_test_text="${conclusion}"
+              conclusion_run_text="${conclusion}"
+              ;;
+            failure)
+              color="800000"
+              conclusion_suite_text="${conclusion}"
+              conclusion_test_text="${conclusion} (${tests_error})"
+              conclusion_run_text="${conclusion} (${runs_error})"
+              ;;
+            neutral)
+              color="696969"
+              conclusion_suite_text="${conclusion}"
+              conclusion_test_text="${conclusion}"
+              conclusion_run_text="${conclusion}"
+              ;;
+          esac
+          
           cat << EOF >> $GITHUB_OUTPUT
           color=${color}
-          badge_text=${num_suites} suites / $(printf "%'d" ${num_tests}) tests ($(printf "%'d" ${num_tests_skip}) skipped) / $(printf "%'d" ${num_runs}) executions ($(printf "%'d" ${num_runs_skip}) skipped): ${conclusion}
+          suites_badge_text=${num_suites}: ${conclusion_suite_text}
+          tests_badge_text=$(printf "%'d" ${num_tests}) ($(printf "%'d" ${num_tests_skip}) skipped): ${conclusion_test_text}
+          runs_badge_text=$(printf "%'d" ${num_runs}) ($(printf "%'d" ${num_runs_skip}) skipped): ${conclusion_run_text}
           EOF
 
-      - name: Create badge
+      - name: Create suites badge
+        uses: emibcn/badge-action@d6f51ff11b5c3382b3b88689ae2d6db22d9737d1
+        with:
+          label: Suites
+          status: '${{ steps.badgeprops.outputs.suites_badge_text }}'
+          color: ${{ steps.badgeprops.outputs.color }}
+          path: vxsort-suites-badge.svg
+
+      - name: Create tests badge
         uses: emibcn/badge-action@d6f51ff11b5c3382b3b88689ae2d6db22d9737d1
         with:
           label: Tests
-          status: '${{ steps.badgeprops.outputs.badge_text }}'
+          status: '${{ steps.badgeprops.outputs.tests_badge_text }}'
           color: ${{ steps.badgeprops.outputs.color }}
-          path: vxsort-test-badge.svg
+          path: vxsort-tests-badge.svg
 
-      - name: Upload badge to Gist
+      - name: Create runs badge
+        uses: emibcn/badge-action@d6f51ff11b5c3382b3b88689ae2d6db22d9737d1
+        with:
+          label: Executions 
+          status: '${{ steps.badgeprops.outputs.runs_badge_text }}'
+          color: ${{ steps.badgeprops.outputs.color }}
+          path: vxsort-runs-badge.svg
+
+      - name: Upload suites badge to Gist
         # Upload only for master branch
         if: >
           github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'master' ||
@@ -265,5 +297,26 @@ jobs:
         with:
           token: ${{ secrets.GIST_TOKEN }}
           gistURL: https://gist.githubusercontent.com/damageboy/dfd9d01f2c710f96b444532b92539321
-          file: vxsort-test-badge.svg
+          file: vxsort-suites-badge.svg
 
+      - name: Upload tests badge to Gist
+        # Upload only for master branch
+        if: >
+          github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'master' ||
+          github.event_name != 'workflow_run' && github.ref == 'refs/heads/master'
+        uses: andymckay/append-gist-action@1fbfbbce708a39bd45846f0955ed5521f2099c6d
+        with:
+          token: ${{ secrets.GIST_TOKEN }}
+          gistURL: https://gist.githubusercontent.com/damageboy/dfd9d01f2c710f96b444532b92539321
+          file: vxsort-tests-badge.svg
+
+      - name: Upload runs badge to Gist
+        # Upload only for master branch
+        if: >
+          github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'master' ||
+          github.event_name != 'workflow_run' && github.ref == 'refs/heads/master'
+        uses: andymckay/append-gist-action@1fbfbbce708a39bd45846f0955ed5521f2099c6d
+        with:
+          token: ${{ secrets.GIST_TOKEN }}
+          gistURL: https://gist.githubusercontent.com/damageboy/dfd9d01f2c710f96b444532b92539321
+          file: vxsort-runs-badge.svg
