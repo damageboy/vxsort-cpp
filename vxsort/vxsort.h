@@ -3,14 +3,14 @@
 
 #include <cassert>
 
+#include <cstring>
 #include "alignment.h"
 #include "defs.h"
 #include "isa_detection.h"
-#include "vector_machine/machine_traits.h"
-#include "partition_machine.h"
 #include "pack_machine.h"
+#include "partition_machine.h"
 #include "smallsort/bitonic_sort.h"
-#include <cstring>
+#include "vector_machine/machine_traits.h"
 
 #ifdef VXSORT_STATS
 #include "stats/vxsort_stats.h"
@@ -28,7 +28,7 @@ using namespace vxsort::types;
  * @tparam Shift Optional; specify how many LSB bits are known to be zero in the original input. Can be used
  *               to further speed up sorting.
  */
-template <typename T, vector_machine M, i32 Unroll=1, i32 Shift=0>
+template <typename T, vector_machine M, i32 Unroll = 1, i32 Shift = 0>
 class vxsort {
     static_assert(Unroll >= 1, "Unroll can be in the range [1..12]");
     static_assert(Unroll <= 12, "Unroll can be in the range [1..12]");
@@ -61,12 +61,10 @@ private:
     // In other words, while we allocated this much temp memory, the actual amount of elements inside said memory
     // is smaller by 8 elements + 1 for each alignment (max alignment is actually N-1, I just round up to N...)
     // This long sense just means that we over-allocate N+2 elements...
-    static const i32 PARTITION_SPILL_SIZE_IN_ELEMENTS =
-            (2 * SLACK_PER_SIDE_IN_ELEMENTS + N + 4*N);
+    static const i32 PARTITION_SPILL_SIZE_IN_ELEMENTS = (2 * SLACK_PER_SIDE_IN_ELEMENTS + N + 4 * N);
 
     static_assert(PARTITION_SPILL_SIZE_IN_ELEMENTS < SMALL_SORT_THRESHOLD_ELEMENTS, "Unroll-level must match small-sorting threshold");
     static const i32 PackUnroll = (Unroll / 2 > 0) ? Unroll / 2 : 1;
-
 
     void reset(T* start, T* end) {
         _depth = 0;
@@ -125,9 +123,7 @@ private:
         *(lo + i - 1) = d;
     }
 
-    void sort(T* left, T* right,
-              T left_hint, T right_hint,
-              AH alignment, i32 depth_limit) {
+    void sort(T* left, T* right, T left_hint, T right_hint, AH alignment, i32 depth_limit) {
         auto length = static_cast<size_t>(right - left + 1);
 
         T* mid;
@@ -153,7 +149,7 @@ private:
             vxsort_stats<T>::record_small_sort_size(length);
 #endif
 
-            auto* const aligned_left = reinterpret_cast<T *>(reinterpret_cast<uintptr_t>(left) & ~(N - 1));
+            auto* const aligned_left = reinterpret_cast<T*>(reinterpret_cast<uintptr_t>(left) & ~(N - 1));
             if (aligned_left < _start) {
                 smallsort::bitonic<T, M>::sort(left, length);
                 return;
@@ -349,14 +345,14 @@ private:
         // Broadcast the selected pivot
         const auto P = VMT::broadcast(pivot);
 
-        auto * RESTRICT spill_read_left = _spill;
-        auto * RESTRICT spill_write_left = spill_read_left;
-        auto * RESTRICT spill_read_right = _spill + PARTITION_SPILL_SIZE_IN_ELEMENTS;
-        auto * RESTRICT spill_write_right = spill_read_right;
+        auto* RESTRICT spill_read_left = _spill;
+        auto* RESTRICT spill_write_left = spill_read_left;
+        auto* RESTRICT spill_read_right = _spill + PARTITION_SPILL_SIZE_IN_ELEMENTS;
+        auto* RESTRICT spill_write_right = spill_read_right;
 
         // mutable pointer copies of the originals
-        auto * RESTRICT read_left = left;
-        auto * RESTRICT read_right = right;
+        auto* RESTRICT read_left = left;
+        auto* RESTRICT read_right = right;
 
         // the read heads always advance by N elements towards te middle,
         // It would be wise to spend some extra effort here to align the read
@@ -365,17 +361,12 @@ private:
         // is close, for example, assuming 64-byte cache-line:
         // * unaligned 256-bit loads create split-line loads 50% of the time
         // * unaligned 512-bit loads create a split-line loads 100% of the time
-        PMT::align_vectorized(alignment.left_masked_amount,
-                              alignment.right_unmasked_amount,
-                              P,
-                              read_left, read_right,
-                              spill_read_left, spill_write_left,
+        PMT::align_vectorized(alignment.left_masked_amount, alignment.right_unmasked_amount, P, read_left, read_right, spill_read_left, spill_write_left,
                               spill_read_right, spill_write_right);
 
-        assert((right - left) ==
-               ((read_right + N) - read_left) + // Unpartitioned elements (+N for right-side vec reads)
-               (spill_write_left - spill_read_left) + // partitioned to left-spill
-               (spill_read_right - (spill_write_right + N))); // partitioned to right-spill (+N for right-side vec reads)
+        assert((right - left) == ((read_right + N) - read_left) +                    // Unpartitioned elements (+N for right-side vec reads)
+                                     (spill_write_left - spill_read_left) +          // partitioned to left-spill
+                                     (spill_read_right - (spill_write_right + N)));  // partitioned to right-spill (+N for right-side vec reads)
 
         assert(((usize)read_left & ALIGN_MASK) == 0);
         assert(((usize)read_right & ALIGN_MASK) == 0);
@@ -384,8 +375,8 @@ private:
 
         // From now on, we are fully aligned
         // and all reading is done in full vector units
-        auto * RESTRICT read_left_v = reinterpret_cast<TV*>(read_left);
-        auto * RESTRICT read_right_v = reinterpret_cast<TV*>(read_right);
+        auto* RESTRICT read_left_v = reinterpret_cast<TV*>(read_left);
+        auto* RESTRICT read_right_v = reinterpret_cast<TV*>(read_right);
 
 #ifndef NDEBUG
         read_left = nullptr;
@@ -405,14 +396,14 @@ private:
         // Adjust for the reading that was made above
         read_left_v += InnerUnroll;
         read_right_v += 1;
-        read_right_v -= InnerUnroll*2;
+        read_right_v -= InnerUnroll * 2;
         TV* nextPtr;
 
-        auto * RESTRICT write_left = left;
-        auto * RESTRICT write_right = right - N;
+        auto* RESTRICT write_left = left;
+        auto* RESTRICT write_right = right - N;
 
         while (read_left_v < read_right_v) {
-            if (write_right - ((T *)read_right_v) < (2 * (InnerUnroll * N) - N)) {
+            if (write_right - ((T*)read_right_v) < (2 * (InnerUnroll * N) - N)) {
                 nextPtr = read_right_v;
                 read_right_v -= InnerUnroll;
             } else {
@@ -458,7 +449,7 @@ private:
         read_right_v += (InnerUnroll - 1);
 
         while (read_left_v <= read_right_v) {
-            if (write_right - (T *)read_right_v < N) {
+            if (write_right - (T*)read_right_v < N) {
                 nextPtr = read_right_v;
                 read_right_v -= 1;
             } else {
@@ -483,7 +474,7 @@ private:
         *write_left++ = pivot;
 
         assert(write_left > left);
-        assert(write_left <= right+1);
+        assert(write_left <= right + 1);
 
         return write_left;
     }
@@ -501,16 +492,14 @@ private:
     ///               the nearest vector-alignment left+right of the partition
     ///               is situated.
     /// \return The amount of elements partitioned to the left side
-    size_t vectorized_packed_partition(T* const left, T* const right,
-                                       T min_bounding, const AH alignment) {
+    size_t vectorized_packed_partition(T* const left, T* const right, T min_bounding, const AH alignment) {
         assert(right - left >= SMALL_SORT_THRESHOLD_ELEMENTS);
         assert((reinterpret_cast<size_t>(left) & ELEMENT_ALIGN) == 0);
         assert((reinterpret_cast<size_t>(right) & ELEMENT_ALIGN) == 0);
 
 #ifndef NDEBUG
-        memset((void *)_spill, 0, PARTITION_SPILL_SIZE_IN_ELEMENTS * sizeof(T));
+        memset((void*)_spill, 0, PARTITION_SPILL_SIZE_IN_ELEMENTS * sizeof(T));
 #endif
-
 
 #ifdef VXSORT_STATS
         vxsort_stats<T>::bump_partitions((right - left) + 1);
@@ -527,13 +516,13 @@ private:
         const TV offset_v = VMT::broadcast(offset);
         //const TV offset_v = PKM::prepare_offset(min_bounding);
 
-        auto * RESTRICT read_left = left;
-        auto * RESTRICT read_right = right;
+        auto* RESTRICT read_left = left;
+        auto* RESTRICT read_right = right;
 
-        auto * RESTRICT spill_read_left = _spill;
-        auto * RESTRICT spill_write_left = spill_read_left;
-        auto * RESTRICT spill_read_right = _spill + PARTITION_SPILL_SIZE_IN_ELEMENTS;
-        auto * RESTRICT spill_write_right = spill_read_right;
+        auto* RESTRICT spill_read_left = _spill;
+        auto* RESTRICT spill_write_left = spill_read_left;
+        auto* RESTRICT spill_read_right = _spill + PARTITION_SPILL_SIZE_IN_ELEMENTS;
+        auto* RESTRICT spill_write_right = spill_read_right;
 
         // the read heads always advance by N elements towards te middle,
         // It would be wise to spend some extra effort here to align the read
@@ -557,15 +546,15 @@ private:
 
         // From now on, we are fully aligned
         // and all reading is done in full vector units
-        auto * RESTRICT read_left_v = reinterpret_cast<TV*>(read_left);
-        auto * RESTRICT read_right_v = reinterpret_cast<TV*>(read_right);
+        auto* RESTRICT read_left_v = reinterpret_cast<TV*>(read_left);
+        auto* RESTRICT read_right_v = reinterpret_cast<TV*>(read_right);
 #ifndef NDEBUG
         read_left = nullptr;
         read_right = nullptr;
 #endif
 
         auto* RESTRICT write_left = reinterpret_cast<TPACK*>(left);
-        auto* RESTRICT write_right = reinterpret_cast<TPACK*>(right+1) - 2*N;
+        auto* RESTRICT write_right = reinterpret_cast<TPACK*>(right + 1) - 2 * N;
 
         // We will be packing before partitioning, so
         // We must generate a pre-packed pivot
@@ -586,7 +575,7 @@ private:
             auto dl = VMT::load_vec(read_left_v + i);
             auto dr = VMT::load_vec(read_right_v - i);
 
-            auto packed_data  = PKM::pack_vectors(dl, dr, offset_v);
+            auto packed_data = PKM::pack_vectors(dl, dr, offset_v);
 
             vxsort<TPACK, M, Unroll>::PMT::partition_block(packed_data, PPP, write_left, write_right);
         }
@@ -594,20 +583,20 @@ private:
         // We might have one more vector worth of stuff to partition, so we'll do it with
         // scalar partitioning into the tmp space
         if (len_v > 0) {
-            auto slack = VMT::load_vec((TV *) (read_left_v + len_dv));
+            auto slack = VMT::load_vec((TV*)(read_left_v + len_dv));
             PMT::partition_block(slack, P, spill_write_left, spill_write_right);
         }
         // Fix-up spill_write_right after the last vector operation
         // potentially *writing* through it is done
         spill_write_right += N;
 
-        write_right += 2*N;
+        write_right += 2 * N;
 
-        for (auto *p = spill_read_left; p < spill_write_left; p++) {
+        for (auto* p = spill_read_left; p < spill_write_left; p++) {
             *(write_left++) = static_cast<TPACK>(VMT::template shift_n_sub<Shift>(*p, offset));
         }
 
-        for (auto *p = spill_write_right; p < spill_read_right; p++) {
+        for (auto* p = spill_write_right; p < spill_read_right; p++) {
             *(--write_right) = static_cast<TPACK>(VMT::template shift_n_sub<Shift>(*p, offset));
         }
 
@@ -797,7 +786,7 @@ private:
         T offset = VMT::template shift_n_sub<Shift>(base, MIN);
 
         auto mem_read = mem_end - len;
-        auto mem_write = reinterpret_cast<T*>(mem_end)  - len;
+        auto mem_write = reinterpret_cast<T*>(mem_end) - len;
 
         // Include a "special" pass to handle very short lengths
         if (len < 2 * N) {
