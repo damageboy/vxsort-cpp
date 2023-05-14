@@ -47,7 +47,8 @@ private:
     static const i32 N = sizeof(TV) / sizeof(T);
     static_assert(is_powerof2(N), "vector-size / element-size must be a power of 2");
 
-    static const i32 SMALL_SORT_THRESHOLD_ELEMENTS = 1024;
+    static const i32 SMALL_SORT_THRESHOLD_BYTES = 4096;
+    static const i32 SMALL_SORT_THRESHOLD_ELEMENTS = SMALL_SORT_THRESHOLD_BYTES / sizeof(T);
     static const i32 SMALL_SORT_THRESHOLD_VECTORS = SMALL_SORT_THRESHOLD_ELEMENTS / N;
     static const i32 SLACK_PER_SIDE_IN_VECTORS = Unroll;
     static const size_t ALIGN = AH::ALIGN;
