@@ -93,8 +93,7 @@ void BM_blacher(benchmark::State& state)
 
     static const i32 ITERATIONS = 1024;
     auto n = 16;
-    auto v = std::vector<i32>(n);
-    generate_unique_values_vec(v, (i32)0x1000, (i32)0x8);
+    auto v = generate_unique_values_vec(n, (i32)0x1000, (i32)0x8);
 
     auto copies = generate_copies(ITERATIONS, n, v);
     auto begins = generate_array_beginnings(copies);
