@@ -29,13 +29,14 @@ void process_perf_counters(UserCounters &counters, i64 num_elements);
 extern std::random_device::result_type global_bench_random_seed;
 
 template <typename T>
-void generate_unique_values_vec(std::vector<T>& vec, T start, T stride) {
-    for (usize i = 0; i < vec.size(); i++, start += stride)
-        vec[i] = start;
+std::vector<T> generate_unique_values_vec(usize size, T start, T stride) {
+    std::vector<T> v(size);
+    for (usize i = 0; i < v.size(); i++, start += stride)
+        v[i] = start;
 
     std::mt19937_64 g(global_bench_random_seed);
-
-    std::shuffle(vec.begin(), vec.end(), g);
+    std::shuffle(v.begin(), v.end(), g);
+    return v;
 }
 
 template <typename T, typename U=T>
@@ -67,7 +68,7 @@ std::vector<std::vector<T>> generate_copies(usize num_copies, i64 n, std::vector
 
 template <typename T>
 std::vector<T> shuffled_seq(usize size, T start, T stride, std::mt19937_64& rng) {
-    std::vector<T> v; v.reserve(size);
+    std::vector<T> v(size);
     for (usize i = 0; i < size; ++i)
         v.push_back(start + stride * i);
     std::shuffle(v.begin(), v.end(), rng);
@@ -76,7 +77,7 @@ std::vector<T> shuffled_seq(usize size, T start, T stride, std::mt19937_64& rng)
 
 template <typename T>
 std::vector<int> shuffled_16_values(usize size, T start, T stride, std::mt19937_64& rng) {
-    std::vector<T> v; v.reserve(size);
+    std::vector<T> v(size);
     for (usize i = 0; i < size; ++i)
         v.push_back(start + stride * (i % 16));
     std::shuffle(v.begin(), v.end(), rng);
@@ -85,7 +86,7 @@ std::vector<int> shuffled_16_values(usize size, T start, T stride, std::mt19937_
 
 template <typename T>
 std::vector<int> all_equal(isize size, T start) {
-    std::vector<T> v; v.reserve(size);
+    std::vector<T> v(size);
     for (i32 i = 0; i < size; ++i)
         v.push_back(start);
     return v;
@@ -93,7 +94,7 @@ std::vector<int> all_equal(isize size, T start) {
 
 template <typename T>
 std::vector<T> ascending_int(isize size, T start, T stride) {
-    std::vector<T> v; v.reserve(size);
+    std::vector<T> v(size);
     for (isize i = 0; i < size; ++i)
         v.push_back(start + stride * i);
     return v;
@@ -101,7 +102,7 @@ std::vector<T> ascending_int(isize size, T start, T stride) {
 
 template <typename T>
 std::vector<T> descending_int(isize size, T start, T stride) {
-    std::vector<T> v; v.reserve(size);
+    std::vector<T> v(size);
     for (isize i = size - 1; i >= 0; --i)
         v.push_back(start + stride * i);
     return v;
@@ -109,7 +110,7 @@ std::vector<T> descending_int(isize size, T start, T stride) {
 
 template <typename T>
 std::vector<int> pipe_organ(isize size, T start, T stride, std::mt19937_64&) {
-    std::vector<T> v; v.reserve(size);
+    std::vector<T> v(size);
     for (isize i = 0; i < size/2; ++i)
         v.push_back(start + stride * i);
     for (isize i = size/2; i < size; ++i)
@@ -119,7 +120,7 @@ std::vector<int> pipe_organ(isize size, T start, T stride, std::mt19937_64&) {
 
 template <typename T>
 std::vector<int> push_front(isize size, T start, T stride, std::mt19937_64&) {
-    std::vector<int> v; v.reserve(size);
+    std::vector<T> v(size);
     for (isize i = 1; i < size; ++i)
         v.push_back(start + stride * i);
     v.push_back(start);
@@ -128,7 +129,7 @@ std::vector<int> push_front(isize size, T start, T stride, std::mt19937_64&) {
 
 template <typename T>
 std::vector<T> push_middle(isize size, T start, T stride, std::mt19937_64&) {
-    std::vector<T> v; v.reserve(size);
+    std::vector<T> v(size);
     for (isize i = 0; i < size; ++i) {
         if (i != size/2)
             v.push_back(start + stride * i);

@@ -21,10 +21,9 @@ static void BM_vxsort(benchmark::State& state) {
     VXSORT_BENCH_ISA();
 
     auto n = state.range(0);
-    auto v = std::vector<Q>((i32)n);
     const auto ITERATIONS = 10;
 
-    generate_unique_values_vec(v, (Q)0x1000, (Q)0x8);
+    auto v = generate_unique_values_vec(n, (Q)0x1000, (Q)0x8);
     auto copies = generate_copies(ITERATIONS, n, v);
     auto begins = generate_array_beginnings(copies);
     auto ends = generate_array_beginnings(copies);
@@ -62,13 +61,12 @@ static void BM_vxsort_strided(benchmark::State& state) {
 
     auto n = StridedSortSize;
     auto stride = state.range(0);
-    auto v = std::vector<Q>(n);
     const auto ITERATIONS = 10;
 
     const auto min_value = StridedSortMinValue;
     const auto max_value = min_value + StridedSortSize * stride;
 
-    generate_unique_values_vec(v, (Q) 0x80000000, (Q) stride);
+    auto v = generate_unique_values_vec(n, (Q) 0x80000000, (Q) stride);
     auto copies = generate_copies(ITERATIONS, n, v);
     auto begins = generate_array_beginnings(copies);
     auto ends = generate_array_beginnings(copies);
