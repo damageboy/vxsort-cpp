@@ -1,7 +1,7 @@
 #include "vxsort_targets_enable_avx512.h"
 
-#include <random>
 #include <benchmark/benchmark.h>
+#include <random>
 
 #include <vxsort.avx512.h>
 
@@ -9,24 +9,12 @@
 
 namespace vxsort_bench {
 using namespace vxsort::types;
-using benchmark::TimeUnit;
 using vm = vxsort::vector_machine;
 
-BENCHMARK_TEMPLATE(BM_vxsort, u16, vm::AVX512,  1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_vxsort, u16, vm::AVX512,  2)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_vxsort, u16, vm::AVX512,  4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_vxsort, u16, vm::AVX512,  8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-
-BENCHMARK_TEMPLATE(BM_vxsort, u32, vm::AVX512,  1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_vxsort, u32, vm::AVX512,  2)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_vxsort, u32, vm::AVX512,  4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_vxsort, u32, vm::AVX512,  8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-
-BENCHMARK_TEMPLATE(BM_vxsort, u64, vm::AVX512,  1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_vxsort, u64, vm::AVX512,  2)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_vxsort, u64, vm::AVX512,  4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_vxsort, u64, vm::AVX512,  8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-
+void register_fullsort_avx512_u_benchmarks() {
+    register_fullsort_benchmarks<vm::AVX512, 8, u16, u32, u64>();
 }
+
+}  // namespace vxsort_bench
 
 #include "vxsort_targets_disable.h"

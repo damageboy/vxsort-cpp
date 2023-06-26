@@ -15,7 +15,7 @@ static void BM_stdsort(benchmark::State& state) {
     auto n = state.range(0);
     const auto ITERATIONS = 10;
 
-    auto v = generate_unique_values_vec(n, (Q)0x1000, (Q)8);
+    auto v = unique_values(n, (Q) 0x1000, (Q) 8);
     auto copies = generate_copies(ITERATIONS, n, v);
     auto begins = generate_array_beginnings(copies);
     auto ends = generate_array_beginnings(copies);

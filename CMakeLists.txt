@@ -214,7 +214,8 @@ CPMAddPackage(
         GIT_TAG main
         OPTIONS "BUILD_TESTING OFF"
 )
-CPMAddPackage("gh:fmtlib/fmt#9.1.0")
+CPMAddPackage("gh:fmtlib/fmt#10.0.0")
+CPMAddPackage("gh:Neargye/magic_enum#v0.9.2")
 CPMAddPackage("gh:okdshin/PicoSHA2#master")
 
 enable_testing()
