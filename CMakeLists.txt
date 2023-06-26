@@ -19,7 +19,7 @@ set(VXSORT_USE_LINKER "" CACHE STRING "Custom linker for -fuse-ld=...")
 find_program(CCACHE_PROGRAM ccache)
 if(CCACHE_PROGRAM AND ${VXSORT_CCACHE})
     message("ccache detected - using ccache to cache object files across compilations")
-    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CCACHE_PROGRAM}")    
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CCACHE_PROGRAM}")
 endif()
 
 # Make sure we can import out CMake functions
