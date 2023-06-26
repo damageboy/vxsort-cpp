@@ -3,7 +3,7 @@ BasedOnStyle: Chromium
 
 ---
 Language: Cpp
-ColumnLimit: 160
+ColumnLimit: 100
 IndentWidth: 4
 
 ...
