@@ -11,6 +11,8 @@ target_link_libraries(${TARGET_NAME}
         ${CMAKE_PROJECT_NAME}_lib
         benchmark
         picosha2
+        fmt::fmt
+        magic_enum::magic_enum
         ${CMAKE_THREAD_LIBS_INIT})
 
 configure_file(run.sh run.sh COPYONLY)
