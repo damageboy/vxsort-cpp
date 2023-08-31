@@ -7,7 +7,6 @@
 #include "BM_fullsort.vxsort.h"
 
 namespace vxsort_bench {
-using namespace vxsort::types;
 using vm = vxsort::vector_machine;
 
 void register_fullsort_avx2_i_benchmarks() {
