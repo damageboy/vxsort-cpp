@@ -79,7 +79,7 @@ std::vector<T> shuffled_16_values(usize size, T start, T stride) {
 template <typename T>
 std::vector<T> all_equal(usize size, T start , T stride) {
     std::vector<T> v(size);
-    for (i32 i = 0; i < size; ++i)
+    for (usize i = 0; i < size; ++i)
         v.push_back(start);
     return v;
 }

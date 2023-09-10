@@ -23,8 +23,7 @@ protected:
 
 public:
     virtual void SetUp() {
-        V = std::vector<T>(GetParam());
-        generate_unique_values_vec(V, (T)0x1000, (T)0x1);
+        auto v = unique_values(GetParam(), (T)0x1000, (T)0x1);
     }
     virtual void TearDown() {
     }
@@ -89,8 +88,11 @@ public:
     virtual void SetUp() {
         testing::TestWithParam<SizeAndSlack<T>>::SetUp();
         auto p = this->GetParam();
-        V = std::vector<T>(p.Size + p.Slack);
-        generate_unique_values_vec(V, p.FirstValue, p.ValueStride, p.Randomize);
+        //V = std::vector<T>(p.Size + p.Slack);
+        //generate_unique_values_vec(V, p.FirstValue, p.ValueStride, p.Randomize);
+        auto v = unique_values(p.Size + p.Slack, p.FirstValue, p.ValueStride);
+
+
     }
     virtual void TearDown() {
 #ifdef VXSORT_STATS
@@ -138,8 +140,7 @@ public:
     virtual void SetUp() {
         testing::TestWithParam<SizeAndStride<T>>::SetUp();
         auto p = this->GetParam();
-        V = std::vector<T>(p.Size);
-        generate_unique_values_vec(V, p.FirstValue, p.ValueStride, p.Randomize);
+        auto v = unique_values(p.Size, p.FirstValue, p.ValueStride);
         MinValue = p.FirstValue;
         MaxValue = MinValue + p.Size * p.ValueStride;
         if (MinValue > MaxValue)
