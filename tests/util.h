@@ -6,22 +6,12 @@
 #include <numeric>
 #include <random>
 
-template <typename T>
-void generate_unique_values_vec(std::vector<T>& vec, T start, T stride= 0x1, bool randomize = true) {
-    for (size_t i = 0; i < vec.size(); i++) {
-        vec[i] = start;
-        start += stride;
-    }
+#include <defs.h>
 
-    if (!randomize)
-        return;
+namespace vxsort_tests {
+using namespace vxsort::types;
 
-    std::random_device rd;
-    // std::mt19937 g(rd());
-    std::mt19937 g(666);
-
-    std::shuffle(vec.begin(), vec.end(), g);
-}
+const std::random_device::result_type global_bench_random_seed = 666;
 
 template <typename IntType>
 std::vector<IntType> range(IntType start, IntType stop, IntType step) {
@@ -53,6 +43,83 @@ std::vector<IntType> multiply_range(IntType start, IntType stop, IntType step) {
     }
 
     return result;
+}
+
+template <typename T>
+std::vector<T> unique_values(usize size, T start, T stride) {
+    std::vector<T> v(size);
+    for (usize i = 0; i < v.size(); i++, start += stride)
+        v[i] = start;
+
+    std::mt19937_64 rng(global_bench_random_seed);
+    std::shuffle(v.begin(), v.end(), rng);
+    return v;
+}
+
+template <typename T>
+std::vector<T> shuffled_16_values(usize size, T start, T stride) {
+    std::vector<T> v(size);
+    for (usize i = 0; i < size; ++i)
+        v.push_back(start + stride * (i % 16));
+    std::mt19937_64 rng(global_bench_random_seed);
+    std::shuffle(v.begin(), v.end(), rng);
+    return v;
+}
+
+template <typename T>
+std::vector<T> all_equal(usize size, T start , T stride) {
+    std::vector<T> v(size);
+    for (i32 i = 0; i < size; ++i)
+        v.push_back(start);
+    return v;
+}
+
+template <typename T>
+std::vector<T> ascending_int(usize size, T start, T stride) {
+    std::vector<T> v(size);
+    for (usize i = 0; i < size; ++i)
+        v.push_back(start + stride * i);
+    return v;
+}
+
+template <typename T>
+std::vector<T> descending_int(usize size, T start, T stride) {
+    std::vector<T> v(size);
+    for (isize i = size - 1; i >= 0; --i)
+        v.push_back(start + stride * i);
+    return v;
+}
+
+template <typename T>
+std::vector<T> pipe_organ(usize size, T start, T stride) {
+    std::vector<T> v(size);
+    for (usize i = 0; i < size/2; ++i)
+        v.push_back(start + stride * i);
+    for (usize i = size/2; i < size; ++i)
+        v.push_back(start + (size - i) * stride);
+    return v;
+}
+
+template <typename T>
+std::vector<T> push_front(usize size, T start, T stride) {
+    std::vector<T> v(size);
+    for (usize i = 1; i < size; ++i)
+        v.push_back(start + stride * i);
+    v.push_back(start);
+    return v;
+}
+
+template <typename T>
+std::vector<T> push_middle(usize size, T start, T stride) {
+    std::vector<T> v(size);
+    for (usize i = 0; i < size; ++i) {
+        if (i != size/2)
+            v.push_back(start + stride * i);
+    }
+    v.push_back(start + stride * (size/2));
+    return v;
+}
+
 }
 
 #endif
