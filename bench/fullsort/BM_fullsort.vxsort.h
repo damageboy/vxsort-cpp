@@ -2,7 +2,6 @@
 #define VXSORT_BM_FULLSORT_VXSORT_H
 
 #include <benchmark/benchmark.h>
-#include <cxxabi.h>
 #include <fmt/format.h>
 #include <algorithm>
 #include <magic_enum.hpp>
@@ -10,6 +9,10 @@
 #include <thread>
 #include "../bench_isa.h"
 #include "../util.h"
+
+#ifndef VXSORT_COMPILER_MSVC
+#include <cxxabi.h>
+#endif
 
 #include <vxsort.h>
 
@@ -184,7 +187,11 @@ void register_type(i64 s, SortPattern p) {
     if constexpr (U >= 2) {
         register_type<M, U / 2, T>(s, p);
     }
+#ifdef VXSORT_COMPILER_MSVC
+    auto realname = typeid(T).name();
+#else
     auto realname = abi::__cxa_demangle(typeid(T).name(), nullptr, nullptr, nullptr);
+#endif
     auto bench_name = fmt::format("BM_vxsort_pattern<{}, {}, {}>/{}/{}", realname, U, s,
                                   magic_enum::enum_name(M), magic_enum::enum_name(p));
     ::benchmark::RegisterBenchmark(bench_name.c_str(), BM_vxsort_pattern<T, M, U>, s, p)
