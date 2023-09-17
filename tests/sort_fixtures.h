@@ -16,83 +16,139 @@ using namespace vxsort::types;
 using testing::ValuesIn;
 using testing::Types;
 
-template <typename T, int AlignTo = 0>
-struct SortFixture : public testing::TestWithParam<int> {
-protected:
-    std::vector<T> V;
 
-public:
-    virtual void SetUp() {
-        auto v = unique_values(GetParam(), (T)0x1000, (T)0x1);
-    }
-    virtual void TearDown() {
-    }
+enum class SortPattern {
+    unique_values,
+    shuffled_16_values,
+    all_equal,
+    ascending_int,
+    descending_int,
+    pipe_organ,
+    push_front,
+    push_middle
 };
 
-struct PrintValue {
-    template <class ParamType>
-    std::string operator()(const testing::TestParamInfo<ParamType>& info) const {
-        auto v = static_cast<int>(info.param);
-        return std::to_string(v);
-    }
-};
-
+/// @brief This sort fixture 
+/// @tparam T 
+/// @tparam AlignTo 
 template <typename T>
-struct SizeAndSlack {
+struct SortTestParams {
 public:
+    SortPattern Pattern;
     usize Size;
     i32 Slack;
     T FirstValue;
     T ValueStride;
-    bool Randomize;
 
-    SizeAndSlack(size_t size, int slack, T first_value, T value_stride, bool randomize)
-        : Size(size), Slack(slack), FirstValue(first_value), ValueStride(value_stride), Randomize(randomize) {}
+
+    SortTestParams(SortPattern pattern, size_t size, int slack, T first_value, T value_stride)
+        : Pattern(pattern), Size(size), Slack(slack), FirstValue(first_value), ValueStride(value_stride) {}
 
     /**
      * Generate sorting problems "descriptions"
-     * @param start
-     * @param stop
-     * @param step
-     * @param slack
+     * @param patterns - the sort patterns to test with
+     * @param start - start value for the size parameter
+     * @param stop - stop value for the size paraameter
+     * @param step - the step/multiplier for the size parameter
+     * @param slack - the slack parameter used to generate ranges of problem sized around a base value
      * @param first_value - the smallest value in each test array
      * @param value_stride - the minimal jump between array elements
-     * @param randomize - should the problem array contents be randomized, defaults to true
      * @return
      */
-    static std::vector<SizeAndSlack> generate(size_t start, size_t stop, size_t step, int slack, T first_value, T value_stride, bool randomize = true) {
+    static std::vector<SortTestParams> gen_mult(std::vector<SortPattern> patterns, usize start, usize stop, usize step, i32 slack, T first_value, T value_stride) {
         if (step == 0) {
             throw std::invalid_argument("step for range must be non-zero");
         }
 
-        std::vector<SizeAndSlack> result;
+        std::vector<SortTestParams> result;
         size_t i = start;
-        while ((step > 0) ? (i <= stop) : (i > stop)) {
-            for (auto j : range<int>(-slack, slack, 1)) {
-                if ((i64)i + j <= 0)
-                    continue;
-                result.push_back(SizeAndSlack(i, j, first_value, value_stride, randomize));
+        for (auto p : patterns) {
+            while ((step > 0) ? (i <= stop) : (i > stop)) {
+                for (auto j : range<int>(-slack, slack, 1)) {
+                    if ((i64)i + j <= 0)
+                        continue;
+                    result.push_back(SortTestParams(p, i, j, first_value, value_stride));
+                }
+                i *= step;
             }
-            i *= step;
         }
         return result;
+    }
+
+    /**
+     * Generate sorting problems "descriptions"
+     * @param pattern - the sort pattern to test with
+     * @param start - start value for the size parameter
+     * @param stop - stop value for the size paraameter
+     * @param step - the step/multiplier for the size parameter
+     * @param slack - the slack parameter used to generate ranges of problem sized around a base value
+     * @param first_value - the smallest value in each test array
+     * @param value_stride - the minimal jump between array elements
+     * @return
+     */
+    static auto gen_mult(SortPattern pattern, usize start, usize stop, usize step, i32 slack, T first_value, T value_stride) {
+        return gen_mult(std::vector<SortPattern>{pattern}, start, stop, step, slack,
+                                 first_value, value_stride);
+    }
+
+    /**
+     * Generate sorting problems "descriptions"
+     * @param patterns - the sort patterns to test with
+     * @param start - start value for the size parameter
+     * @param stop - stop value for the size paraameter
+     * @param step - the step/multiplier for the size parameter
+     * @param slack - the slack parameter used to generate ranges of problem sized around a base value
+     * @param first_value - the smallest value in each test array
+     * @param value_stride - the minimal jump between array elements
+     * @return
+     */
+    static std::vector<SortTestParams> gen_step(std::vector<SortPattern> patterns, usize start, usize stop, usize step, i32 slack, T first_value, T value_stride) {
+        if (step == 0) {
+            throw std::invalid_argument("step for range must be non-zero");
+        }
+
+        std::vector<SortTestParams> result;
+        size_t i = start;
+        for (auto p : patterns) {
+            while ((step > 0) ? (i <= stop) : (i > stop)) {
+                for (auto j : range<int>(-slack, slack, 1)) {
+                    if ((i64)i + j <= 0)
+                        continue;
+                    result.push_back(SortTestParams(p, i, j, first_value, value_stride));
+                }
+                i += step;
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Generate sorting problems "descriptions"
+     * @param pattern - the sort pattern to test with
+     * @param start - start value for the size parameter
+     * @param stop - stop value for the size paraameter
+     * @param step - the step for the size parameter
+     * @param slack - the slack parameter used to generate ranges of problem sized around a base value
+     * @param first_value - the smallest value in each test array
+     * @param value_stride - the minimal jump between array elements
+     * @return
+     */
+    static auto gen_step(SortPattern pattern, usize start, usize stop, usize step, i32 slack, T first_value, T value_stride) {
+        return gen_step(std::vector<SortPattern>{pattern}, start, stop, step, slack,
+                        first_value, value_stride);
     }
 };
 
 template <typename T, int AlignTo = 0>
-struct SortWithSlackFixture : public testing::TestWithParam<SizeAndSlack<T>> {
+struct ParametrizedSortFixture : public testing::TestWithParam<SortTestParams<T>> {
 protected:
     std::vector<T> V;
 
 public:
     virtual void SetUp() {
-        testing::TestWithParam<SizeAndSlack<T>>::SetUp();
+        testing::TestWithParam<SortTestParams<T>>::SetUp();
         auto p = this->GetParam();
-        //V = std::vector<T>(p.Size + p.Slack);
-        //generate_unique_values_vec(V, p.FirstValue, p.ValueStride, p.Randomize);
         auto v = unique_values(p.Size + p.Slack, p.FirstValue, p.ValueStride);
-
-
     }
     virtual void TearDown() {
 #ifdef VXSORT_STATS
@@ -103,63 +159,12 @@ public:
 };
 
 template <typename T>
-struct PrintSizeAndSlack {
-    std::string operator()(const testing::TestParamInfo<SizeAndSlack<T>>& info) const {
+struct PrintSortTestParams {
+    std::string operator()(const testing::TestParamInfo<SortTestParams<T>>& info) const {
         return std::to_string(info.param.Size + info.param.Slack);
     }
 };
 
-template <typename T>
-struct SizeAndStride {
-public:
-    usize Size;
-    T FirstValue;
-    T ValueStride;
-    bool Randomize;
-
-    SizeAndStride(size_t size, T first_value, T value_stride, bool randomize)
-        : Size(size), FirstValue(first_value), ValueStride(value_stride), Randomize(randomize) {}
-
-    static std::vector<SizeAndStride> generate(size_t size, T stride_start, T stride_stop, T first_value, bool randomize = true) {
-        std::vector<SizeAndStride> result;
-        for (auto j : multiply_range<T>(stride_start, stride_stop, 2)) {
-            result.push_back(SizeAndStride(size, first_value, j, randomize));
-        }
-        return result;
-    }
-};
-
-template <typename T, i32 AlignTo = 0>
-struct SortWithStrideFixture : public testing::TestWithParam<SizeAndStride<T>> {
-protected:
-    std::vector<T> V;
-    T MinValue;
-    T MaxValue;
-
-public:
-    virtual void SetUp() {
-        testing::TestWithParam<SizeAndStride<T>>::SetUp();
-        auto p = this->GetParam();
-        auto v = unique_values(p.Size, p.FirstValue, p.ValueStride);
-        MinValue = p.FirstValue;
-        MaxValue = MinValue + p.Size * p.ValueStride;
-        if (MinValue > MaxValue)
-            throw std::invalid_argument("stride is generating an overflow");
-    }
-    virtual void TearDown() {
-#ifdef VXSORT_STATS
-        vxsort::print_all_stats();
-        vxsort::reset_all_stats();
-#endif
-    }
-};
-
-template <typename T>
-struct PrintSizeAndStride {
-    std::string operator()(const testing::TestParamInfo<SizeAndStride<T>>& info) const {
-        return std::to_string(info.param.ValueStride);
-    }
-};
 }
 
 #endif  // VXSORT_SORT_FIXTURES_H
