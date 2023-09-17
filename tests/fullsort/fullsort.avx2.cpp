@@ -14,44 +14,44 @@ using VM = vxsort::vector_machine;
 using namespace vxsort;
 
 #ifdef VXSORT_TEST_AVX2_I16
-struct VxSortAVX2_i16 : public SortWithSlackFixture<i16> {};
-auto vxsort_i16_params_avx2 = ValuesIn(SizeAndSlack<i16>::generate(10, 10000,   10, 32, 0x1000, 0x1));
-INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_i16, vxsort_i16_params_avx2, PrintSizeAndSlack<i16>());
+struct VxSortAVX2_i16 : public ParametrizedSortFixture<i16> {};
+auto vxsort_i16_params_avx2 = ValuesIn(SortTestParams<i16>::gen_mult(SortPattern::unique_values, 10, 10000,   10, 32, 0x1000, 0x1));
+INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_i16, vxsort_i16_params_avx2, PrintSortTestParams<i16>());
 #endif
 #ifdef VXSORT_TEST_AVX2_I32
-struct VxSortAVX2_i32 : public SortWithSlackFixture<i32> {};
-auto vxsort_i32_params_avx2 = ValuesIn(SizeAndSlack<i32>::generate(10, 1000000, 10, 16, 0x1000, 0x1));
-INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_i32, vxsort_i32_params_avx2, PrintSizeAndSlack<i32>());
+struct VxSortAVX2_i32 : public ParametrizedSortFixture<i32> {};
+auto vxsort_i32_params_avx2 = ValuesIn(SortTestParams<i32>::gen_mult(SortPattern::unique_values, 10, 1000000, 10, 16, 0x1000, 0x1));
+INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_i32, vxsort_i32_params_avx2, PrintSortTestParams<i32>());
 #endif
 #ifdef VXSORT_TEST_AVX2_I64
-struct VxSortAVX2_i64 : public SortWithSlackFixture<i64> {};
-auto vxsort_i64_params_avx2 = ValuesIn(SizeAndSlack<i64>::generate(10, 1000000, 10, 8, 0x1000, 0x1));
-INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_i64, vxsort_i64_params_avx2, PrintSizeAndSlack<i64>());
+struct VxSortAVX2_i64 : public ParametrizedSortFixture<i64> {};
+auto vxsort_i64_params_avx2 = ValuesIn(SortTestParams<i64>::gen_mult(SortPattern::unique_values, 10, 1000000, 10, 8, 0x1000, 0x1));
+INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_i64, vxsort_i64_params_avx2, PrintSortTestParams<i64>());
 #endif
 #ifdef VXSORT_TEST_AVX2_U16
-struct VxSortAVX2_u16 : public SortWithSlackFixture<u16> {};
-auto vxsort_u16_params_avx2 = ValuesIn(SizeAndSlack<u16>::generate(10, 1000000, 10, 16, 0x1000, 0x1));
-INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_u16, vxsort_u16_params_avx2, PrintSizeAndSlack<u16>());
+struct VxSortAVX2_u16 : public ParametrizedSortFixture<u16> {};
+auto vxsort_u16_params_avx2 = ValuesIn(SortTestParams<u16>::gen_mult(SortPattern::unique_values, 10, 1000000, 10, 16, 0x1000, 0x1));
+INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_u16, vxsort_u16_params_avx2, PrintSortTestParams<u16>());
 #endif
 #ifdef VXSORT_TEST_AVX2_U32
-struct VxSortAVX2_u32 : public SortWithSlackFixture<u32> {};
-auto vxsort_u32_params_avx2 = ValuesIn(SizeAndSlack<u32>::generate(10, 1000000, 10, 16, 0x1000, 0x1));
-INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_u32, vxsort_u32_params_avx2, PrintSizeAndSlack<u32>());
+struct VxSortAVX2_u32 : public ParametrizedSortFixture<u32> {};
+auto vxsort_u32_params_avx2 = ValuesIn(SortTestParams<u32>::gen_mult(SortPattern::unique_values, 10, 1000000, 10, 16, 0x1000, 0x1));
+INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_u32, vxsort_u32_params_avx2, PrintSortTestParams<u32>());
 #endif
 #ifdef VXSORT_TEST_AVX2_U64
-struct VxSortAVX2_u64 : public SortWithSlackFixture<u64> {};
-auto vxsort_u64_params_avx2 = ValuesIn(SizeAndSlack<u64>::generate(10, 1000000, 10, 8, 0x1000, 0x1));
-INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_u64, vxsort_u64_params_avx2, PrintSizeAndSlack<u64>());
+struct VxSortAVX2_u64 : public ParametrizedSortFixture<u64> {};
+auto vxsort_u64_params_avx2 = ValuesIn(SortTestParams<u64>::gen_mult(SortPattern::unique_values, 10, 1000000, 10, 8, 0x1000, 0x1));
+INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_u64, vxsort_u64_params_avx2, PrintSortTestParams<u64>());
 #endif
 #ifdef VXSORT_TEST_AVX2_F32
-struct VxSortAVX2_f32 : public SortWithSlackFixture<f32> {};
-auto vxsort_f32_params_avx2 = ValuesIn(SizeAndSlack<f32>::generate(10, 1000000, 10, 16, 1234.5, 0.1f));
-INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_f32, vxsort_f32_params_avx2, PrintSizeAndSlack<f32>());
+struct VxSortAVX2_f32 : public ParametrizedSortFixture<f32> {};
+auto vxsort_f32_params_avx2 = ValuesIn(SortTestParams<f32>::gen_mult(SortPattern::unique_values, 10, 1000000, 10, 16, 1234.5f, 0.1f));
+INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_f32, vxsort_f32_params_avx2, PrintSortTestParams<f32>());
 #endif
 #ifdef VXSORT_TEST_AVX2_F64
-struct VxSortAVX2_f64 : public SortWithSlackFixture<f64> {};
-auto vxsort_f64_params_avx2 = ValuesIn(SizeAndSlack<f64>::generate(10, 1000000, 10, 8, 1234.5, 0.1));
-INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_f64, vxsort_f64_params_avx2, PrintSizeAndSlack<f64>());
+struct VxSortAVX2_f64 : public ParametrizedSortFixture<f64> {};
+auto vxsort_f64_params_avx2 = ValuesIn(SortTestParams<f64>::gen_mult(SortPattern::unique_values, 10, 1000000, 10, 8, 1234.5, 0.1));
+INSTANTIATE_TEST_SUITE_P(VxSort, VxSortAVX2_f64, vxsort_f64_params_avx2, PrintSortTestParams<f64>());
 #endif
 
 #ifdef VXSORT_TEST_AVX2_I16
