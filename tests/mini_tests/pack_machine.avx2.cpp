@@ -14,13 +14,13 @@ template<typename T>
 using PackMachineAVX2Test = PackMachineTest<T, VM::AVX2>;
 
 using TestTypes = ::testing::Types<
-#ifdef VXSORT_TEST_AVX2_I16
+#ifdef VXSORT_TEST_AVX2_I
             i16, i32, i64
 #endif
-#ifdef VXSORT_TEST_AVX2_U16
+#ifdef VXSORT_TEST_AVX2_U
             u16, u32, u64
 #endif
-#ifdef VXSORT_TEST_AVX2_F32
+#ifdef VXSORT_TEST_AVX2_F
             f32, f64
 #endif
     >;

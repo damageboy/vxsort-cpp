@@ -1,15 +1,14 @@
 #include <random>
+#include <unordered_map>
+#include <cstring>
+
 #include "util.h"
 
 #include <benchmark/benchmark.h>
 #include <fmt/format.h>
-#include <defs.h>
-
 
 #include <picosha2.h>
 
-#include <random>
-#include <unordered_map>
 
 namespace vxsort_bench {
 using namespace vxsort::types;
@@ -200,5 +199,4 @@ void process_perf_counters(UserCounters &counters, i64 num_elements) {
         counters.erase(k);
     }
 }
-
 }

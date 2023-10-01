@@ -10,10 +10,6 @@
 #include "../bench_isa.h"
 #include "../util.h"
 
-#ifndef VXSORT_COMPILER_MSVC
-#include <cxxabi.h>
-#endif
-
 #include <vxsort.h>
 
 #include "fullsort_params.h"
@@ -187,13 +183,9 @@ void register_type(i64 s, SortPattern p) {
     if constexpr (U >= 2) {
         register_type<M, U / 2, T>(s, p);
     }
-#ifdef VXSORT_COMPILER_MSVC
-    auto realname = typeid(T).name();
-#else
-    auto realname = abi::__cxa_demangle(typeid(T).name(), nullptr, nullptr, nullptr);
-#endif
-    auto bench_name = fmt::format("BM_vxsort_pattern<{}, {}, {}>/{}/{}", realname, U, s,
-                                  magic_enum::enum_name(M), magic_enum::enum_name(p));
+        auto *bench_type = get_canonical_typename<T>();
+        auto bench_name = fmt::format("BM_vxsort_pattern<{}, {}, {}>/{}/{}", bench_type, U, s,
+                                      magic_enum::enum_name(M), magic_enum::enum_name(p));
     ::benchmark::RegisterBenchmark(bench_name.c_str(), BM_vxsort_pattern<T, M, U>, s, p)
         ->Unit(kMillisecond)
         ->ThreadRange(1, processor_count);

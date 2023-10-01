@@ -13,13 +13,13 @@ template<typename T>
 using PartitionMachineAVX512Test = PageWithLavaBoundariesFixture<T, VM::AVX512>;
 
 using TestTypes = ::testing::Types<
-#ifdef VXSORT_TEST_AVX512_I16
+#ifdef VXSORT_TEST_AVX512_I
             i16, i32, i64
 #endif
-#ifdef VXSORT_TEST_AVX512_U16
+#ifdef VXSORT_TEST_AVX512_U
             u16, u32, u64
 #endif
-#ifdef VXSORT_TEST_AVX512_F32
+#ifdef VXSORT_TEST_AVX512_F
             f32, f64
 #endif
 >;

@@ -3,36 +3,45 @@
 
 #include "gtest/gtest.h"
 
-#if defined(GTEST_OS_ESP8266) || defined(GTEST_OS_ESP32)
-// Arduino-like platforms: program entry points are setup/loop instead of main.
+namespace vxsort_tests {
 
-#ifdef GTEST_OS_ESP8266
-extern "C" {
+
+    void register_fullsort_avx2_i_tests();
+    void register_fullsort_avx512_i_tests();
+    void register_fullsort_avx2_u_tests();
+    void register_fullsort_avx2_f_tests();
+    void register_fullsort_avx512_u_tests();
+    void register_fullsort_avx512_f_tests();
+
+    void register_fullsort_test_matrix() {
+
+#ifdef VXSORT_TEST_AVX2_I
+        register_fullsort_avx2_i_tests();
 #endif
-
-void setup() { testing::InitGoogleTest(); }
-
-void loop() { RUN_ALL_TESTS(); }
-
-#ifdef GTEST_OS_ESP8266
-}
+#ifdef VXSORT_TEST_AVX2_U
+        register_fullsort_avx2_u_tests();
 #endif
-
-#elif defined(GTEST_OS_QURT)
-// QuRT: program entry point is main, but argc/argv are unusable.
-
-GTEST_API_ int main() {
-    printf("Running main() from %s\n", __FILE__);
-    testing::InitGoogleTest();
-    return RUN_ALL_TESTS();
-}
-#else
-// Normal platforms: program entry point is main, argc/argv are initialized.
+#ifdef VXSORT_TEST_AVX2_F
+        register_fullsort_avx2_f_tests();
+#endif
+#ifdef VXSORT_TEST_AVX512_I
+        register_fullsort_avx512_i_tests();
+#endif
+#ifdef VXSORT_TEST_AVX512_U
+        register_fullsort_avx512_u_tests();
+#endif
+#ifdef VXSORT_TEST_AVX512_F
+        register_fullsort_avx512_f_tests();
+#endif
+    }
+}  // namespace vxsort_tests
 
 GTEST_API_ int main(int argc, char **argv) {
     backward::SignalHandling sh;
 
     testing::InitGoogleTest(&argc, argv);
+
+    vxsort_tests::register_fullsort_test_matrix();
+
     return RUN_ALL_TESTS();
 }
-#endif
