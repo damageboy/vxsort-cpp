@@ -5,11 +5,25 @@
 #include <algorithm>
 #include <numeric>
 #include <random>
-
+#ifndef VXSORT_COMPILER_MSVC
+#include <cxxabi.h>
+#endif
+#include <cstring>
 #include <defs.h>
 
 namespace vxsort_tests {
 using namespace vxsort::types;
+
+enum class SortPattern {
+    unique_values,
+    shuffled_16_values,
+    all_equal,
+    ascending_int,
+    descending_int,
+    pipe_organ,
+    push_front,
+    push_middle
+};
 
 const std::random_device::result_type global_bench_random_seed = 666;
 
@@ -118,6 +132,41 @@ std::vector<T> push_middle(usize size, T start, T stride) {
     }
     v.push_back(start + stride * (size/2));
     return v;
+}
+
+template<typename T>
+const char *get_canonical_typename() {
+#ifdef VXSORT_COMPILER_MSVC
+    auto realname = typeid(T).name();
+#else
+    auto realname = abi::__cxa_demangle(typeid(T).name(), nullptr, nullptr, nullptr);
+#endif
+
+    if (realname == nullptr) {
+        return "unknown";
+    } else if (std::strcmp(realname, "long") == 0)
+        return "i64";
+    else if (std::strcmp(realname, "unsigned long") == 0)
+        return "u64";
+    else if (std::strcmp(realname, "int") == 0)
+        return "i32";
+    else if (std::strcmp(realname, "unsigned int") == 0)
+        return "u32";
+    else if (std::strcmp(realname, "short") == 0)
+        return "i16";
+    else if (std::strcmp(realname, "unsigned short") == 0)
+        return "u16";
+    else if (std::strcmp(realname, "char") == 0)
+        return "i8";
+    else if (std::strcmp(realname, "unsigned char") == 0)
+        return "u8";
+    else if (std::strcmp(realname, "float") == 0)
+        return "f32";
+    else if (std::strcmp(realname, "double") == 0)
+        return "f64";
+
+    else
+        return realname;
 }
 
 }

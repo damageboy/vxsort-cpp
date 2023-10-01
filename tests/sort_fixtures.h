@@ -16,18 +16,6 @@ using namespace vxsort::types;
 using testing::ValuesIn;
 using testing::Types;
 
-
-enum class SortPattern {
-    unique_values,
-    shuffled_16_values,
-    all_equal,
-    ascending_int,
-    descending_int,
-    pipe_organ,
-    push_front,
-    push_middle
-};
-
 /// @brief This sort fixture 
 /// @tparam T 
 /// @tparam AlignTo 
