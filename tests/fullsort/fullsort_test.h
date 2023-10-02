@@ -7,7 +7,7 @@
 #include <fmt/format.h>
 #include <magic_enum.hpp>
 
-#include "../util.h"
+#include "../test_vectors.h"
 #include "../sort_fixtures.h"
 #include "../test_isa.h"
 #include "vxsort.h"
@@ -17,7 +17,7 @@ using namespace vxsort::types;
 using ::vxsort::vector_machine;
 
 template <typename T, i32 Unroll, vector_machine M>
-void vxsort_pattern_test(SortPattern, usize size, T first_value, T stride) {
+void vxsort_pattern_test(sort_pattern, usize size, T first_value, T stride) {
     VXSORT_TEST_ISA();
 
     auto V = unique_values<T>(size, first_value, stride);
@@ -57,64 +57,55 @@ void vxsort_hinted_test(std::vector<T>& V, T min_value, T max_value) {
     }
 }
 
-static inline std::vector<SortPattern> test_patterns() {
+static inline std::vector<sort_pattern> fullsort_test_patterns() {
     return {
-            SortPattern::unique_values,
-            SortPattern::shuffled_16_values,
-            SortPattern::all_equal,
+            sort_pattern::unique_values,
+            //sort_pattern::shuffled_16_values,
+            //sort_pattern::all_equal,
     };
 }
 
 template <typename T>
-struct SortTestParams2 {
+struct fullsort_test_params {
 public:
-    SortTestParams2(SortPattern pattern, usize size, i32 slack, T first_value, T value_stride)
-            : Pattern(pattern), Size(size), Slack(slack), FirstValue(first_value), ValueStride(value_stride) {}
-    SortPattern Pattern;
-    usize Size;
-    i32 Slack;
-    T FirstValue;
-    T ValueStride;
+    fullsort_test_params(sort_pattern pattern, usize size, i32 slack, T first_value, T value_stride)
+            : pattern(pattern), size(size), slack(slack), first_value(first_value), stride(value_stride) {}
+    sort_pattern pattern;
+    usize size;
+    i32 slack;
+    T first_value;
+    T stride;
 };
 
-class VxSortFixture : public testing::Test {
-public:
-    using FunctionType = std::function<void()>;
-    explicit VxSortFixture(FunctionType fn) : _fn(std::move(fn)) {}
+template<typename T>
+std::vector<fullsort_test_params<T>>
+gen_params(usize start, usize stop, usize step, i32 slack, T first_value, T value_stride)
+{
+    auto patterns = fullsort_test_patterns();
 
-    VxSortFixture(VxSortFixture const&) = delete;
+    using TestParams = fullsort_test_params<T>;
+    std::vector<TestParams> tests;
 
-    void TestBody() override {
-        _fn();
+    for (auto p : fullsort_test_patterns()) {
+        for (auto i : multiply_range<i32>(start, stop, step)) {
+            for (auto j : range<i32>(-slack, slack, 1)) {
+                if ((i64)i + j <= 0)
+                    continue;
+                tests.push_back(fullsort_test_params<T>(p, i, j, first_value, value_stride));
+            }
+        }
     }
-
-private:
-    FunctionType _fn;
-};
-
-template <class Lambda, class... Args>
-void RegisterSingleTest(const char* test_suite_name, const char* test_name,
-                        const char* type_param, const char* value_param,
-                        const char* file, int line,
-                        Lambda&& fn, Args&&... args) {
-
-    testing::RegisterTest(
-            test_suite_name, test_name, type_param, value_param,
-            file, line,
-            [=]() mutable -> testing::Test* { return new VxSortFixture(
-                    [=]() mutable { fn(args...); });
-            });
+    return tests;
 }
 
-
 template <vector_machine M, i32 U, typename T>
-void register_fullsort_benchmarks(usize start, usize stop, usize step, T first_value, T value_stride) {
+void register_fullsort_tests(usize start, usize stop, usize step, T first_value, T value_stride) {
     if (step == 0) {
         throw std::invalid_argument("step for range must be non-zero");
     }
 
     if constexpr (U >= 2) {
-        register_fullsort_benchmarks<M, U / 2, T>(start, stop, step, first_value, value_stride);
+        register_fullsort_tests<M, U / 2, T>(start, stop, step, first_value, value_stride);
     }
 
     using VM = vxsort::vxsort_machine_traits<T, M>;
@@ -124,34 +115,22 @@ void register_fullsort_benchmarks(usize start, usize stop, usize step, T first_v
     constexpr i32 slack = sizeof(typename VM::TV) /  sizeof(T);
     static_assert(slack > 1);
 
-    std::vector<SortTestParams2<T>> tests;
-    size_t i = start;
-    for (auto p : test_patterns()) {
-        while ((step > 0) ? (i <= stop) : (i > stop)) {
-            for (auto j : range<int>(-slack, slack, 1)) {
-                if ((i64)i + j <= 0)
-                    continue;
-                tests.push_back(SortTestParams2<T>(p, i, j, first_value, value_stride));
-            }
-            i *= step;
-        }
-    }
+    auto tests = gen_params(start, stop, step, slack, first_value, value_stride);
 
     for (auto p : tests) {
         auto *test_type = get_canonical_typename<T>();
 
-        auto test_size = p.Size + p.Slack;
+        auto test_size = p.size + p.slack;
         auto test_name = fmt::format("vxsort_pattern_test<{}, {}, {}>/{}/{}", test_type, U,
-                                     magic_enum::enum_name(M), magic_enum::enum_name(p.Pattern), test_size);
+                                     magic_enum::enum_name(M), magic_enum::enum_name(p.pattern), test_size);
 
-        RegisterSingleTest(
+        RegisterSingleLambdaTest(
                 "fullsort", test_name.c_str(), nullptr,
-                std::to_string(p.Size).c_str(),
+                std::to_string(test_size).c_str(),
                 __FILE__, __LINE__,
-                vxsort_pattern_test<T, U, M>, p.Pattern, test_size, p.FirstValue, p.ValueStride);
+                vxsort_pattern_test<T, U, M>, p.pattern, test_size, p.first_value, p.stride);
     }
 }
-
 }
 
 #endif  // VXSORT_FULLSORT_TEST_H
