@@ -14,7 +14,7 @@
 namespace vxsort_tests {
 using namespace vxsort::types;
 
-enum class SortPattern {
+enum class sort_pattern {
     unique_values,
     shuffled_16_values,
     all_equal,

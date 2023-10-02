@@ -6,32 +6,45 @@
 namespace vxsort_tests {
 
 
-    void register_fullsort_avx2_i_tests();
-    void register_fullsort_avx512_i_tests();
-    void register_fullsort_avx2_u_tests();
-    void register_fullsort_avx2_f_tests();
-    void register_fullsort_avx512_u_tests();
-    void register_fullsort_avx512_f_tests();
+void register_fullsort_avx2_i_tests();
+void register_fullsort_avx512_i_tests();
+void register_fullsort_avx2_u_tests();
+void register_fullsort_avx2_f_tests();
+void register_fullsort_avx512_u_tests();
+void register_fullsort_avx512_f_tests();
 
-    void register_fullsort_test_matrix() {
+void register_smallsort_avx2_i_tests();
+void register_smallsort_avx512_i_tests();
+void register_smallsort_avx2_u_tests();
+void register_smallsort_avx2_f_tests();
+void register_smallsort_avx512_u_tests();
+void register_smallsort_avx512_f_tests();
+
+void register_fullsort_test_matrix() {
 
 #ifdef VXSORT_TEST_AVX2_I
-        register_fullsort_avx2_i_tests();
+    register_fullsort_avx2_i_tests();
+    register_smallsort_avx2_i_tests();
 #endif
 #ifdef VXSORT_TEST_AVX2_U
-        register_fullsort_avx2_u_tests();
+    register_fullsort_avx2_u_tests();
+    register_smallsort_avx2_u_tests();
 #endif
 #ifdef VXSORT_TEST_AVX2_F
-        register_fullsort_avx2_f_tests();
+    register_fullsort_avx2_f_tests();
+    register_smallsort_avx2_f_tests();
 #endif
 #ifdef VXSORT_TEST_AVX512_I
-        register_fullsort_avx512_i_tests();
+    register_fullsort_avx512_i_tests();
+    register_smallsort_avx512_i_tests();
 #endif
 #ifdef VXSORT_TEST_AVX512_U
-        register_fullsort_avx512_u_tests();
+    register_fullsort_avx512_u_tests();
+    register_smallsort_avx512_u_tests();
 #endif
 #ifdef VXSORT_TEST_AVX512_F
-        register_fullsort_avx512_f_tests();
+    register_fullsort_avx512_f_tests();
+    register_smallsort_avx512_f_tests();
 #endif
     }
 }  // namespace vxsort_tests
