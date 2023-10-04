@@ -81,9 +81,9 @@ std::vector<T> shuffled_16_values(usize size, T start, T stride) {
 }
 
 template <typename T>
-std::vector<T> all_equal(usize size, T start , T stride) {
+std::vector<T> all_equal(usize size, T start , T) {
     std::vector<T> v(size);
-    for (i32 i = 0; i < size; ++i)
+    for (usize i = 0; i < size; ++i)
         v.push_back(start);
     return v;
 }
@@ -167,6 +167,33 @@ const char *get_canonical_typename() {
 
     else
         return realname;
+}
+
+template <typename T>
+std::vector<T>
+generate_values_by_pattern(sort_pattern pattern, usize size, T first_value, T stride)
+{
+    switch (pattern) {
+        case sort_pattern::unique_values:
+            return unique_values<T>(size, first_value, stride);
+        case sort_pattern::shuffled_16_values:
+            return shuffled_16_values<T>(size, first_value, stride);
+        case sort_pattern::all_equal:
+            return all_equal<T>(size, first_value, stride);
+        case sort_pattern::ascending_int:
+            return ascending_int<T>(size, first_value, stride);
+        case sort_pattern::descending_int:
+            return descending_int<T>(size, first_value, stride);
+        case sort_pattern::pipe_organ:
+            return pipe_organ<T>(size, first_value, stride);
+        case sort_pattern::push_front:
+            return push_front<T>(size, first_value, stride);
+        case sort_pattern::push_middle:
+            return push_middle<T>(size, first_value, stride);
+        default:
+            throw std::invalid_argument("unknown sort pattern");
+    }
+
 }
 
 }
