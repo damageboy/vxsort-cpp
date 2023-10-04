@@ -21,7 +21,7 @@ void bitonic_machine_sort_pattern_test(sort_pattern pattern, usize size, T first
 
     using BM = vxsort::smallsort::bitonic_machine<T, M>;
 
-    auto V = unique_values<T>(size, first_value, stride);
+    auto V = generate_values_by_pattern<T>(pattern, size, first_value, stride);
 
     auto v_copy = std::vector<T>(V);
     auto begin = V.data();
@@ -40,7 +40,7 @@ template <class T, vector_machine M>
 void bitonic_sort_pattern_test(sort_pattern pattern, usize size, T first_value, T stride) {
     VXSORT_TEST_ISA();
 
-    auto V = unique_values<T>(size, first_value, stride);
+    auto V = generate_values_by_pattern<T>(pattern, size, first_value, stride);
 
     auto v_copy = std::vector<T>(V);
     auto begin = V.data();
@@ -57,8 +57,8 @@ void bitonic_sort_pattern_test(sort_pattern pattern, usize size, T first_value, 
 static inline std::vector<sort_pattern> smallsort_test_patterns() {
     return {
             sort_pattern::unique_values,
-            //sort_pattern::shuffled_16_values,
-            //sort_pattern::all_equal,
+            sort_pattern::shuffled_16_values,
+            sort_pattern::all_equal,
     };
 }
 
