@@ -74,7 +74,8 @@ template <typename T>
 std::vector<T> shuffled_16_values(usize size, T start, T stride) {
     std::vector<T> v(size);
     for (usize i = 0; i < size; ++i)
-        v.push_back(start + stride * (i % 16));
+        v[i] = start + stride * (i % 16);
+
     std::mt19937_64 rng(global_bench_random_seed);
     std::shuffle(v.begin(), v.end(), rng);
     return v;
@@ -84,7 +85,7 @@ template <typename T>
 std::vector<T> all_equal(usize size, T start , T) {
     std::vector<T> v(size);
     for (usize i = 0; i < size; ++i)
-        v.push_back(start);
+        v[i] = start;
     return v;
 }
 
@@ -92,7 +93,7 @@ template <typename T>
 std::vector<T> ascending_int(usize size, T start, T stride) {
     std::vector<T> v(size);
     for (usize i = 0; i < size; ++i)
-        v.push_back(start + stride * i);
+        v[i] = start + stride * i;
     return v;
 }
 
@@ -100,7 +101,7 @@ template <typename T>
 std::vector<T> descending_int(usize size, T start, T stride) {
     std::vector<T> v(size);
     for (isize i = size - 1; i >= 0; --i)
-        v.push_back(start + stride * i);
+        v[i] = start + stride * i;
     return v;
 }
 
@@ -108,9 +109,9 @@ template <typename T>
 std::vector<T> pipe_organ(usize size, T start, T stride) {
     std::vector<T> v(size);
     for (usize i = 0; i < size/2; ++i)
-        v.push_back(start + stride * i);
+        v[i] = start + stride * i;
     for (usize i = size/2; i < size; ++i)
-        v.push_back(start + (size - i) * stride);
+        v[i] = start + (size - i) * stride;
     return v;
 }
 
@@ -118,8 +119,8 @@ template <typename T>
 std::vector<T> push_front(usize size, T start, T stride) {
     std::vector<T> v(size);
     for (usize i = 1; i < size; ++i)
-        v.push_back(start + stride * i);
-    v.push_back(start);
+        v[i-1] = start + stride * i;
+    v[size-1] = start;
     return v;
 }
 
@@ -128,9 +129,9 @@ std::vector<T> push_middle(usize size, T start, T stride) {
     std::vector<T> v(size);
     for (usize i = 0; i < size; ++i) {
         if (i != size/2)
-            v.push_back(start + stride * i);
+            v[i] = start + stride * i;
     }
-    v.push_back(start + stride * (size/2));
+    v[size/2] = start + stride * (size/2);
     return v;
 }
 

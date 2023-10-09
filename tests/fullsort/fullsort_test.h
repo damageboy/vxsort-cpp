@@ -1,15 +1,15 @@
 #ifndef VXSORT_FULLSORT_TEST_H
 #define VXSORT_FULLSORT_TEST_H
 
+#include <fmt/format.h>
 #include <gtest/gtest.h>
 #include <algorithm>
-#include <vector>
-#include <fmt/format.h>
 #include <magic_enum.hpp>
+#include <vector>
 
-#include "../test_vectors.h"
 #include "../sort_fixtures.h"
 #include "../test_isa.h"
+#include "../test_vectors.h"
 #include "vxsort.h"
 
 namespace vxsort_tests {
@@ -59,9 +59,9 @@ void vxsort_hinted_test(std::vector<T>& V, T min_value, T max_value) {
 
 static inline std::vector<sort_pattern> fullsort_test_patterns() {
     return {
-            sort_pattern::unique_values,
-            //sort_pattern::shuffled_16_values,
-            //sort_pattern::all_equal,
+        sort_pattern::unique_values,
+        // sort_pattern::shuffled_16_values,
+        // sort_pattern::all_equal,
     };
 }
 
@@ -69,7 +69,11 @@ template <typename T>
 struct fullsort_test_params {
 public:
     fullsort_test_params(sort_pattern pattern, usize size, i32 slack, T first_value, T value_stride)
-            : pattern(pattern), size(size), slack(slack), first_value(first_value), stride(value_stride) {}
+        : pattern(pattern),
+          size(size),
+          slack(slack),
+          first_value(first_value),
+          stride(value_stride) {}
     sort_pattern pattern;
     usize size;
     i32 slack;
@@ -77,10 +81,13 @@ public:
     T stride;
 };
 
-template<typename T>
-std::vector<fullsort_test_params<T>>
-gen_params(usize start, usize stop, usize step, i32 slack, T first_value, T value_stride)
-{
+template <typename T>
+std::vector<fullsort_test_params<T>> gen_params(usize start,
+                                                usize stop,
+                                                usize step,
+                                                i32 slack,
+                                                T first_value,
+                                                T value_stride) {
     auto patterns = fullsort_test_patterns();
 
     using TestParams = fullsort_test_params<T>;
@@ -112,25 +119,26 @@ void register_fullsort_tests(usize start, usize stop, usize step, T first_value,
 
     // Test "slacks" are defined in terms of number of elements in the primitive size (T)
     // up to the number of such elements contained in one vector type (VM::TV)
-    constexpr i32 slack = sizeof(typename VM::TV) /  sizeof(T);
+    constexpr i32 slack = sizeof(typename VM::TV) / sizeof(T);
     static_assert(slack > 1);
 
     auto tests = gen_params(start, stop, step, slack, first_value, value_stride);
 
     for (auto p : tests) {
-        auto *test_type = get_canonical_typename<T>();
+        auto* test_type = get_canonical_typename<T>();
 
         auto test_size = p.size + p.slack;
-        auto test_name = fmt::format("vxsort_pattern_test<{}, {}, {}>/{}/{}", test_type, U,
-                                     magic_enum::enum_name(M), magic_enum::enum_name(p.pattern), test_size);
+        auto test_name =
+            fmt::format("vxsort_pattern_test<{}, {}, {}>/{}/{}", test_type, U,
+                        magic_enum::enum_name(M), magic_enum::enum_name(p.pattern), test_size);
 
-        RegisterSingleLambdaTest(
-                "fullsort", test_name.c_str(), nullptr,
-                std::to_string(test_size).c_str(),
-                __FILE__, __LINE__,
-                vxsort_pattern_test<T, U, M>, p.pattern, test_size, p.first_value, p.stride);
+        register_single_test_lambda(
+            "fullsort", test_name.c_str(), nullptr,
+            std::to_string(test_size).c_str(),
+            __FILE__, __LINE__,
+            vxsort_pattern_test<T, U, M>, p.pattern, test_size, p.first_value, p.stride);
     }
 }
-}
+}  // namespace vxsort_tests
 
 #endif  // VXSORT_FULLSORT_TEST_H
