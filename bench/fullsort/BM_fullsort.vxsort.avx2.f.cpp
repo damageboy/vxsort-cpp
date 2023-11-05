@@ -1,7 +1,7 @@
-    #include "vxsort_targets_enable_avx2.h"
+#include "vxsort_targets_enable_avx2.h"
 
-#include <random>
 #include <benchmark/benchmark.h>
+#include <random>
 
 #include <vxsort.avx2.h>
 
@@ -9,19 +9,12 @@
 
 namespace vxsort_bench {
 using namespace vxsort::types;
-using benchmark::TimeUnit;
 using vm = vxsort::vector_machine;
 
-BENCHMARK_TEMPLATE(BM_vxsort, f32, vm::AVX2,  1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_vxsort, f32, vm::AVX2,  2)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_vxsort, f32, vm::AVX2,  4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_vxsort, f32, vm::AVX2,  8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-
-BENCHMARK_TEMPLATE(BM_vxsort, f64, vm::AVX2,  1)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_vxsort, f64, vm::AVX2,  2)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_vxsort, f64, vm::AVX2,  4)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-BENCHMARK_TEMPLATE(BM_vxsort, f64, vm::AVX2,  8)->RangeMultiplier(2)->Range(MIN_SORT, MAX_SORT)->Unit(kMillisecond)->ThreadRange(1, processor_count);
-
+void register_fullsort_avx2_f_benchmarks() {
+    register_fullsort_benchmarks<vm::AVX2, 8, f32, f64>();
 }
+
+}  // namespace vxsort_bench
 
 #include "vxsort_targets_disable.h"

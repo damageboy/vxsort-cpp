@@ -1,63 +1,62 @@
-#ifndef VXSORT_BENCH_UTIL_H
-#define VXSORT_BENCH_UTIL_H
-
-#include <benchmark/benchmark.h>
-
-#include <defs.h>
+#ifndef VXSORT_TEST_UTIL_H
+#define VXSORT_TEST_UTIL_H
 
 #include <vector>
 #include <algorithm>
 #include <numeric>
 #include <random>
-#include <cstring>
 #ifndef VXSORT_COMPILER_MSVC
 #include <cxxabi.h>
 #endif
+#include <cstring>
+#include <defs.h>
 
-
-#include "stolen-cycleclock.h"
-
-using namespace benchmark;
-
-namespace vxsort_bench {
-
+namespace vxsort_tests {
 using namespace vxsort::types;
 
-Counter make_time_per_n_counter(i64 n);
+enum class sort_pattern {
+    unique_values,
+    shuffled_16_values,
+    all_equal,
+    ascending_int,
+    descending_int,
+    pipe_organ,
+    push_front,
+    push_middle
+};
 
-Counter make_cycle_per_n_counter(f64 n);
+const std::random_device::result_type global_bench_random_seed = 666;
 
-std::string get_crypto_hash(void *start, void *end);
+template <typename IntType>
+std::vector<IntType> range(IntType start, IntType stop, IntType step) {
+    if (step == IntType(0)) {
+        throw std::invalid_argument("step for range must be non-zero");
+    }
 
-void process_perf_counters(UserCounters &counters, i64 num_elements);
+    std::vector<IntType> result;
+    IntType i = start;
+    while ((step > 0) ? (i <= stop) : (i > stop)) {
+        result.push_back(i);
+        i += step;
+    }
 
-extern std::random_device::result_type global_bench_random_seed;
-
-template <typename T>
-void refresh_copies(std::vector<std::vector<T>> &copies, std::vector<T>& orig) {
-    const auto begin = orig.begin();
-    const auto end = orig.end();
-    const auto num_copies = copies.size();
-    for (usize i = 0; i < num_copies; i++)
-        copies[i].assign(begin, end);
+    return result;
 }
 
-template <typename T>
-std::vector<std::vector<T>> generate_copies(usize num_copies, i64 n, std::vector<T>& orig) {
-    std::vector<std::vector<T>> copies(num_copies);
-    for (usize i = 0; i < num_copies; i++)
-        copies[i] = std::vector<T>(n);
-    refresh_copies(copies, orig);
-    return copies;
-}
+template <typename IntType>
+std::vector<IntType> multiply_range(IntType start, IntType stop, IntType step) {
+    if (step == IntType(0)) {
+        throw std::invalid_argument("step for range must be non-zero");
+    }
 
-template <typename T, typename U=T>
-std::vector<U *> generate_array_beginnings(std::vector<std::vector<T>> &copies) {
-    const auto num_copies = copies.size();
-    std::vector<U*> begins(num_copies);
-    for (usize i = 0; i < num_copies; i++)
-        begins[i] = (U*)copies[i].data();
-    return begins;
+    std::vector<IntType> result;
+    IntType i = start;
+    while ((step > 0) ? (i <= stop) : (i > stop)) {
+        result.push_back(i);
+        i *= step;
+    }
+
+    return result;
 }
 
 template <typename T>
@@ -166,11 +165,38 @@ const char *get_canonical_typename() {
         return "f32";
     else if (std::strcmp(realname, "double") == 0)
         return "f64";
+
     else
         return realname;
 }
 
+template <typename T>
+std::vector<T>
+generate_values_by_pattern(sort_pattern pattern, usize size, T first_value, T stride)
+{
+    switch (pattern) {
+        case sort_pattern::unique_values:
+            return unique_values<T>(size, first_value, stride);
+        case sort_pattern::shuffled_16_values:
+            return shuffled_16_values<T>(size, first_value, stride);
+        case sort_pattern::all_equal:
+            return all_equal<T>(size, first_value, stride);
+        case sort_pattern::ascending_int:
+            return ascending_int<T>(size, first_value, stride);
+        case sort_pattern::descending_int:
+            return descending_int<T>(size, first_value, stride);
+        case sort_pattern::pipe_organ:
+            return pipe_organ<T>(size, first_value, stride);
+        case sort_pattern::push_front:
+            return push_front<T>(size, first_value, stride);
+        case sort_pattern::push_middle:
+            return push_middle<T>(size, first_value, stride);
+        default:
+            throw std::invalid_argument("unknown sort pattern");
+    }
 
 }
 
-#endif //VXSORT_BENCH_UTIL_H
+}
+
+#endif

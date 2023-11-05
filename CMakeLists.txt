@@ -19,7 +19,7 @@ set(VXSORT_USE_LINKER "" CACHE STRING "Custom linker for -fuse-ld=...")
 find_program(CCACHE_PROGRAM ccache)
 if(CCACHE_PROGRAM AND ${VXSORT_CCACHE})
     message("ccache detected - using ccache to cache object files across compilations")
-    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CCACHE_PROGRAM}")    
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CCACHE_PROGRAM}")
 endif()
 
 # Make sure we can import out CMake functions
@@ -203,8 +203,8 @@ CPMAddPackage(
 CPMAddPackage(
         NAME googletest
         GITHUB_REPOSITORY google/googletest
-        GIT_TAG v1.13.0
-        VERSION 1.13.0
+        GIT_TAG v1.14.0
+        VERSION 1.14.0
         OPTIONS "BUILD_GMOCK OFF" "INSTALL_GTEST OFF" "gtest_force_shared_crt"
         OVERRIDE_FIND_PACKAGE
 )
@@ -214,7 +214,8 @@ CPMAddPackage(
         GIT_TAG main
         OPTIONS "BUILD_TESTING OFF"
 )
-CPMAddPackage("gh:fmtlib/fmt#9.1.0")
+CPMAddPackage("gh:fmtlib/fmt#10.1.1")
+CPMAddPackage("gh:Neargye/magic_enum#v0.9.2")
 CPMAddPackage("gh:okdshin/PicoSHA2#master")
 
 enable_testing()

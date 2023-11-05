@@ -23,8 +23,7 @@ static void BM_bitonic_sort(benchmark::State& state) {
 
     static const i32 ITERATIONS = 1024;
     auto n = state.range(0);
-    auto v = std::vector<Q>(n);
-    generate_unique_values_vec(v, (Q)0x1000, (Q)0x8);
+    auto v = unique_values(n, (Q) 0x1000, (Q) 0x8);
 
     auto copies = generate_copies(ITERATIONS, n, v);
     auto begins = generate_array_beginnings(copies);
@@ -59,8 +58,7 @@ static void BM_bitonic_machine(benchmark::State& state) {
 
     static const i32 ITERATIONS = 1024;
     auto n = N * BM::N;
-    auto v = std::vector<Q>(n);
-    generate_unique_values_vec(v, (Q)0x1000, (Q)0x8);
+    auto v = unique_values(n, (Q) 0x1000, (Q) 0x8);
 
     auto copies = generate_copies(ITERATIONS, n, v);
     auto begins = generate_array_beginnings(copies);
