@@ -197,7 +197,7 @@ jobs:
       uses: dorny/test-reporter@v1
       if:  steps.check_cpu.outputs.has_avx2 == 1 || steps.check_cpu.outputs.has_avx512 == 1
       env:
-        NODE_OPTIONS: --max-old-space-size=4096
+        NODE_OPTIONS: --max-old-space-size=4096 --stack-size=2048
       with:
         name: tests/${{ matrix.config.name}}
         path: build/tests/junit/*.xml
