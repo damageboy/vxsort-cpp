@@ -1,0 +1,18 @@
+[project]
+name = "vxsort-cpp"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pyfunctional",
+    "pandas",
+    "ipython",
+    "z3-solver>=4.14.1.0",
+    "pytest>=8.3.5",
+    "pytest-cov>=7.0.0",
+]
+
+[tool.ruff]
+line-length = 240
+indent-width = 4
