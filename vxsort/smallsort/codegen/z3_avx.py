@@ -1,54 +1,43 @@
 import sys
-from z3.z3 import BitVecNumRef, BitVecRef, BitVec, BitVecVal, Solver, Extract, Concat, If, LShR, ZeroExt, simplify
+from typing import Any
+from z3.z3 import SeqRef, BitVecNumRef, BitVecRef, BitVec, BitVecVal, Solver, Extract, Concat, If, LShR, ZeroExt, simplify
 
 zero = 0
 
 
-def ymm_reg(name):
+def ymm_reg(name: str):
     return BitVec(name, 32 * 8)
 
-
-def ymm_reg_with_32b_values(name, s, raw_values):
-    assert len(raw_values) == 8
-    # Wrap them as 32-bit BitVecVals constraints
-    bv_elemes = [BitVec(f"{name}_l_{i:02}", 32) for i in range(8)]
-    for i, raw_value in enumerate(raw_values):
-        s.add(bv_elemes[i] == BitVecVal(raw_value, 32))
-    return simplify(Concat(bv_elemes[::-1]))
-
-
-def zmm_reg(name):
+def zmm_reg(name: str):
     return BitVec(name, 64 * 8)
 
-
-def zmm_reg_with_32b_values(name, s, raw_values):
-    assert len(raw_values) == 16
-    # Wrap them as 32-bit BitVecVals constraints
-    bv_elemes = [BitVec(f"{name}_l_{i:02}", 32) for i in range(16)]
+def reg_with_values(name: str, s: Solver, raw_values, element_bits: int , total_bits: int):
+    lanes = total_bits // element_bits
+    assert len(raw_values) == lanes, f"Expected {lanes} values for {element_bits}-bit elements in {total_bits}-bit register, got {len(raw_values)}"
+    
+    # Create BitVec elements for each lane
+    bv_elements = [BitVec(f"{name}_l_{i:02}", element_bits) for i in range(lanes)]
+    
+    # Add constraints for each element
     for i, raw_value in enumerate(raw_values):
-        s.add(bv_elemes[i] == BitVecVal(raw_value, 32))
-    return simplify(Concat(bv_elemes[::-1]))
+        s.add(bv_elements[i] == BitVecVal(raw_value, element_bits))
+    
+    return simplify(Concat(bv_elements[::-1]))
 
 
-def ymm_reg_with_64b_values(name, s, raw_values):
-    assert len(raw_values) == 4
-    # Wrap them as 64-bit BitVecVals constraints
-    bv_elemes = [BitVec(f"{name}_l_{i:02}", 64) for i in range(4)]
-    for i, raw_value in enumerate(raw_values):
-        s.add(bv_elemes[i] == BitVecVal(raw_value, 64))
-    return simplify(Concat(bv_elemes[::-1]))
+def ymm_reg_with_32b_values(name: str, s: Solver, raw_values):
+    return reg_with_values(name, s, raw_values, 32, 256)
 
+def zmm_reg_with_32b_values(name: str, s: Solver, raw_values):
+    return reg_with_values(name, s, raw_values, 32, 512)
 
-def zmm_reg_with_64b_values(name, s, raw_values):
-    assert len(raw_values) == 8
-    # Wrap them as 64-bit BitVecVals constraints
-    bv_elemes = [BitVec(f"{name}_l_{i:02}", 64) for i in range(8)]
-    for i, raw_value in enumerate(raw_values):
-        s.add(bv_elemes[i] == BitVecVal(raw_value, 64))
-    return simplify(Concat(bv_elemes[::-1]))
+def ymm_reg_with_64b_values(name: str, s: Solver, raw_values):
+    return reg_with_values(name, s, raw_values, 64, 256)
 
+def zmm_reg_with_64b_values(name: str, s: Solver, raw_values):
+    return reg_with_values(name, s, raw_values, 64, 512)
 
-def _reg_with_unique_values(name, s, lanes, bits):
+def _reg_with_unique_values(name: str, s: Solver, lanes: int, bits: int):
     """
     Create a register with given number of lanes and element width, ensuring each lane is unique.
     """
@@ -67,44 +56,17 @@ def _reg_with_unique_values(name, s, lanes, bits):
     return reg
 
 
-def ymm_reg_with_unique_values(name, s, bits):
-    """Create a YMM register with unique symbolic values.
-    
-    Args:
-        name: Register name
-        s: Z3 Solver
-        bits: Element width in bits (32 or 64)
-    """
+def ymm_reg_with_unique_values(name: str, s: Solver, bits: int):
     lanes = 256 // bits
     return _reg_with_unique_values(name, s, lanes=lanes, bits=bits)
 
 
-def zmm_reg_with_unique_values(name, s, bits):
-    """Create a ZMM register with unique symbolic values.
-    
-    Args:
-        name: Register name
-        s: Z3 Solver
-        bits: Element width in bits (32 or 64)
-    """
+def zmm_reg_with_unique_values(name: str, s: Solver, bits: int):
     lanes = 512 // bits
     return _reg_with_unique_values(name, s, lanes=lanes, bits=bits)
 
 
-def ymm_reg_pair_with_unique_values(name_prefix, s, bits):
-    """Create a pair of YMM registers with globally unique symbolic values.
-    
-    Creates two YMM registers where all elements are unique both within each
-    register and across both registers (global uniqueness).
-    
-    Args:
-        name_prefix: Prefix for register names (will create name_prefix1 and name_prefix2)
-        s: Z3 Solver to add constraints to
-        bits: Element width in bits (32 or 64)
-        
-    Returns:
-        Tuple of (reg1, reg2) both with globally unique values
-    """
+def ymm_reg_pair_with_unique_values(name_prefix: str, s: Solver, bits: int):
     # Create two registers with internal uniqueness
     reg1 = ymm_reg_with_unique_values(f"{name_prefix}1", s, bits)
     reg2 = ymm_reg_with_unique_values(f"{name_prefix}2", s, bits)
@@ -122,20 +84,7 @@ def ymm_reg_pair_with_unique_values(name_prefix, s, bits):
     return reg1, reg2
 
 
-def zmm_reg_pair_with_unique_values(name_prefix, s, bits):
-    """Create a pair of ZMM registers with globally unique symbolic values.
-    
-    Creates two ZMM registers where all elements are unique both within each
-    register and across both registers (global uniqueness).
-    
-    Args:
-        name_prefix: Prefix for register names (will create name_prefix1 and name_prefix2)
-        s: Z3 Solver to add constraints to
-        bits: Element width in bits (32 or 64)
-        
-    Returns:
-        Tuple of (reg1, reg2) both with globally unique values
-    """
+def zmm_reg_pair_with_unique_values(name_prefix: str, s: Solver, bits: int):
     # Create two registers with internal uniqueness
     reg1 = zmm_reg_with_unique_values(f"{name_prefix}1", s, bits)
     reg2 = zmm_reg_with_unique_values(f"{name_prefix}2", s, bits)
@@ -153,32 +102,15 @@ def zmm_reg_pair_with_unique_values(name_prefix, s, bits):
     return reg1, reg2
 
 
-def construct_ymm_reg_from_elements(bits, element_specs):
-    """Construct a YMM register from specified elements of source registers.
-    
-    Args:
-        bits: Element width in bits (32 or 64)
-        element_specs: List of (register, element_index) tuples specifying which
-                      elements to extract. element_index is 0-based within the 
-                      source register (0-7 for 32-bit, 0-3 for 64-bit elements).
-                      The list should contain exactly 256//bits elements.
-                      
-    Returns:
-        A YMM register constructed by concatenating the specified elements
-        in the order given (with Z3's MSB-first Concat ordering)
-        
-    Example:
-        # Create [op1[0], op1[1], op2[0], op2[1], op1[4], op1[5], op2[4], op2[5]]
-        construct_ymm_reg_from_elements(32, [
-            (op1, 0), (op1, 1), (op2, 0), (op2, 1),
-            (op1, 4), (op1, 5), (op2, 4), (op2, 5)
-        ])
-    """
-    lanes = 256 // bits
-    assert len(element_specs) == lanes, f"Expected {lanes} element specs for {bits}-bit elements, got {len(element_specs)}"
+# Type definition for element specifications
+ElementSpecs = list[tuple[BitVecRef, int]]
+
+def construct_reg_from_elements(bits: int, element_specs: ElementSpecs, total_bits: int):
+    lanes = total_bits // bits
+    assert len(element_specs) == lanes, f"Expected {lanes} element specs for {bits}-bit elements in {total_bits}-bit register, got {len(element_specs)}"
     
     # Extract each specified element
-    elements = []
+    elements: list[BitVecRef | SeqRef] = []
     for reg, elem_idx in element_specs:
         assert 0 <= elem_idx < lanes, f"Element index {elem_idx} out of range for {bits}-bit elements (0-{lanes-1})"
         start_bit = elem_idx * bits
@@ -189,58 +121,15 @@ def construct_ymm_reg_from_elements(bits, element_specs):
     return simplify(Concat(elements[::-1]))
 
 
-def construct_zmm_reg_from_elements(bits, element_specs):
-    """Construct a ZMM register from specified elements of source registers.
-    
-    Args:
-        bits: Element width in bits (32 or 64)
-        element_specs: List of (register, element_index) tuples specifying which
-                      elements to extract. element_index is 0-based within the 
-                      source register (0-15 for 32-bit, 0-7 for 64-bit elements).
-                      The list should contain exactly 512//bits elements.
-                      
-    Returns:
-        A ZMM register constructed by concatenating the specified elements
-        in the order given (with Z3's MSB-first Concat ordering)
-        
-    Example:
-        # Create [op1[0], op1[1], op2[0], op2[1], ..., op1[12], op1[13], op2[12], op2[13]]
-        construct_zmm_reg_from_elements(32, [
-            (op1, 0), (op1, 1), (op2, 0), (op2, 1),   # Lane 0
-            (op1, 4), (op1, 5), (op2, 4), (op2, 5),   # Lane 1
-            (op1, 8), (op1, 9), (op2, 8), (op2, 9),   # Lane 2
-            (op1, 12), (op1, 13), (op2, 12), (op2, 13) # Lane 3
-        ])
-    """
-    lanes = 512 // bits
-    assert len(element_specs) == lanes, f"Expected {lanes} element specs for {bits}-bit elements, got {len(element_specs)}"
-    
-    # Extract each specified element
-    elements = []
-    for reg, elem_idx in element_specs:
-        assert 0 <= elem_idx < lanes, f"Element index {elem_idx} out of range for {bits}-bit elements (0-{lanes-1})"
-        start_bit = elem_idx * bits
-        end_bit = start_bit + bits - 1
-        elements.append(Extract(end_bit, start_bit, reg))
-    
-    # Concatenate in reverse order for Z3 (MSB first)
-    return simplify(Concat(elements[::-1]))
+def construct_ymm_reg_from_elements(bits: int, element_specs: ElementSpecs):
+    return construct_reg_from_elements(bits, element_specs, 256)
 
 
-def _reg_reversed(name, s, original_reg, lanes, bits):
-    """
-    Create a register that is constrained to be the reverse of the original register.
-    
-    Args:
-        name: Name for the new register
-        s: Z3 Solver to add constraints to
-        original_reg: The original register to reverse
-        lanes: Number of lanes in the register
-        bits: Bits per lane
-    
-    Returns:
-        A new register constrained to be the reverse of original_reg
-    """
+def construct_zmm_reg_from_elements(bits: int, element_specs: ElementSpecs):
+    return construct_reg_from_elements(bits, element_specs, 512)
+
+
+def _reg_reversed(name: str, s: Solver, original_reg, lanes: int, bits: int):
     assert lanes * bits == 256 or lanes * bits == 512, "Total register size can only be 256 or 512 bits"
     
     # Create a new register
@@ -913,7 +802,6 @@ def vpermilps_lane(lane_idx: int, a: BitVecRef, ctrl01: BitVecRef, ctrl23: BitVe
     chunks[3] = _select4_ps(src_lane, ctrl67)
     return chunks
 
-
 def vpermilpd_lane(lane_idx: int, a: BitVecRef, ctrl0: BitVecRef, ctrl1: BitVecRef):
     src_lane = extract_128b_lane(a, lane_idx)
 
@@ -933,6 +821,18 @@ def vshufps_lane(lane_idx: int, a: BitVecRef, b: BitVecRef, ctrl01: BitVecRef, c
     chunks[3] = _select4_ps(b_lane, ctrl67)
     return chunks
 
+def vshufpd_lane(lane_idx: int, a: BitVecRef, b: BitVecRef, imm: BitVecRef):
+    a_lane = extract_128b_lane(a, lane_idx)
+    b_lane = extract_128b_lane(b, lane_idx)
+
+    # Each lane uses 2 control bits: lane i uses imm[2*i] and imm[2*i+1]
+    ctrl0 = Extract(2 * lane_idx, 2 * lane_idx, imm)      # Controls selection from a
+    ctrl1 = Extract(2 * lane_idx + 1, 2 * lane_idx + 1, imm)  # Controls selection from b
+
+    chunks: list[BitVecRef|None] = [None] * 2
+    chunks[0] = _select2_pd(a_lane, ctrl0)
+    chunks[1] = _select2_pd(b_lane, ctrl1)
+    return chunks
 
 # AVX2: vpermilps/vpshufd/AVX-512 (_mm512_permute_ps/_mm512_shuffle_epi32)
 def _mm256_permute_ps(op1: BitVecRef, imm8: BitVecRef | int):
@@ -952,7 +852,6 @@ def _mm256_permute_ps(op1: BitVecRef, imm8: BitVecRef | int):
     flat_chunks = [e for sublist in chunks_128b for e in sublist]
     return simplify(Concat(flat_chunks[::-1])) # MSBs go first (for Z3)
 
-
 # AVX512:  vpermilps/vpshufd (_mm512_permute_ps/_mm512_shuffle_epi32)
 def _mm512_permute_ps(op1: BitVecRef, imm8: BitVecRef | int):
     """
@@ -968,7 +867,6 @@ def _mm512_permute_ps(op1: BitVecRef, imm8: BitVecRef | int):
     chunks_128b = [vpermilps_lane(lane_idx, a, ctrl01, ctrl23, ctrl45, ctrl67) for lane_idx in range(4)]
     flat_chunks = [e for sublist in chunks_128b for e in sublist]
     return simplify(Concat(flat_chunks[::-1]))  # Reverse for Z3
-
 
 # AVX-2: vpermilpd (_mm256_permute_pd)
 def _mm256_permute_pd(op1: BitVecRef, imm8: BitVecRef | int):
@@ -1090,6 +988,56 @@ def _mm512_shuffle_ps(op1: BitVecRef, op2: BitVecRef, imm8: BitVecRef | int):
     ctrl01, ctrl23, ctrl45, ctrl67 = _extract_ctl4(imm)
 
     chunks_128b = [vshufps_lane(lane_idx, op1, op2, ctrl01, ctrl23, ctrl45, ctrl67) for lane_idx in range(4)]
+    flat_chunks = [e for sublist in chunks_128b for e in sublist]
+    return simplify(Concat(flat_chunks[::-1])) # MSBs go first (for Z3)
+
+
+# AVX2: vshufpd (_mm256_shuffle_pd)
+def _mm256_shuffle_pd(op1: BitVecRef, op2: BitVecRef, imm8: BitVecRef | int):
+    """
+    Shuffle double-precision (64-bit) floating-point elements within 128-bit lanes using the control in imm8, and store the results in dst.
+    Implements __m256d _mm256_shuffle_pd (__m256d a, __m256d b, const int imm8)
+    according to the Intel spec.
+
+    Operation:
+    ```
+    dst[63:0] := (imm8[0] == 0) ? a[63:0] : a[127:64]
+    dst[127:64] := (imm8[1] == 0) ? b[63:0] : b[127:64]
+    dst[191:128] := (imm8[2] == 0) ? a[191:128] : a[255:192]
+    dst[255:192] := (imm8[3] == 0) ? b[191:128] : b[255:192]
+    dst[MAX:256] := 0
+    ```
+    """
+    imm = imm8 if isinstance(imm8, BitVecRef) else BitVecVal(imm8, 8)
+
+    chunks_128b = [vshufpd_lane(lane_idx, op1, op2, imm) for lane_idx in range(2)]
+    flat_chunks = [e for sublist in chunks_128b for e in sublist]
+    return simplify(Concat(flat_chunks[::-1])) # MSBs go first (for Z3)
+
+
+# AVX512: vshufpd (_mm512_shuffle_pd)
+def _mm512_shuffle_pd(op1: BitVecRef, op2: BitVecRef, imm8: BitVecRef | int):
+    """
+    Shuffle double-precision (64-bit) floating-point elements within 128-bit lanes using the control in imm8, and store the results in dst.
+    Implements __m512d _mm512_shuffle_pd (__m512d a, __m512d b, const int imm8)
+    according to the Intel spec.
+
+    Operation:
+    ```
+    dst[63:0] := (imm8[0] == 0) ? a[63:0] : a[127:64]
+    dst[127:64] := (imm8[1] == 0) ? b[63:0] : b[127:64]
+    dst[191:128] := (imm8[2] == 0) ? a[191:128] : a[255:192]
+    dst[255:192] := (imm8[3] == 0) ? b[191:128] : b[255:192]
+    dst[319:256] := (imm8[4] == 0) ? a[319:256] : a[383:320]
+    dst[383:320] := (imm8[5] == 0) ? b[319:256] : b[383:320]
+    dst[447:384] := (imm8[6] == 0) ? a[447:384] : a[511:448]
+    dst[511:448] := (imm8[7] == 0) ? b[447:384] : b[511:448]
+    dst[MAX:512] := 0
+    ```
+    """
+    imm = imm8 if isinstance(imm8, BitVecRef) else BitVecVal(imm8, 8)
+
+    chunks_128b = [vshufpd_lane(lane_idx, op1, op2, imm) for lane_idx in range(4)]
     flat_chunks = [e for sublist in chunks_128b for e in sublist]
     return simplify(Concat(flat_chunks[::-1])) # MSBs go first (for Z3)
 
