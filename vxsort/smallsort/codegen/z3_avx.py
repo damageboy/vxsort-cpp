@@ -172,7 +172,7 @@ def to_num(v):
     return d
 
 
-def _MM_SHUFFLE2(x, y):
+def _MM_SHUFFLE2(x: int, y: int) -> int:
     """
     Mimics the standard _MM_SHUFFLE2 intrinsic macro.
     Returns (x << 1) | y
@@ -180,7 +180,7 @@ def _MM_SHUFFLE2(x, y):
     return (x << 1) | y
 
 
-def _MM_SHUFFLE(z, y, x, w):
+def _MM_SHUFFLE(z: int, y: int, x: int, w: int) -> int:
     """
     Mimics the standard _MM_SHUFFLE intrinsic macro.
     Returns (z<<6) | (y<<4) | (x<<2) | w
@@ -190,6 +190,67 @@ def _MM_SHUFFLE(z, y, x, w):
 
 ##
 # Single vector variable permutes
+
+def _create_element_selector(source_reg: BitVecRef, idx_bits: BitVecRef, num_elements: int, element_bits: int) -> BitVecRef:
+    """
+    Create a balanced tree of If statements for element selection.
+    
+    Args:
+        source_reg: The source register to select elements from
+        idx_bits: The index bits extracted from the index register
+        num_elements: Number of elements to choose from (2, 4, 8, 16)
+        element_bits: Number of bits per element (32 or 64)
+    
+    Returns:
+        A Z3 expression that selects the appropriate element based on idx_bits
+    """
+    # Extract all elements
+    elements: list[BitVecRef | SeqRef] = []
+    for i in range(num_elements):
+        start_bit = i * element_bits
+        end_bit = start_bit + element_bits - 1
+        elements.append(Extract(end_bit, start_bit, source_reg))
+    
+    # Create balanced tree of If statements
+    return _create_if_tree(idx_bits, elements)
+
+
+def _create_if_tree(idx_bits: BitVecRef, elements: list[BitVecRef | SeqRef]):
+    """
+    Create nested If statements for element selection.
+    """    
+    
+    assert len(elements) > 0, "Can't have 0 elements"
+    end_idx = len(elements) - 1
+
+    # Create nested If statements like the original code
+    result = elements[end_idx]  # Default case
+    for i in range(end_idx - 1, -1, -1):
+        result = If(idx_bits == i, elements[i], result)
+    
+    return result
+
+
+def _create_two_source_element_selector(a: BitVecRef, b: BitVecRef, offset_bits: BitVecRef, source_selector: BitVecRef, num_elements: int, element_bits: int) -> BitVecRef:
+    """
+    Create element selector for two-source permutation (permutex2var).
+    
+    Args:
+        source_a: First source register
+        source_b: Second source register  
+        offset_bits: Bits specifying which element to select from the chosen source
+        source_selector: Bit specifying which source to choose from (0=a, 1=b)
+        num_elements: Number of elements in each source register
+        element_bits: Number of bits per element
+    
+    Returns:
+        A Z3 expression that selects the appropriate element
+    """
+    # First select the source vector based on source_selector
+    selected_source = If(source_selector == 0, a, b)
+    
+    # Then select element from the chosen source based on offset
+    return _create_element_selector(selected_source, offset_bits, num_elements, element_bits)
 
 
 # AVX2: vpermd/_mm256_permutevar_epi32
@@ -218,39 +279,8 @@ def _mm256_permutexvar_epi32(op1: BitVecRef, op_idx: BitVecRef):
         # Extract 3 bits for index: idx[i+2:i] (need 3 bits to represent 0-7)
         idx_bits = Extract(i + 2, i, op_idx)
 
-        # Use nested If statements to handle each possible index value (0-7)
-        # Each index selects a different 32-bit chunk from the input
-        elems[j] = simplify(
-            If(
-                idx_bits == 0,
-                Extract(1 * 32 - 1, 0 * 32, op1),
-                If(
-                    idx_bits == 1,
-                    Extract(2 * 32 - 1, 1 * 32, op1),
-                    If(
-                        idx_bits == 2,
-                        Extract(3 * 32 - 1, 2 * 32, op1),
-                        If(
-                            idx_bits == 3,
-                            Extract(4 * 32 - 1, 3 * 32, op1),
-                            If(
-                                idx_bits == 4,
-                                Extract(5 * 32 - 1, 4 * 32, op1),
-                                If(
-                                    idx_bits == 5,
-                                    Extract(6 * 32 - 1, 5 * 32, op1),
-                                    If(
-                                        idx_bits == 6,
-                                        Extract(7 * 32 - 1, 6 * 32, op1),
-                                        Extract(8 * 32 - 1, 7 * 32, op1),  # idx_bits == 7
-                                    ),
-                                ),
-                            ),
-                        ),
-                    ),
-                ),
-            )
-        )
+        # Use the generic element selector instead of nested If statements
+        elems[j] = _create_element_selector(op1, idx_bits, 8, 32)
 
     return simplify(Concat(elems[::-1]))
 
@@ -282,71 +312,8 @@ def _mm512_permutexvar_epi32(op1: BitVecRef, op_idx: BitVecRef):
         # Extract 4 bits for index: idx[i+3:i] as per pseudocode
         idx_bits = Extract(i + 3, i, op_idx)
 
-        # Use nested If statements to handle each possible index value (0-15)
-        # Each index selects a different 32-bit chunk from the input
-        chunks[j] = simplify(
-            If(
-                idx_bits == 0,
-                Extract(1 * 32 - 1, 0 * 32, op1),
-                If(
-                    idx_bits == 1,
-                    Extract(2 * 32 - 1, 1 * 32, op1),
-                    If(
-                        idx_bits == 2,
-                        Extract(3 * 32 - 1, 2 * 32, op1),
-                        If(
-                            idx_bits == 3,
-                            Extract(4 * 32 - 1, 3 * 32, op1),
-                            If(
-                                idx_bits == 4,
-                                Extract(5 * 32 - 1, 4 * 32, op1),
-                                If(
-                                    idx_bits == 5,
-                                    Extract(6 * 32 - 1, 5 * 32, op1),
-                                    If(
-                                        idx_bits == 6,
-                                        Extract(7 * 32 - 1, 6 * 32, op1),
-                                        If(
-                                            idx_bits == 7,
-                                            Extract(8 * 32 - 1, 7 * 32, op1),
-                                            If(
-                                                idx_bits == 8,
-                                                Extract(9 * 32 - 1, 8 * 32, op1),
-                                                If(
-                                                    idx_bits == 9,
-                                                    Extract(10 * 32 - 1, 9 * 32, op1),
-                                                    If(
-                                                        idx_bits == 10,
-                                                        Extract(11 * 32 - 1, 10 * 32, op1),
-                                                        If(
-                                                            idx_bits == 11,
-                                                            Extract(12 * 32 - 1, 11 * 32, op1),
-                                                            If(
-                                                                idx_bits == 12,
-                                                                Extract(13 * 32 - 1, 12 * 32, op1),
-                                                                If(
-                                                                    idx_bits == 13,
-                                                                    Extract(14 * 32 - 1, 13 * 32, op1),
-                                                                    If(
-                                                                        idx_bits == 14,
-                                                                        Extract(15 * 32 - 1, 14 * 32, op1),
-                                                                        Extract(16 * 32 - 1, 15 * 32, op1),  # idx_bits == 15
-                                                                    ),
-                                                                ),
-                                                            ),
-                                                        ),
-                                                    ),
-                                                ),
-                                            ),
-                                        ),
-                                    ),
-                                ),
-                            ),
-                        ),
-                    ),
-                ),
-            )
-        )
+        # Use the generic element selector instead of nested If statements
+        chunks[j] = _create_element_selector(op1, idx_bits, 16, 32)
 
     return simplify(Concat(chunks[::-1]))
 
@@ -377,82 +344,10 @@ def _mm512_permutex2var_epi32(a: BitVecRef, idx: BitVecRef, b: BitVecRef):
         offset_bits = Extract(i + 3, i, idx)
         
         # Extract source selector: idx[i+4] (1 bit to choose between a and b)
-        source_selector = Extract(i + 4, i + 4, idx)
+        source = Extract(i + 4, i + 4, idx)
 
-        # First select the source vector based on source_selector
-        # source_selector == 0 -> choose from a, source_selector == 1 -> choose from b
-        selected_source = simplify(
-            If(
-                source_selector == 0,
-                a,
-                b
-            )
-        )
-
-        # Then select element from the chosen source based on offset
-        elements[j] = simplify(
-            If(
-                offset_bits == 0,
-                Extract(1 * 32 - 1, 0 * 32, selected_source),
-                If(
-                    offset_bits == 1,
-                    Extract(2 * 32 - 1, 1 * 32, selected_source),
-                    If(
-                        offset_bits == 2,
-                        Extract(3 * 32 - 1, 2 * 32, selected_source),
-                        If(
-                            offset_bits == 3,
-                            Extract(4 * 32 - 1, 3 * 32, selected_source),
-                            If(
-                                offset_bits == 4,
-                                Extract(5 * 32 - 1, 4 * 32, selected_source),
-                                If(
-                                    offset_bits == 5,
-                                    Extract(6 * 32 - 1, 5 * 32, selected_source),
-                                    If(
-                                        offset_bits == 6,
-                                        Extract(7 * 32 - 1, 6 * 32, selected_source),
-                                        If(
-                                            offset_bits == 7,
-                                            Extract(8 * 32 - 1, 7 * 32, selected_source),
-                                            If(
-                                                offset_bits == 8,
-                                                Extract(9 * 32 - 1, 8 * 32, selected_source),
-                                                If(
-                                                    offset_bits == 9,
-                                                    Extract(10 * 32 - 1, 9 * 32, selected_source),
-                                                    If(
-                                                        offset_bits == 10,
-                                                        Extract(11 * 32 - 1, 10 * 32, selected_source),
-                                                        If(
-                                                            offset_bits == 11,
-                                                            Extract(12 * 32 - 1, 11 * 32, selected_source),
-                                                            If(
-                                                                offset_bits == 12,
-                                                                Extract(13 * 32 - 1, 12 * 32, selected_source),
-                                                                If(
-                                                                    offset_bits == 13,
-                                                                    Extract(14 * 32 - 1, 13 * 32, selected_source),
-                                                                    If(
-                                                                        offset_bits == 14,
-                                                                        Extract(15 * 32 - 1, 14 * 32, selected_source),
-                                                                        Extract(16 * 32 - 1, 15 * 32, selected_source),  # offset_bits == 15
-                                                                    ),
-                                                                ),
-                                                            ),
-                                                        ),
-                                                    ),
-                                                ),
-                                            ),
-                                        ),
-                                    ),
-                                ),
-                            ),
-                        ),
-                    ),
-                ),
-            )
-        )
+        # Use the generic two-source element selector instead of nested If statements
+        elements[j] = _create_two_source_element_selector(a, b, offset_bits, source, 16, 32)
 
     return simplify(Concat(elements[::-1]))
 
@@ -483,50 +378,10 @@ def _mm512_permutex2var_epi64(a: BitVecRef, idx: BitVecRef, b: BitVecRef):
         offset_bits = Extract(i + 2, i, idx)
         
         # Extract source selector: idx[i+3] (1 bit to choose between a and b)
-        source_selector = Extract(i + 3, i + 3, idx)
+        source = Extract(i + 3, i + 3, idx)
 
-        # First select the source vector based on source_selector
-        # source_selector == 0 -> choose from a, source_selector == 1 -> choose from b
-        selected_source = simplify(
-            If(
-                source_selector == 0,
-                a,
-                b
-            )
-        )
-
-        # Then select element from the chosen source based on offset
-        elements[j] = simplify(
-            If(
-                offset_bits == 0,
-                Extract(1 * 64 - 1, 0 * 64, selected_source),
-                If(
-                    offset_bits == 1,
-                    Extract(2 * 64 - 1, 1 * 64, selected_source),
-                    If(
-                        offset_bits == 2,
-                        Extract(3 * 64 - 1, 2 * 64, selected_source),
-                        If(
-                            offset_bits == 3,
-                            Extract(4 * 64 - 1, 3 * 64, selected_source),
-                            If(
-                                offset_bits == 4,
-                                Extract(5 * 64 - 1, 4 * 64, selected_source),
-                                If(
-                                    offset_bits == 5,
-                                    Extract(6 * 64 - 1, 5 * 64, selected_source),
-                                    If(
-                                        offset_bits == 6,
-                                        Extract(7 * 64 - 1, 6 * 64, selected_source),
-                                        Extract(8 * 64 - 1, 7 * 64, selected_source),  # offset_bits == 7
-                                    ),
-                                ),
-                            ),
-                        ),
-                    ),
-                ),
-            )
-        )
+        # Use the generic two-source element selector instead of nested If statements
+        elements[j] = _create_two_source_element_selector(a, b, offset_bits, source, 8, 64)
 
     return simplify(Concat(elements[::-1]))
 
@@ -659,79 +514,25 @@ def _mm512_mask_permutex2var_ps(a: BitVecRef, k: BitVecRef, idx: BitVecRef, b: B
 
 
 # AVX2: vpermq/_mm256_permutexvar_epi64
-def _mm256_permutexvar_epi64(op1: BitVecRef, op_idx: BitVecRef):
+def _mm256_permutexvar_epi64(op1: BitVecRef, idx: BitVecRef):
     chunks = [None] * 4  # 4 chunks for 64-bit elements in 256-bit register
 
     for j in range(4):
         i = j * 64
-
-        # Extract 2 bits for index: idx[i+1:i] (need 2 bits to represent 0-3)
-        idx_bits = Extract(i + 1, i, op_idx)
-
-        # Use nested If statements to handle each possible index value (0-3)
-        # Each index selects a different 64-bit chunk from the input
-        chunks[j] = simplify(
-            If(
-                idx_bits == 0,
-                Extract(1 * 64 - 1, 0 * 64, op1),
-                If(
-                    idx_bits == 1,
-                    Extract(2 * 64 - 1, 1 * 64, op1),
-                    If(
-                        idx_bits == 2,
-                        Extract(3 * 64 - 1, 2 * 64, op1),
-                        Extract(4 * 64 - 1, 3 * 64, op1),  # idx_bits == 3
-                    ),
-                ),
-            )
-        )
+        idx_bits = Extract(i + 1, i, idx) # Extract 2 bits: idx[i+1:i]
+        chunks[j] = _create_element_selector(op1, idx_bits, 4, 64)
 
     return simplify(Concat(chunks[::-1]))
 
 
 # AVX512: vpermq/_mm512_permutexvar_epi64
-def _mm512_permutexvar_epi64(op1: BitVecRef, op_idx: BitVecRef):
+def _mm512_permutexvar_epi64(op1: BitVecRef, idx: BitVecRef):
     chunks = [None] * 8  # 8 chunks for 64-bit elements in 512-bit register
 
     for j in range(8):
         i = j * 64
-
-        # Extract 3 bits for index: idx[i+2:i] (need 3 bits to represent 0-7)
-        idx_bits = Extract(i + 2, i, op_idx)
-
-        # Use nested If statements to handle each possible index value (0-7)
-        # Each index selects a different 64-bit chunk from the input
-        chunks[j] = simplify(
-            If(
-                idx_bits == 0,
-                Extract(1 * 64 - 1, 0 * 64, op1),
-                If(
-                    idx_bits == 1,
-                    Extract(2 * 64 - 1, 1 * 64, op1),
-                    If(
-                        idx_bits == 2,
-                        Extract(3 * 64 - 1, 2 * 64, op1),
-                        If(
-                            idx_bits == 3,
-                            Extract(4 * 64 - 1, 3 * 64, op1),
-                            If(
-                                idx_bits == 4,
-                                Extract(5 * 64 - 1, 4 * 64, op1),
-                                If(
-                                    idx_bits == 5,
-                                    Extract(6 * 64 - 1, 5 * 64, op1),
-                                    If(
-                                        idx_bits == 6,
-                                        Extract(7 * 64 - 1, 6 * 64, op1),
-                                        Extract(8 * 64 - 1, 7 * 64, op1),  # idx_bits == 7
-                                    ),
-                                ),
-                            ),
-                        ),
-                    ),
-                ),
-            )
-        )
+        idx_bits = Extract(i + 2, i, idx) # Extract 3 idx bits: idx[i+2:i]
+        chunks[j] = _create_element_selector(op1, idx_bits, 8, 64)
 
     return simplify(Concat(chunks[::-1]))
 
