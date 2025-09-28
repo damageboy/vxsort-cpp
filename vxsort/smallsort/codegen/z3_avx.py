@@ -635,87 +635,98 @@ def vshufpd_lane(lane_idx: int, a: BitVecRef, b: BitVecRef, imm: BitVecRef):
     chunks[1] = _select2_pd(b_lane, ctrl1)
     return chunks
 
-# AVX2: vpermilps/vpshufd/AVX-512 (_mm512_permute_ps/_mm512_shuffle_epi32)
+# Generic permute_ps function
+def _permute_ps_generic(op1: BitVecRef, imm8: BitVecRef | int, num_lanes: int):
+    """
+    Generic permute_ps implementation for any number of 128-bit lanes.
+    Permutes 32-bit elements within each 128-bit lane using control bits in imm8.
+    
+    Operation:
+    ```
+    DEFINE SELECT4(src, control) {
+        CASE(control[1:0]) OF
+        0:	tmp[31:0] := src[31:0]
+        1:	tmp[31:0] := src[63:32]
+        2:	tmp[31:0] := src[95:64]
+        3:	tmp[31:0] := src[127:96]
+        ESAC
+        RETURN tmp[31:0]
+    }
+    FOR lane := 0 to num_lanes-1
+        dst[lane*128+31:lane*128] := SELECT4(a[lane*128+127:lane*128], imm8[1:0])
+        dst[lane*128+63:lane*128+32] := SELECT4(a[lane*128+127:lane*128], imm8[3:2])
+        dst[lane*128+95:lane*128+64] := SELECT4(a[lane*128+127:lane*128], imm8[5:4])
+        dst[lane*128+127:lane*128+96] := SELECT4(a[lane*128+127:lane*128], imm8[7:6])
+    ENDFOR
+    ```
+    """
+    a = op1
+    imm = imm8 if isinstance(imm8, BitVecRef) else BitVecVal(imm8, 8)
+    ctrl01, ctrl23, ctrl45, ctrl67 = _extract_ctl4(imm)
+    chunks_128b = [vpermilps_lane(lane_idx, a, ctrl01, ctrl23, ctrl45, ctrl67) for lane_idx in range(num_lanes)]
+    flat_chunks = [e for sublist in chunks_128b for e in sublist]
+    return simplify(Concat(flat_chunks[::-1]))
+
+# AVX2: vpermilps (_mm256_permute_ps)
 def _mm256_permute_ps(op1: BitVecRef, imm8: BitVecRef | int):
-    """
-    Permutes 32-bit elements within each 128-bit lane
-    of the source vector 'a' using the control bits in 'imm8'.
-    Operates on YMM registers.
-    """
-    a = op1
-    # Support constants or BitVec
-    imm = imm8 if isinstance(imm8, BitVecRef) else BitVecVal(imm8, 8)
+    """Permutes 32-bit elements within 128-bit lanes. Operates on YMM registers (2 lanes)."""
+    return _permute_ps_generic(op1, imm8, 2)
 
-    ctrl01, ctrl23, ctrl45, ctrl67 = _extract_ctl4(imm)
-
-    # Process each 128-bit lane (AVX-2 has two lanes in a 256-bit register)
-    chunks_128b = [vpermilps_lane(lane_idx, a, ctrl01, ctrl23, ctrl45, ctrl67) for lane_idx in range(2)]
-    flat_chunks = [e for sublist in chunks_128b for e in sublist]
-    return simplify(Concat(flat_chunks[::-1])) # MSBs go first (for Z3)
-
-# AVX512:  vpermilps/vpshufd (_mm512_permute_ps/_mm512_shuffle_epi32)
+# AVX512: vpermilps (_mm512_permute_ps)
 def _mm512_permute_ps(op1: BitVecRef, imm8: BitVecRef | int):
+    """Permutes 32-bit elements within 128-bit lanes. Operates on ZMM registers (4 lanes)."""
+    return _permute_ps_generic(op1, imm8, 4)
+
+# Generic permute_pd function
+def _permute_pd_generic(op1: BitVecRef, imm8: BitVecRef | int, num_lanes: int):
     """
-    Permutes 32-bit floating-point elements in each 128-bit lane
-    of the source vector 'a' using the control bits in 'imm8'.
+    Generic permute_pd implementation for any number of 128-bit lanes.
+    Permutes 64-bit elements within each 128-bit lane using control bits in imm8.
+    
+    Operation:
+    ```
+    DEFINE SELECT2(src, control) {
+        CASE(control[0]) OF
+        0:	tmp[63:0] := src[63:0]
+        1:	tmp[63:0] := src[127:64]
+        ESAC
+        RETURN tmp[63:0]
+    }
+    FOR lane := 0 to num_lanes-1
+        dst[lane*128+63:lane*128] := SELECT2(a[lane*128+127:lane*128], imm8[0])
+        dst[lane*128+127:lane*128+64] := SELECT2(a[lane*128+127:lane*128], imm8[1])
+    ENDFOR
+    ```
     """
     a = op1
- 
     imm = imm8 if isinstance(imm8, BitVecRef) else BitVecVal(imm8, 8)
-
-    ctrl01, ctrl23, ctrl45, ctrl67 = _extract_ctl4(imm)
-    # Process each 128-bit lane (AVX-512 has four lanes in a 512-bit register)
-    chunks_128b = [vpermilps_lane(lane_idx, a, ctrl01, ctrl23, ctrl45, ctrl67) for lane_idx in range(4)]
-    flat_chunks = [e for sublist in chunks_128b for e in sublist]
-    return simplify(Concat(flat_chunks[::-1]))  # Reverse for Z3
-
-# AVX-2: vpermilpd (_mm256_permute_pd)
-def _mm256_permute_pd(op1: BitVecRef, imm8: BitVecRef | int):
-    """
-    Permutes 64-bit double-precision floating-point elements within each 128-bit lane
-    of the source vector 'a' using the control bits in 'imm8'.
-    Operates on YMM registers.
-    """
-    a = op1
-    # Support constants or BitVec
-    imm = imm8 if isinstance(imm8, BitVecRef) else BitVecVal(imm8, 8)
-
     ctrl0, ctrl1 = _extract_ctl2(imm)
-
-    # Process each 128-bit lane (AVX-2 has two lanes in a 256-bit register)
-    chunks_128b = [vpermilpd_lane(lane_idx, a, ctrl0, ctrl1) for lane_idx in range(2)]
+    chunks_128b = [vpermilpd_lane(lane_idx, a, ctrl0, ctrl1) for lane_idx in range(num_lanes)]
     flat_chunks = [e for sublist in chunks_128b for e in sublist]
-    return simplify(Concat(flat_chunks[::-1])) # MSBs go first (for Z3)
+    return simplify(Concat(flat_chunks[::-1]))
 
+# AVX2: vpermilpd (_mm256_permute_pd)
+def _mm256_permute_pd(op1: BitVecRef, imm8: BitVecRef | int):
+    """Permutes 64-bit elements within 128-bit lanes. Operates on YMM registers (2 lanes)."""
+    return _permute_pd_generic(op1, imm8, 2)
 
 # AVX512: vpermilpd (_mm512_permute_pd)
 def _mm512_permute_pd(op1: BitVecRef, imm8: BitVecRef | int):
-    """
-    Permutes 64-bit double-precision floating-point elements in each 128-bit lane
-    of the source vector 'a' using the control bits in 'imm8'.
-    """
-    a = op1
-    imm = imm8 if isinstance(imm8, BitVecRef) else BitVecVal(imm8, 8)
-
-    ctrl0, ctrl1 = _extract_ctl2(imm)
-    # Process each 128-bit lane (AVX-512 has four lanes in a 512-bit register)
-    chunks_128b = [vpermilpd_lane(lane_idx, a, ctrl0, ctrl1) for lane_idx in range(4)]
-    flat_chunks = [e for sublist in chunks_128b for e in sublist]
-    return simplify(Concat(flat_chunks[::-1])) # MSBs go first (for Z3)
+    """Permutes 64-bit elements within 128-bit lanes. Operates on ZMM registers (4 lanes)."""
+    return _permute_pd_generic(op1, imm8, 4)
 
 
 ##
 # 2 vector 128-bit static permutes
 
 
-# AVX2: vshufps (_mm256_shuffle_ps)
-def _mm256_shuffle_ps(op1: BitVecRef, op2: BitVecRef, imm8: BitVecRef | int):
+# Generic shuffle_ps function
+def _shuffle_ps_generic(op1: BitVecRef, op2: BitVecRef, imm8: BitVecRef | int, num_lanes: int):
     """
-    Shuffle single-precision (32-bit) floating-point elements in a within 128-bit lanes using the control in imm8, and store the results in dst.
-    Implements __m256 _mm256_shuffle_ps (__m256 a, __m256 b, const int imm8)
-    according to the Intel spec.
-
-    Operation
+    Generic shuffle_ps implementation for any number of 128-bit lanes.
+    Shuffles 32-bit elements within 128-bit lanes using control in imm8.
+    
+    Operation:
     ```
     DEFINE SELECT4(src, control) {
         CASE(control[1:0]) OF
@@ -726,121 +737,59 @@ def _mm256_shuffle_ps(op1: BitVecRef, op2: BitVecRef, imm8: BitVecRef | int):
         ESAC
         RETURN tmp[31:0]
     }
-    dst[31:0] := SELECT4(a[127:0], imm8[1:0])
-    dst[63:32] := SELECT4(a[127:0], imm8[3:2])
-    dst[95:64] := SELECT4(b[127:0], imm8[5:4])
-    dst[127:96] := SELECT4(b[127:0], imm8[7:6])
-    dst[159:128] := SELECT4(a[255:128], imm8[1:0])
-    dst[191:160] := SELECT4(a[255:128], imm8[3:2])
-    dst[223:192] := SELECT4(b[255:128], imm8[5:4])
-    dst[255:224] := SELECT4(b[255:128], imm8[7:6])
-    dst[MAX:256] := 0
+    FOR lane := 0 to num_lanes-1
+        dst[lane*128+31:lane*128] := SELECT4(a[lane*128+127:lane*128], imm8[1:0])
+        dst[lane*128+63:lane*128+32] := SELECT4(a[lane*128+127:lane*128], imm8[3:2])
+        dst[lane*128+95:lane*128+64] := SELECT4(b[lane*128+127:lane*128], imm8[5:4])
+        dst[lane*128+127:lane*128+96] := SELECT4(b[lane*128+127:lane*128], imm8[7:6])
+    ENDFOR
     ```
     """
     imm = imm8 if isinstance(imm8, BitVecRef) else BitVecVal(imm8, 8)
-
     ctrl01, ctrl23, ctrl45, ctrl67 = _extract_ctl4(imm)
-
-    chunks_128b = [vshufps_lane(lane_idx, op1, op2, ctrl01, ctrl23, ctrl45, ctrl67) for lane_idx in range(2)]
+    chunks_128b = [vshufps_lane(lane_idx, op1, op2, ctrl01, ctrl23, ctrl45, ctrl67) for lane_idx in range(num_lanes)]
     flat_chunks = [e for sublist in chunks_128b for e in sublist]
-    return simplify(Concat(flat_chunks[::-1])) # MSBs go first (for Z3)
+    return simplify(Concat(flat_chunks[::-1]))
 
+# AVX2: vshufps (_mm256_shuffle_ps)
+def _mm256_shuffle_ps(op1: BitVecRef, op2: BitVecRef, imm8: BitVecRef | int):
+    """Shuffles 32-bit elements within 128-bit lanes. Operates on YMM registers (2 lanes)."""
+    return _shuffle_ps_generic(op1, op2, imm8, 2)
 
 # AVX512: vshufps (_mm512_shuffle_ps)
 def _mm512_shuffle_ps(op1: BitVecRef, op2: BitVecRef, imm8: BitVecRef | int):
+    """Shuffles 32-bit elements within 128-bit lanes. Operates on ZMM registers (4 lanes)."""
+    return _shuffle_ps_generic(op1, op2, imm8, 4)
+
+
+# Generic shuffle_pd function
+def _shuffle_pd_generic(op1: BitVecRef, op2: BitVecRef, imm8: BitVecRef | int, num_lanes: int):
     """
-        Shuffle single-precision (32-bit) floating-point elements in a within 128-bit lanes using the control in imm8, and store the results in dst.
-
-    Implements __m512 _mm512_shuffle_ps (__m512 a, __m512 b, const int imm8)
-    according to the Intel spec.
-
-        Operation
+    Generic shuffle_pd implementation for any number of 128-bit lanes.
+    Shuffles 64-bit elements within 128-bit lanes using control in imm8.
+    
+    Operation:
     ```
-    DEFINE SELECT4(src, control) {
-        CASE(control[1:0]) OF
-        0:	tmp[31:0] := src[31:0]
-        1:	tmp[31:0] := src[63:32]
-        2:	tmp[31:0] := src[95:64]
-        3:	tmp[31:0] := src[127:96]
-        ESAC
-        RETURN tmp[31:0]
-    }
-    dst[31:0] := SELECT4(a[127:0], imm8[1:0])
-    dst[63:32] := SELECT4(a[127:0], imm8[3:2])
-    dst[95:64] := SELECT4(b[127:0], imm8[5:4])
-    dst[127:96] := SELECT4(b[127:0], imm8[7:6])
-    dst[159:128] := SELECT4(a[255:128], imm8[1:0])
-    dst[191:160] := SELECT4(a[255:128], imm8[3:2])
-    dst[223:192] := SELECT4(b[255:128], imm8[5:4])
-    dst[255:224] := SELECT4(b[255:128], imm8[7:6])
-    dst[287:256] := SELECT4(a[383:256], imm8[1:0])
-    dst[319:288] := SELECT4(a[383:256], imm8[3:2])
-    dst[351:320] := SELECT4(b[383:256], imm8[5:4])
-    dst[383:352] := SELECT4(b[383:256], imm8[7:6])
-    dst[415:384] := SELECT4(a[511:384], imm8[1:0])
-    dst[447:416] := SELECT4(a[511:384], imm8[3:2])
-    dst[479:448] := SELECT4(b[511:384], imm8[5:4])
-    dst[511:480] := SELECT4(b[511:384], imm8[7:6])
-    dst[MAX:512] := 0
+    FOR lane := 0 to num_lanes-1
+        dst[lane*128+63:lane*128] := (imm8[2*lane] == 0) ? a[lane*128+63:lane*128] : a[lane*128+127:lane*128+64]
+        dst[lane*128+127:lane*128+64] := (imm8[2*lane+1] == 0) ? b[lane*128+63:lane*128] : b[lane*128+127:lane*128+64]
+    ENDFOR
     ```
     """
     imm = imm8 if isinstance(imm8, BitVecRef) else BitVecVal(imm8, 8)
-
-    ctrl01, ctrl23, ctrl45, ctrl67 = _extract_ctl4(imm)
-
-    chunks_128b = [vshufps_lane(lane_idx, op1, op2, ctrl01, ctrl23, ctrl45, ctrl67) for lane_idx in range(4)]
+    chunks_128b = [vshufpd_lane(lane_idx, op1, op2, imm) for lane_idx in range(num_lanes)]
     flat_chunks = [e for sublist in chunks_128b for e in sublist]
-    return simplify(Concat(flat_chunks[::-1])) # MSBs go first (for Z3)
-
+    return simplify(Concat(flat_chunks[::-1]))
 
 # AVX2: vshufpd (_mm256_shuffle_pd)
 def _mm256_shuffle_pd(op1: BitVecRef, op2: BitVecRef, imm8: BitVecRef | int):
-    """
-    Shuffle double-precision (64-bit) floating-point elements within 128-bit lanes using the control in imm8, and store the results in dst.
-    Implements __m256d _mm256_shuffle_pd (__m256d a, __m256d b, const int imm8)
-    according to the Intel spec.
-
-    Operation:
-    ```
-    dst[63:0] := (imm8[0] == 0) ? a[63:0] : a[127:64]
-    dst[127:64] := (imm8[1] == 0) ? b[63:0] : b[127:64]
-    dst[191:128] := (imm8[2] == 0) ? a[191:128] : a[255:192]
-    dst[255:192] := (imm8[3] == 0) ? b[191:128] : b[255:192]
-    dst[MAX:256] := 0
-    ```
-    """
-    imm = imm8 if isinstance(imm8, BitVecRef) else BitVecVal(imm8, 8)
-
-    chunks_128b = [vshufpd_lane(lane_idx, op1, op2, imm) for lane_idx in range(2)]
-    flat_chunks = [e for sublist in chunks_128b for e in sublist]
-    return simplify(Concat(flat_chunks[::-1])) # MSBs go first (for Z3)
-
+    """Shuffles 64-bit elements within 128-bit lanes. Operates on YMM registers (2 lanes)."""
+    return _shuffle_pd_generic(op1, op2, imm8, 2)
 
 # AVX512: vshufpd (_mm512_shuffle_pd)
 def _mm512_shuffle_pd(op1: BitVecRef, op2: BitVecRef, imm8: BitVecRef | int):
-    """
-    Shuffle double-precision (64-bit) floating-point elements within 128-bit lanes using the control in imm8, and store the results in dst.
-    Implements __m512d _mm512_shuffle_pd (__m512d a, __m512d b, const int imm8)
-    according to the Intel spec.
-
-    Operation:
-    ```
-    dst[63:0] := (imm8[0] == 0) ? a[63:0] : a[127:64]
-    dst[127:64] := (imm8[1] == 0) ? b[63:0] : b[127:64]
-    dst[191:128] := (imm8[2] == 0) ? a[191:128] : a[255:192]
-    dst[255:192] := (imm8[3] == 0) ? b[191:128] : b[255:192]
-    dst[319:256] := (imm8[4] == 0) ? a[319:256] : a[383:320]
-    dst[383:320] := (imm8[5] == 0) ? b[319:256] : b[383:320]
-    dst[447:384] := (imm8[6] == 0) ? a[447:384] : a[511:448]
-    dst[511:448] := (imm8[7] == 0) ? b[447:384] : b[511:448]
-    dst[MAX:512] := 0
-    ```
-    """
-    imm = imm8 if isinstance(imm8, BitVecRef) else BitVecVal(imm8, 8)
-
-    chunks_128b = [vshufpd_lane(lane_idx, op1, op2, imm) for lane_idx in range(4)]
-    flat_chunks = [e for sublist in chunks_128b for e in sublist]
-    return simplify(Concat(flat_chunks[::-1])) # MSBs go first (for Z3)
+    """Shuffles 64-bit elements within 128-bit lanes. Operates on ZMM registers (4 lanes)."""
+    return _shuffle_pd_generic(op1, op2, imm8, 4)
 
 
 # Helper function for permute2x128 intrinsics
