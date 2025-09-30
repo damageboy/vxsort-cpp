@@ -1098,3 +1098,234 @@ def add_dwords(op1, op2):
         result.append(simplify(from_dword(chunksA[i] + chunksB[i])))
 
     return simplify(Concat(result[::-1]))
+
+
+##
+# Unpack instructions for 32-bit integers
+
+def _unpack_epi32_generic(a: BitVecRef, b: BitVecRef, high: bool, total_bits: int, src: BitVecRef = None, k: BitVecRef = None):
+    """
+    Generic unpack implementation for 32-bit integers with optional masking.
+    
+    Args:
+        a: First source register
+        b: Second source register  
+        high: True for unpackhi (elements 2,3), False for unpacklo (elements 0,1)
+        total_bits: Register size (256 or 512)
+        src: Source register for masked operations (None for unmasked)
+        k: Write mask (None for unmasked operations)
+    
+    Returns:
+        BitVecRef representing the unpacked result
+    """
+    assert total_bits in [256, 512], "total_bits must be 256 or 512"
+    
+    num_lanes = total_bits // 128  # Number of 128-bit lanes
+    num_elements = total_bits // 32  # Total number of 32-bit elements
+    
+    elements = [None] * num_elements
+    
+    # Process each 128-bit lane
+    for lane in range(num_lanes):
+        lane_start = lane * 128
+        
+        if high:
+            # Extract high half elements (2 and 3) from each lane
+            a_elem0 = Extract(lane_start + 95, lane_start + 64, a)   # a[lane][2] 
+            a_elem1 = Extract(lane_start + 127, lane_start + 96, a)  # a[lane][3]
+            b_elem0 = Extract(lane_start + 95, lane_start + 64, b)   # b[lane][2]
+            b_elem1 = Extract(lane_start + 127, lane_start + 96, b)  # b[lane][3]
+        else:
+            # Extract low half elements (0 and 1) from each lane
+            a_elem0 = Extract(lane_start + 31, lane_start + 0, a)    # a[lane][0]
+            a_elem1 = Extract(lane_start + 63, lane_start + 32, a)   # a[lane][1]
+            b_elem0 = Extract(lane_start + 31, lane_start + 0, b)    # b[lane][0]
+            b_elem1 = Extract(lane_start + 63, lane_start + 32, b)   # b[lane][1]
+        
+        # Interleave: a[elem0], b[elem0], a[elem1], b[elem1]
+        base_idx = lane * 4
+        elements[base_idx + 0] = a_elem0
+        elements[base_idx + 1] = b_elem0
+        elements[base_idx + 2] = a_elem1
+        elements[base_idx + 3] = b_elem1
+    
+    # If masking is requested, apply the mask
+    if src is not None and k is not None:
+        masked_elements = [None] * num_elements
+        for j in range(num_elements):
+            i = j * 32
+            
+            # Extract mask bit for this element
+            mask_bit = Extract(j, j, k)
+            
+            # Extract elements from both unpacked result and src
+            unpack_elem = elements[j]
+            src_elem = Extract(i + 31, i, src)
+            
+            # Apply mask: if mask bit is set, use unpacked result, otherwise use src
+            masked_elements[j] = simplify(
+                If(
+                    mask_bit == 1,
+                    unpack_elem,
+                    src_elem
+                )
+            )
+        elements = masked_elements
+    
+    return simplify(Concat(elements[::-1]))
+
+
+def _mm256_unpacklo_epi32(a: BitVecRef, b: BitVecRef):
+    """
+    Unpack and interleave 32-bit integers from the low half of each 128-bit lane in "a" and "b", and store the results in "dst".
+    Implements __m256i _mm256_unpacklo_epi32(__m256i a, __m256i b)
+    
+    Operation:
+    ```
+    DEFINE INTERLEAVE_DWORDS(src1[127:0], src2[127:0]) {
+        dst[31:0] := src1[31:0] 
+        dst[63:32] := src2[31:0] 
+        dst[95:64] := src1[63:32] 
+        dst[127:96] := src2[63:32] 
+        RETURN dst[127:0]	
+    }
+    dst[127:0] := INTERLEAVE_DWORDS(a[127:0], b[127:0])
+    dst[255:128] := INTERLEAVE_DWORDS(a[255:128], b[255:128])
+    dst[MAX:256] := 0
+    ```
+    """
+    return _unpack_epi32_generic(a, b, high=False, total_bits=256)
+
+
+def _mm256_unpackhi_epi32(a: BitVecRef, b: BitVecRef):
+    """
+    Unpack and interleave 32-bit integers from the high half of each 128-bit lane in "a" and "b", and store the results in "dst".
+    Implements __m256i _mm256_unpackhi_epi32(__m256i a, __m256i b)
+    
+    Operation:
+    ```
+    DEFINE INTERLEAVE_HIGH_DWORDS(src1[127:0], src2[127:0]) {
+        dst[31:0] := src1[95:64] 
+        dst[63:32] := src2[95:64] 
+        dst[95:64] := src1[127:96] 
+        dst[127:96] := src2[127:96] 
+        RETURN dst[127:0]	
+    }
+    dst[127:0] := INTERLEAVE_HIGH_DWORDS(a[127:0], b[127:0])
+    dst[255:128] := INTERLEAVE_HIGH_DWORDS(a[255:128], b[255:128])
+    dst[MAX:256] := 0
+    ```
+    """
+    return _unpack_epi32_generic(a, b, high=True, total_bits=256)
+
+
+def _mm512_unpacklo_epi32(a: BitVecRef, b: BitVecRef):
+    """
+    Unpack and interleave 32-bit integers from the low half of each 128-bit lane in "a" and "b", and store the results in "dst".
+    Implements __m512i _mm512_unpacklo_epi32(__m512i a, __m512i b)
+    
+    Operation:
+    ```
+    DEFINE INTERLEAVE_DWORDS(src1[127:0], src2[127:0]) {
+        dst[31:0] := src1[31:0] 
+        dst[63:32] := src2[31:0] 
+        dst[95:64] := src1[63:32] 
+        dst[127:96] := src2[63:32] 
+        RETURN dst[127:0]	
+    }
+    dst[127:0] := INTERLEAVE_DWORDS(a[127:0], b[127:0])
+    dst[255:128] := INTERLEAVE_DWORDS(a[255:128], b[255:128])
+    dst[383:256] := INTERLEAVE_DWORDS(a[383:256], b[383:256])
+    dst[511:384] := INTERLEAVE_DWORDS(a[511:384], b[511:384])
+    dst[MAX:512] := 0
+    ```
+    """
+    return _unpack_epi32_generic(a, b, high=False, total_bits=512)
+
+
+def _mm512_unpackhi_epi32(a: BitVecRef, b: BitVecRef):
+    """
+    Unpack and interleave 32-bit integers from the high half of each 128-bit lane in "a" and "b", and store the results in "dst".
+    Implements __m512i _mm512_unpackhi_epi32(__m512i a, __m512i b)
+    
+    Operation:
+    ```
+    DEFINE INTERLEAVE_HIGH_DWORDS(src1[127:0], src2[127:0]) {
+        dst[31:0] := src1[95:64] 
+        dst[63:32] := src2[95:64] 
+        dst[95:64] := src1[127:96] 
+        dst[127:96] := src2[127:96] 
+        RETURN dst[127:0]	
+    }
+    dst[127:0] := INTERLEAVE_HIGH_DWORDS(a[127:0], b[127:0])
+    dst[255:128] := INTERLEAVE_HIGH_DWORDS(a[255:128], b[255:128])
+    dst[383:256] := INTERLEAVE_HIGH_DWORDS(a[383:256], b[383:256])
+    dst[511:384] := INTERLEAVE_HIGH_DWORDS(a[511:384], b[511:384])
+    dst[MAX:512] := 0
+    ```
+    """
+    return _unpack_epi32_generic(a, b, high=True, total_bits=512)
+
+
+def _mm512_mask_unpacklo_epi32(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef):
+    """
+    Unpack and interleave 32-bit integers from the low half of each 128-bit lane in "a" and "b", and store the results in "dst" 
+    using writemask "k" (elements are copied from "src" when the corresponding mask bit is not set).
+    Implements __m512i _mm512_mask_unpacklo_epi32(__m512i src, __mmask16 k, __m512i a, __m512i b)
+    
+    Operation:
+    ```
+    DEFINE INTERLEAVE_DWORDS(src1[127:0], src2[127:0]) {
+        dst[31:0] := src1[31:0] 
+        dst[63:32] := src2[31:0] 
+        dst[95:64] := src1[63:32] 
+        dst[127:96] := src2[63:32] 
+        RETURN dst[127:0]
+    }
+    tmp_dst[127:0] := INTERLEAVE_DWORDS(a[127:0], b[127:0])
+    tmp_dst[255:128] := INTERLEAVE_DWORDS(a[255:128], b[255:128])
+    FOR j := 0 to 15
+        i := j*32
+        IF k[j]
+            dst[i+31:i] := tmp_dst[i+31:i]
+        ELSE
+            dst[i+31:i] := src[i+31:i]
+        FI
+    ENDFOR
+    dst[MAX:512] := 0
+    ```
+    """
+    return _unpack_epi32_generic(a, b, high=False, total_bits=512, src=src, k=k)
+
+
+def _mm512_mask_unpackhi_epi32(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef):
+    """
+    Unpack and interleave 32-bit integers from the high half of each 128-bit lane in "a" and "b", and store the results in "dst" 
+    using writemask "k" (elements are copied from "src" when the corresponding mask bit is not set).
+    Implements __m512i _mm512_mask_unpackhi_epi32(__m512i src, __mmask16 k, __m512i a, __m512i b)
+    
+    Operation:
+    ```
+    DEFINE INTERLEAVE_HIGH_DWORDS(src1[127:0], src2[127:0]) {
+        dst[31:0] := src1[95:64] 
+        dst[63:32] := src2[95:64] 
+        dst[95:64] := src1[127:96] 
+        dst[127:96] := src2[127:96] 
+        RETURN dst[127:0]	
+    }
+    tmp_dst[127:0] := INTERLEAVE_HIGH_DWORDS(a[127:0], b[127:0])
+    tmp_dst[255:128] := INTERLEAVE_HIGH_DWORDS(a[255:128], b[255:128])
+    tmp_dst[383:256] := INTERLEAVE_HIGH_DWORDS(a[383:256], b[383:256])
+    tmp_dst[511:384] := INTERLEAVE_HIGH_DWORDS(a[511:384], b[511:384])
+    FOR j := 0 to 15
+        i := j*32
+        IF k[j]
+            dst[i+31:i] := tmp_dst[i+31:i]
+        ELSE
+            dst[i+31:i] := src[i+31:i]
+        FI
+    ENDFOR
+    dst[MAX:512] := 0
+    ```
+    """
+    return _unpack_epi32_generic(a, b, high=True, total_bits=512, src=src, k=k)
