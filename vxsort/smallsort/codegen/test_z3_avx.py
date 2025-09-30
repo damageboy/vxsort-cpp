@@ -19,6 +19,9 @@ from z3_avx import _mm256_permute_pd
 from z3_avx import _mm512_permute_pd
 from z3_avx import _mm256_permute2x128_si256
 from z3_avx import _mm512_shuffle_i32x4
+from z3_avx import _mm256_unpacklo_epi32, _mm256_unpackhi_epi32
+from z3_avx import _mm512_unpacklo_epi32, _mm512_unpackhi_epi32
+from z3_avx import _mm512_mask_unpacklo_epi32, _mm512_mask_unpackhi_epi32
 from z3_avx import ymm_reg, ymm_reg_with_32b_values, ymm_reg_with_64b_values, ymm_reg_with_unique_values, ymm_reg_pair_with_unique_values, construct_ymm_reg_from_elements
 from z3_avx import zmm_reg, zmm_reg_with_32b_values, zmm_reg_with_64b_values, zmm_reg_with_unique_values, zmm_reg_pair_with_unique_values, construct_zmm_reg_from_elements
 from z3_avx import ymm_reg_reversed, zmm_reg_reversed
@@ -1230,3 +1233,342 @@ class TestMaskPermutex2varPs:
         assert result == sat, "Z3 failed to find mask+indices for partial reverse"
         model_mask = s.model().evaluate(mask).as_long()
         assert model_mask == 0x00FF, f"Expected mask 0x00FF for first 8 elements, got 0x{model_mask:04x}"
+
+
+class TestUnpackEpi32:
+    """Tests for unpack 32-bit integer instructions"""
+    
+    def test_mm256_unpacklo_epi32_basic(self):
+        """Test _mm256_unpacklo_epi32 with known values"""
+        s = Solver()
+        
+        # Create test inputs with unique values per lane
+        # a = [a0, a1, a2, a3 | a4, a5, a6, a7]
+        # b = [b0, b1, b2, b3 | b4, b5, b6, b7]
+        a = ymm_reg_with_32b_values("a", s, [0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7])
+        b = ymm_reg_with_32b_values("b", s, [0xb0, 0xb1, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7])
+        
+        output = _mm256_unpacklo_epi32(a, b)
+        
+        # Expected: [a0, b0, a1, b1 | a4, b4, a5, b5] (low elements from each lane)
+        expected = construct_ymm_reg_from_elements(32, [
+            (a, 0), (b, 0), (a, 1), (b, 1),  # Lane 0: interleave a[0,1] with b[0,1]
+            (a, 4), (b, 4), (a, 5), (b, 5)   # Lane 1: interleave a[4,5] with b[4,5]
+        ])
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for unpacklo: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_unpackhi_epi32_basic(self):
+        """Test _mm256_unpackhi_epi32 with known values"""
+        s = Solver()
+        
+        # Create test inputs with unique values per lane
+        a = ymm_reg_with_32b_values("a", s, [0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7])
+        b = ymm_reg_with_32b_values("b", s, [0xb0, 0xb1, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7])
+        
+        output = _mm256_unpackhi_epi32(a, b)
+        
+        # Expected: [a2, b2, a3, b3 | a6, b6, a7, b7] (high elements from each lane)
+        expected = construct_ymm_reg_from_elements(32, [
+            (a, 2), (b, 2), (a, 3), (b, 3),  # Lane 0: interleave a[2,3] with b[2,3]
+            (a, 6), (b, 6), (a, 7), (b, 7)   # Lane 1: interleave a[6,7] with b[6,7]
+        ])
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for unpackhi: {s.model() if result == sat else 'No model'}"
+
+    def test_mm512_unpacklo_epi32_basic(self):
+        """Test _mm512_unpacklo_epi32 with known values"""
+        s = Solver()
+        
+        # Create test inputs with unique values
+        a_vals = [0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 
+                  0xa8, 0xa9, 0xaa, 0xab, 0xac, 0xad, 0xae, 0xaf]
+        b_vals = [0xb0, 0xb1, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7,
+                  0xb8, 0xb9, 0xba, 0xbb, 0xbc, 0xbd, 0xbe, 0xbf]
+        
+        a = zmm_reg_with_32b_values("a", s, a_vals)
+        b = zmm_reg_with_32b_values("b", s, b_vals)
+        
+        output = _mm512_unpacklo_epi32(a, b)
+        
+        # Expected: interleave low elements from each 128-bit lane
+        expected = construct_zmm_reg_from_elements(32, [
+            (a, 0), (b, 0), (a, 1), (b, 1),   # Lane 0
+            (a, 4), (b, 4), (a, 5), (b, 5),   # Lane 1
+            (a, 8), (b, 8), (a, 9), (b, 9),   # Lane 2
+            (a, 12), (b, 12), (a, 13), (b, 13) # Lane 3
+        ])
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for 512-bit unpacklo: {s.model() if result == sat else 'No model'}"
+
+    def test_mm512_unpackhi_epi32_basic(self):
+        """Test _mm512_unpackhi_epi32 with known values"""
+        s = Solver()
+        
+        # Create test inputs with unique values
+        a_vals = [0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 
+                  0xa8, 0xa9, 0xaa, 0xab, 0xac, 0xad, 0xae, 0xaf]
+        b_vals = [0xb0, 0xb1, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7,
+                  0xb8, 0xb9, 0xba, 0xbb, 0xbc, 0xbd, 0xbe, 0xbf]
+        
+        a = zmm_reg_with_32b_values("a", s, a_vals)
+        b = zmm_reg_with_32b_values("b", s, b_vals)
+        
+        output = _mm512_unpackhi_epi32(a, b)
+        
+        # Expected: interleave high elements from each 128-bit lane
+        expected = construct_zmm_reg_from_elements(32, [
+            (a, 2), (b, 2), (a, 3), (b, 3),   # Lane 0
+            (a, 6), (b, 6), (a, 7), (b, 7),   # Lane 1
+            (a, 10), (b, 10), (a, 11), (b, 11), # Lane 2
+            (a, 14), (b, 14), (a, 15), (b, 15)  # Lane 3
+        ])
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for 512-bit unpackhi: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_unpacklo_epi32_identity_check(self):
+        """Test that _mm256_unpacklo_epi32 with identical inputs gives expected pattern"""
+        s = Solver()
+        
+        input_reg = ymm_reg_with_unique_values("input", s, bits=32)
+        output = _mm256_unpacklo_epi32(input_reg, input_reg)
+        
+        # When a == b, unpacklo should give [a0, a0, a1, a1 | a4, a4, a5, a5]
+        expected = construct_ymm_reg_from_elements(32, [
+            (input_reg, 0), (input_reg, 0), (input_reg, 1), (input_reg, 1),
+            (input_reg, 4), (input_reg, 4), (input_reg, 5), (input_reg, 5)
+        ])
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for identity unpacklo: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_unpackhi_epi32_identity_check(self):
+        """Test that _mm256_unpackhi_epi32 with identical inputs gives expected pattern"""
+        s = Solver()
+        
+        input_reg = ymm_reg_with_unique_values("input", s, bits=32)
+        output = _mm256_unpackhi_epi32(input_reg, input_reg)
+        
+        # When a == b, unpackhi should give [a2, a2, a3, a3 | a6, a6, a7, a7]
+        expected = construct_ymm_reg_from_elements(32, [
+            (input_reg, 2), (input_reg, 2), (input_reg, 3), (input_reg, 3),
+            (input_reg, 6), (input_reg, 6), (input_reg, 7), (input_reg, 7)
+        ])
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for identity unpackhi: {s.model() if result == sat else 'No model'}"
+
+    def test_mm512_mask_unpacklo_epi32_mask_all_zeros(self):
+        """Test _mm512_mask_unpacklo_epi32 with mask all zeros (should preserve src)"""
+        s = Solver()
+        
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
+        src = zmm_reg_with_unique_values("src", s, bits=32)
+        mask = BitVecVal(0, 16)  # All mask bits are 0
+        
+        output = _mm512_mask_unpacklo_epi32(src, mask, a, b)
+        
+        s.add(output != src)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
+
+    def test_mm512_mask_unpacklo_epi32_mask_all_ones(self):
+        """Test _mm512_mask_unpacklo_epi32 with mask all ones (should equal unmasked)"""
+        s = Solver()
+        
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
+        src = zmm_reg_with_unique_values("src", s, bits=32)
+        mask = BitVecVal(0xFFFF, 16)  # All mask bits are 1
+        
+        masked_output = _mm512_mask_unpacklo_epi32(src, mask, a, b)
+        unmasked_output = _mm512_unpacklo_epi32(a, b)
+        
+        s.add(masked_output != unmasked_output)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
+
+    def test_mm512_mask_unpackhi_epi32_alternating_mask(self):
+        """Test _mm512_mask_unpackhi_epi32 with alternating mask pattern"""
+        s = Solver()
+        
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
+        src = zmm_reg_with_unique_values("src", s, bits=32)
+        mask = BitVecVal(0x5555, 16)  # 0101010101010101 in binary
+        
+        output = _mm512_mask_unpackhi_epi32(src, mask, a, b)
+        
+        # Expected: unpack result in even positions, src in odd positions
+        unpack_result = _mm512_unpackhi_epi32(a, b)
+        expected_specs = []
+        for i in range(16):
+            if i % 2 == 0:
+                # Even position: use unpack result
+                expected_specs.append((unpack_result, i))
+            else:
+                # Odd position: use src
+                expected_specs.append((src, i))
+        
+        expected = construct_zmm_reg_from_elements(32, expected_specs)
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for alternating mask: {s.model() if result == sat else 'No model'}"
+
+    def test_mm512_mask_unpacklo_epi32_single_bit_mask(self):
+        """Test _mm512_mask_unpacklo_epi32 with only one bit set in mask"""
+        s = Solver()
+        
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
+        src = zmm_reg_with_unique_values("src", s, bits=32)
+        mask = BitVecVal(1 << 3, 16)  # Only bit 3 is set
+        
+        output = _mm512_mask_unpacklo_epi32(src, mask, a, b)
+        
+        # Expected: unpack result only at position 3, src everywhere else
+        unpack_result = _mm512_unpacklo_epi32(a, b)
+        expected_specs = []
+        for i in range(16):
+            if i == 3:
+                expected_specs.append((unpack_result, i))
+            else:
+                expected_specs.append((src, i))
+        
+        expected = construct_zmm_reg_from_elements(32, expected_specs)
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for single bit mask: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_unpacklo_epi32_reconstruct_pattern(self):
+        """Test that Z3 can find inputs that produce a specific output pattern"""
+        s = Solver()
+        
+        a = ymm_reg("a")
+        b = ymm_reg("b")
+        output = _mm256_unpacklo_epi32(a, b)
+        
+        # Specify a target pattern: all elements should be the same value
+        target_value = BitVecVal(0x12345678, 32)
+        for i in range(8):
+            element = Extract(i * 32 + 31, i * 32, output)
+            s.add(element == target_value)
+        
+        result = s.check()
+        assert result == sat, "Z3 should be able to find inputs for constant output"
+        
+        # Verify that the inputs produce the expected pattern
+        model = s.model()
+        model_a = model.evaluate(a).as_long()
+        model_b = model.evaluate(b).as_long()
+        
+        # Extract some elements from the inputs
+        a_elem0 = (model_a >> (0 * 32)) & 0xFFFFFFFF
+        a_elem1 = (model_a >> (1 * 32)) & 0xFFFFFFFF
+        b_elem0 = (model_b >> (0 * 32)) & 0xFFFFFFFF
+        b_elem1 = (model_b >> (1 * 32)) & 0xFFFFFFFF
+        
+        # For constant output, we expect the input elements to all equal the target
+        assert a_elem0 == 0x12345678, f"Expected a[0] = 0x12345678, got 0x{a_elem0:08x}"
+        assert a_elem1 == 0x12345678, f"Expected a[1] = 0x12345678, got 0x{a_elem1:08x}"
+        assert b_elem0 == 0x12345678, f"Expected b[0] = 0x12345678, got 0x{b_elem0:08x}"
+        assert b_elem1 == 0x12345678, f"Expected b[1] = 0x12345678, got 0x{b_elem1:08x}"
+
+    def test_mm512_mask_unpackhi_epi32_find_mask(self):
+        """Test that Z3 can find the correct mask to achieve a specific pattern"""
+        s = Solver()
+        
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
+        src = zmm_reg_with_unique_values("src", s, bits=32)
+        mask = BitVec("mask", 16)
+        
+        output = _mm512_mask_unpackhi_epi32(src, mask, a, b)
+        
+        # We want: first 4 elements from unpack result, rest from src
+        unpack_result = _mm512_unpackhi_epi32(a, b)
+        expected_specs = []
+        for i in range(16):
+            if i < 4:
+                expected_specs.append((unpack_result, i))
+            else:
+                expected_specs.append((src, i))
+        
+        expected = construct_zmm_reg_from_elements(32, expected_specs)
+        
+        s.add(output == expected)
+        result = s.check()
+        
+        assert result == sat, "Z3 should find a mask for the target pattern"
+        model_mask = s.model().evaluate(mask).as_long()
+        assert model_mask == 0x000F, f"Expected mask 0x000F (first 4 bits), got 0x{model_mask:04x}"
+
+    def test_mm256_unpack_combo_lo_hi(self):
+        """Test combining unpacklo and unpackhi operations"""
+        s = Solver()
+        
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32)
+        
+        lo_result = _mm256_unpacklo_epi32(a, b)
+        hi_result = _mm256_unpackhi_epi32(a, b)
+        
+        # The lo and hi results should be different (unless inputs have a very specific pattern)
+        s.add(lo_result == hi_result)
+        result = s.check()
+        
+        # This should be satisfiable only in special cases (when certain elements are equal)
+        if result == sat:
+            # If it's satisfiable, verify that the pattern makes sense
+            model = s.model()
+            model_a = model.evaluate(a).as_long()
+            model_b = model.evaluate(b).as_long()
+            
+            # Extract elements to understand the pattern
+            a_elems = [(model_a >> (i * 32)) & 0xFFFFFFFF for i in range(8)]
+            b_elems = [(model_b >> (i * 32)) & 0xFFFFFFFF for i in range(8)]
+            
+            # For lo == hi, we need specific relationships between elements
+            # This is a complex condition, so we just verify that Z3 found a valid solution
+            print(f"Found pattern where lo == hi: a={a_elems}, b={b_elems}")
+
+    def test_mm512_unpack_lane_independence(self):
+        """Test that unpack operations work independently on each 128-bit lane"""
+        s = Solver()
+        
+        # Create inputs where each 128-bit lane has distinct patterns
+        a_vals = [0x10, 0x11, 0x12, 0x13,  # Lane 0
+                  0x20, 0x21, 0x22, 0x23,  # Lane 1
+                  0x30, 0x31, 0x32, 0x33,  # Lane 2
+                  0x40, 0x41, 0x42, 0x43]  # Lane 3
+        b_vals = [0x50, 0x51, 0x52, 0x53,  # Lane 0
+                  0x60, 0x61, 0x62, 0x63,  # Lane 1
+                  0x70, 0x71, 0x72, 0x73,  # Lane 2
+                  0x80, 0x81, 0x82, 0x83]  # Lane 3
+        
+        a = zmm_reg_with_32b_values("a", s, a_vals)
+        b = zmm_reg_with_32b_values("b", s, b_vals)
+        
+        lo_result = _mm512_unpacklo_epi32(a, b)
+        
+        # Verify each lane is processed independently
+        # Lane 0 should produce: [0x10, 0x50, 0x11, 0x51]
+        # Lane 1 should produce: [0x20, 0x60, 0x21, 0x61]
+        # etc.
+        expected = construct_zmm_reg_from_elements(32, [
+            (a, 0), (b, 0), (a, 1), (b, 1),    # Lane 0: 0x10, 0x50, 0x11, 0x51
+            (a, 4), (b, 4), (a, 5), (b, 5),    # Lane 1: 0x20, 0x60, 0x21, 0x61
+            (a, 8), (b, 8), (a, 9), (b, 9),    # Lane 2: 0x30, 0x70, 0x31, 0x71
+            (a, 12), (b, 12), (a, 13), (b, 13) # Lane 3: 0x40, 0x80, 0x41, 0x81
+        ])
+        
+        s.add(lo_result != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for lane independence: {s.model() if result == sat else 'No model'}"
