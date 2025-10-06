@@ -6,11 +6,14 @@ from z3_avx import _mm256_permute_ps
 from z3_avx import _mm512_permute_ps
 from z3_avx import _mm256_permutexvar_epi32
 from z3_avx import _mm512_permutexvar_epi32
+from z3_avx import _mm512_mask_permutexvar_epi32
 from z3_avx import _mm512_permutex2var_epi32
 from z3_avx import _mm512_permutex2var_epi64
 from z3_avx import _mm512_mask_permutex2var_ps
+from z3_avx import _mm512_mask_permutex2var_pd
 from z3_avx import _mm256_permutexvar_epi64
 from z3_avx import _mm512_permutexvar_epi64
+from z3_avx import _mm512_mask_permutexvar_epi64
 from z3_avx import _mm256_shuffle_ps
 from z3_avx import _mm512_shuffle_ps
 from z3_avx import _mm256_shuffle_pd
@@ -22,6 +25,9 @@ from z3_avx import _mm512_shuffle_i32x4
 from z3_avx import _mm256_unpacklo_epi32, _mm256_unpackhi_epi32
 from z3_avx import _mm512_unpacklo_epi32, _mm512_unpackhi_epi32
 from z3_avx import _mm512_mask_unpacklo_epi32, _mm512_mask_unpackhi_epi32
+from z3_avx import _mm512_mask_permute_ps, _mm512_mask_permute_pd
+from z3_avx import _mm512_mask_shuffle_ps, _mm512_mask_shuffle_pd
+from z3_avx import _mm512_mask_permutevar_ps, _mm512_mask_permutevar_pd
 from z3_avx import ymm_reg, ymm_reg_with_32b_values, ymm_reg_with_64b_values, ymm_reg_with_unique_values, ymm_reg_pair_with_unique_values, construct_ymm_reg_from_elements
 from z3_avx import zmm_reg, zmm_reg_with_32b_values, zmm_reg_with_64b_values, zmm_reg_with_unique_values, zmm_reg_pair_with_unique_values, construct_zmm_reg_from_elements
 from z3_avx import ymm_reg_reversed, zmm_reg_reversed
@@ -351,6 +357,333 @@ class TestPermutexvarEpi64:
         model_indices = s.model().evaluate(indices).as_long()
         expected_long = array_to_long(reverse_permute_vector_epi64_avx512, bits=64)
         assert model_indices == expected_long, "Z3 found unexpected reverse permute: got 0x{model_indices:0128x}, expected 0x{expected_long:0128x}"
+
+
+class TestMaskPermutexvarEpi32:
+    """Tests for _mm512_mask_permutexvar_epi32 (512-bit masked variant)"""
+    
+    def test_mm512_mask_permutexvar_epi32_mask_all_zeros(self):
+        """Test with mask all zeros (should preserve src)"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=32)
+        a = zmm_reg_with_unique_values("a", s, bits=32)
+        indices = zmm_reg_with_32b_values("indices", s, null_permute_vector_epi32_avx512)
+        mask = BitVecVal(0, 16)  # All mask bits are 0
+        
+        output = _mm512_mask_permutexvar_epi32(src, mask, indices, a)
+        
+        s.add(output != src)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permutexvar_epi32_mask_all_ones(self):
+        """Test with mask all ones (should equal unmasked operation)"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=32)
+        a = zmm_reg_with_unique_values("a", s, bits=32)
+        indices = zmm_reg_with_32b_values("indices", s, null_permute_vector_epi32_avx512)
+        mask = BitVecVal(0xFFFF, 16)  # All mask bits are 1
+        
+        masked_output = _mm512_mask_permutexvar_epi32(src, mask, indices, a)
+        unmasked_output = _mm512_permutexvar_epi32(a, indices)
+        
+        s.add(masked_output != unmasked_output)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permutexvar_epi32_alternating_mask(self):
+        """Test with alternating mask pattern"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=32)
+        a = zmm_reg_with_unique_values("a", s, bits=32)
+        indices = zmm_reg_with_32b_values("indices", s, reverse_permute_vector_epi32_avx512)
+        mask = BitVecVal(0x5555, 16)  # Alternating: 0101010101010101
+        
+        output = _mm512_mask_permutexvar_epi32(src, mask, indices, a)
+        unmasked = _mm512_permutexvar_epi32(a, indices)
+        
+        # Expected: unmasked result in even positions (mask bit 1), src in odd positions (mask bit 0)
+        expected_specs = []
+        for i in range(16):
+            if i % 2 == 0:
+                expected_specs.append((unmasked, i))
+            else:
+                expected_specs.append((src, i))
+        
+        expected = construct_zmm_reg_from_elements(32, expected_specs)
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for alternating mask: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permutexvar_epi32_single_bit_mask(self):
+        """Test with only one bit set in mask"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=32)
+        a = zmm_reg_with_unique_values("a", s, bits=32)
+        indices = zmm_reg_with_32b_values("indices", s, reverse_permute_vector_epi32_avx512)
+        mask = BitVecVal(1 << 7, 16)  # Only bit 7 is set
+        
+        output = _mm512_mask_permutexvar_epi32(src, mask, indices, a)
+        unmasked = _mm512_permutexvar_epi32(a, indices)
+        
+        # Expected: unmasked result only at position 7, src everywhere else
+        expected_specs = []
+        for i in range(16):
+            if i == 7:
+                expected_specs.append((unmasked, i))
+            else:
+                expected_specs.append((src, i))
+        
+        expected = construct_zmm_reg_from_elements(32, expected_specs)
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for single bit mask: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permutexvar_epi32_partial_mask(self):
+        """Test with lower half masked"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=32)
+        a = zmm_reg_with_unique_values("a", s, bits=32)
+        indices = zmm_reg_with_32b_values("indices", s, reverse_permute_vector_epi32_avx512)
+        mask = BitVecVal(0x00FF, 16)  # Lower 8 bits set
+        
+        output = _mm512_mask_permutexvar_epi32(src, mask, indices, a)
+        
+        reversed_a = zmm_reg_reversed("a_reversed", s, a, bits=32)
+        
+        # Expected: reversed a in positions 0-7, src in positions 8-15
+        expected_specs = []
+        for i in range(16):
+            if i < 8:
+                expected_specs.append((reversed_a, i))
+            else:
+                expected_specs.append((src, i))
+        
+        expected = construct_zmm_reg_from_elements(32, expected_specs)
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for partial mask: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permutexvar_epi32_find_mask_for_identity(self):
+        """Test that Z3 can find mask to preserve src (mask all zeros)"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=32)
+        a = zmm_reg_with_unique_values("a", s, bits=32)
+        indices = zmm_reg_with_32b_values("indices", s, reverse_permute_vector_epi32_avx512)
+        mask = BitVec("mask", 16)
+        
+        output = _mm512_mask_permutexvar_epi32(src, mask, indices, a)
+        
+        s.add(output == src)
+        result = s.check()
+        
+        assert result == sat, "Z3 failed to find mask for identity"
+        model_mask = s.model().evaluate(mask).as_long()
+        assert model_mask == 0, f"Z3 found unexpected mask for identity: got 0x{model_mask:04x}, expected 0x0000"
+    
+    def test_mm512_mask_permutexvar_epi32_find_mask_for_full_permute(self):
+        """Test that Z3 can find mask for full permutation (mask all ones)"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=32)
+        a = zmm_reg_with_unique_values("a", s, bits=32)
+        indices = zmm_reg_with_32b_values("indices", s, null_permute_vector_epi32_avx512)
+        mask = BitVec("mask", 16)
+        
+        output = _mm512_mask_permutexvar_epi32(src, mask, indices, a)
+        
+        s.add(output == a)
+        result = s.check()
+        
+        assert result == sat, "Z3 failed to find mask for full permutation"
+        model_mask = s.model().evaluate(mask).as_long()
+        assert model_mask == 0xFFFF, f"Z3 found unexpected mask for full permutation: got 0x{model_mask:04x}, expected 0xFFFF"
+
+
+class TestMaskPermutexvarEpi64:
+    """Tests for _mm512_mask_permutexvar_epi64 (512-bit masked variant)"""
+    
+    def test_mm512_mask_permutexvar_epi64_mask_all_zeros(self):
+        """Test with mask all zeros (should preserve src)"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=64)
+        a = zmm_reg_with_unique_values("a", s, bits=64)
+        indices = zmm_reg_with_64b_values("indices", s, null_permute_vector_epi64_avx512)
+        mask = BitVecVal(0, 8)  # All mask bits are 0
+        
+        output = _mm512_mask_permutexvar_epi64(src, mask, indices, a)
+        
+        s.add(output != src)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permutexvar_epi64_mask_all_ones(self):
+        """Test with mask all ones (should equal unmasked operation)"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=64)
+        a = zmm_reg_with_unique_values("a", s, bits=64)
+        indices = zmm_reg_with_64b_values("indices", s, null_permute_vector_epi64_avx512)
+        mask = BitVecVal(0xFF, 8)  # All mask bits are 1
+        
+        masked_output = _mm512_mask_permutexvar_epi64(src, mask, indices, a)
+        unmasked_output = _mm512_permutexvar_epi64(a, indices)
+        
+        s.add(masked_output != unmasked_output)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permutexvar_epi64_alternating_mask(self):
+        """Test with alternating mask pattern"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=64)
+        a = zmm_reg_with_unique_values("a", s, bits=64)
+        indices = zmm_reg_with_64b_values("indices", s, reverse_permute_vector_epi64_avx512)
+        mask = BitVecVal(0x55, 8)  # Alternating: 01010101
+        
+        output = _mm512_mask_permutexvar_epi64(src, mask, indices, a)
+        unmasked = _mm512_permutexvar_epi64(a, indices)
+        
+        # Expected: unmasked result in even positions (mask bit 1), src in odd positions (mask bit 0)
+        expected_specs = []
+        for i in range(8):
+            if i % 2 == 0:
+                expected_specs.append((unmasked, i))
+            else:
+                expected_specs.append((src, i))
+        
+        expected = construct_zmm_reg_from_elements(64, expected_specs)
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for alternating mask: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permutexvar_epi64_single_bit_mask(self):
+        """Test with only one bit set in mask"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=64)
+        a = zmm_reg_with_unique_values("a", s, bits=64)
+        indices = zmm_reg_with_64b_values("indices", s, reverse_permute_vector_epi64_avx512)
+        mask = BitVecVal(1 << 3, 8)  # Only bit 3 is set
+        
+        output = _mm512_mask_permutexvar_epi64(src, mask, indices, a)
+        unmasked = _mm512_permutexvar_epi64(a, indices)
+        
+        # Expected: unmasked result only at position 3, src everywhere else
+        expected_specs = []
+        for i in range(8):
+            if i == 3:
+                expected_specs.append((unmasked, i))
+            else:
+                expected_specs.append((src, i))
+        
+        expected = construct_zmm_reg_from_elements(64, expected_specs)
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for single bit mask: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permutexvar_epi64_partial_mask(self):
+        """Test with lower half masked"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=64)
+        a = zmm_reg_with_unique_values("a", s, bits=64)
+        indices = zmm_reg_with_64b_values("indices", s, reverse_permute_vector_epi64_avx512)
+        mask = BitVecVal(0x0F, 8)  # Lower 4 bits set
+        
+        output = _mm512_mask_permutexvar_epi64(src, mask, indices, a)
+        
+        reversed_a = zmm_reg_reversed("a_reversed", s, a, bits=64)
+        
+        # Expected: reversed a in positions 0-3, src in positions 4-7
+        expected_specs = []
+        for i in range(8):
+            if i < 4:
+                expected_specs.append((reversed_a, i))
+            else:
+                expected_specs.append((src, i))
+        
+        expected = construct_zmm_reg_from_elements(64, expected_specs)
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for partial mask: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permutexvar_epi64_find_mask_for_identity(self):
+        """Test that Z3 can find mask to preserve src (mask all zeros)"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=64)
+        a = zmm_reg_with_unique_values("a", s, bits=64)
+        indices = zmm_reg_with_64b_values("indices", s, reverse_permute_vector_epi64_avx512)
+        mask = BitVec("mask", 8)
+        
+        output = _mm512_mask_permutexvar_epi64(src, mask, indices, a)
+        
+        s.add(output == src)
+        result = s.check()
+        
+        assert result == sat, "Z3 failed to find mask for identity"
+        model_mask = s.model().evaluate(mask).as_long()
+        assert model_mask == 0, f"Z3 found unexpected mask for identity: got 0x{model_mask:02x}, expected 0x00"
+    
+    def test_mm512_mask_permutexvar_epi64_find_mask_for_full_permute(self):
+        """Test that Z3 can find mask for full permutation (mask all ones)"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=64)
+        a = zmm_reg_with_unique_values("a", s, bits=64)
+        indices = zmm_reg_with_64b_values("indices", s, null_permute_vector_epi64_avx512)
+        mask = BitVec("mask", 8)
+        
+        output = _mm512_mask_permutexvar_epi64(src, mask, indices, a)
+        
+        s.add(output == a)
+        result = s.check()
+        
+        assert result == sat, "Z3 failed to find mask for full permutation"
+        model_mask = s.model().evaluate(mask).as_long()
+        assert model_mask == 0xFF, f"Z3 found unexpected mask for full permutation: got 0x{model_mask:02x}, expected 0xFF"
+    
+    def test_mm512_mask_permutexvar_epi64_find_indices_and_mask(self):
+        """Test that Z3 can find both indices and mask to achieve a specific pattern"""
+        s = Solver()
+        
+        src = zmm_reg_with_64b_values("src", s, [0x100, 0x101, 0x102, 0x103, 0x104, 0x105, 0x106, 0x107])
+        a = zmm_reg_with_64b_values("a", s, [0x200, 0x201, 0x202, 0x203, 0x204, 0x205, 0x206, 0x207])
+        indices = zmm_reg("indices")
+        mask = BitVec("mask", 8)
+        
+        output = _mm512_mask_permutexvar_epi64(src, mask, indices, a)
+        
+        # We want: first 4 elements reversed from a, last 4 from src unchanged
+        # Expected: [a[3], a[2], a[1], a[0], src[4], src[5], src[6], src[7]]
+        #         = [0x203, 0x202, 0x201, 0x200, 0x104, 0x105, 0x106, 0x107]
+        expected = construct_zmm_reg_from_elements(64, [
+            (a, 3), (a, 2), (a, 1), (a, 0),
+            (src, 4), (src, 5), (src, 6), (src, 7)
+        ])
+        
+        s.add(output == expected)
+        result = s.check()
+        
+        assert result == sat, "Z3 failed to find indices and mask for pattern"
+        model_mask = s.model().evaluate(mask).as_long()
+        # Lower 4 bits should be set (positions 0-3 use permuted values)
+        assert model_mask == 0x0F, f"Z3 found unexpected mask: got 0x{model_mask:02x}, expected 0x0F"
 
 
 class TestPermutex2varEpi32:
@@ -1235,6 +1568,253 @@ class TestMaskPermutex2varPs:
         assert model_mask == 0x00FF, f"Expected mask 0x00FF for first 8 elements, got 0x{model_mask:04x}"
 
 
+class TestMaskPermutex2varPd:
+    """Tests for _mm512_mask_permutex2var_pd (512-bit masked variant for 64-bit)"""
+    
+    def test_mm512_mask_permutex2var_pd_mask_all_zeros(self):
+        """Test with mask all zeros (should preserve a)"""
+        s = Solver()
+        
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        indices = zmm_reg_with_64b_values("indices", s, null_permutex2var_vector_epi64_avx512)
+        mask = BitVecVal(0, 8)
+        output = _mm512_mask_permutex2var_pd(a, mask, indices, b)
+        
+        s.add(a != output)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permutex2var_pd_mask_all_ones(self):
+        """Test with mask all ones (should equal unmasked)"""
+        s = Solver()
+        
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        indices = zmm_reg_with_64b_values("indices", s, null_permutex2var_vector_epi64_avx512)
+        mask = BitVecVal(0xFF, 8)
+        
+        masked_output = _mm512_mask_permutex2var_pd(a, mask, indices, b)
+        unmasked_output = _mm512_permutex2var_epi64(a, indices, b)
+        
+        s.add(masked_output != unmasked_output)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permutex2var_pd_alternating_mask(self):
+        """Test with alternating mask pattern"""
+        s = Solver()
+        
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        select_b_indices = [(1 << 3) | i for i in range(8)]
+        indices = zmm_reg_with_64b_values("indices", s, select_b_indices)
+        mask = BitVecVal(0x55, 8)  # 01010101
+        
+        output = _mm512_mask_permutex2var_pd(a, mask, indices, b)
+        unmasked = _mm512_permutex2var_epi64(a, indices, b)
+        
+        # Expected: unmasked result in even positions, a in odd positions
+        expected_specs = []
+        for i in range(8):
+            if i % 2 == 0:
+                expected_specs.append((unmasked, i))
+            else:
+                expected_specs.append((a, i))
+        
+        expected = construct_zmm_reg_from_elements(64, expected_specs)
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for alternating mask: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permutex2var_pd_single_bit_mask(self):
+        """Test with only one bit set in mask"""
+        s = Solver()
+        
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        indices = zmm_reg_with_64b_values("indices", s, [(1 << 3) | 5] * 8)
+        mask = BitVecVal(1 << 3, 8)  # Only bit 3
+        output = _mm512_mask_permutex2var_pd(a, mask, indices, b)
+        
+        expected_specs = []
+        for i in range(8):
+            if i == 3:
+                expected_specs.append((b, 5))
+            else:
+                expected_specs.append((a, i))
+        
+        expected = construct_zmm_reg_from_elements(64, expected_specs)
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for single bit mask: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permutex2var_pd_partial_mask(self):
+        """Test with lower half masked"""
+        s = Solver()
+        
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        reverse_a_indices = [(0 << 3) | (7 - i) for i in range(8)]
+        indices = zmm_reg_with_64b_values("indices", s, reverse_a_indices)
+        mask = BitVecVal(0x0F, 8)  # Lower 4 bits set
+        
+        output = _mm512_mask_permutex2var_pd(a, mask, indices, b)
+        reversed_a = zmm_reg_reversed("a_reversed", s, a, bits=64)
+        
+        # Expected: reversed a in positions 0-3, original a in positions 4-7
+        expected_specs = []
+        for i in range(8):
+            if i < 4:
+                expected_specs.append((reversed_a, i))
+            else:
+                expected_specs.append((a, i))
+        
+        expected = construct_zmm_reg_from_elements(64, expected_specs)
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for partial mask: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permutex2var_pd_mixed_sources_with_mask(self):
+        """Test with mixed sources and selective masking"""
+        s = Solver()
+        
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        mixed_indices = []
+        for i in range(8):
+            if i % 2 == 0:
+                mixed_indices.append((0 << 3) | i)
+            else:
+                mixed_indices.append((1 << 3) | i)
+        
+        indices = zmm_reg_with_64b_values("indices", s, mixed_indices)
+        mask = BitVecVal(0x55, 8)  # 01010101
+        output = _mm512_mask_permutex2var_pd(a, mask, indices, b)
+        
+        expected_specs = [(a, i) for i in range(8)]
+        expected = construct_zmm_reg_from_elements(64, expected_specs)
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for mixed sources with mask: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permutex2var_pd_find_identity_mask(self):
+        """Test that Z3 can find mask to preserve a (mask all zeros)"""
+        s = Solver()
+        
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        indices = zmm_reg_with_64b_values("indices", s, [(1 << 3) | 7] * 8)
+        mask = BitVec("mask", 8)
+        output = _mm512_mask_permutex2var_pd(a, mask, indices, b)
+        
+        s.add(output == a)
+        result = s.check()
+        
+        assert result == sat, "Z3 failed to find mask for identity"
+        model_mask = s.model().evaluate(mask).as_long()
+        assert model_mask == 0, f"Z3 found unexpected mask for identity: got 0x{model_mask:02x}, expected 0x00"
+    
+    def test_mm512_mask_permutex2var_pd_find_full_permute_mask(self):
+        """Test that Z3 can find mask for full permutation (mask all ones)"""
+        s = Solver()
+        
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        indices = zmm_reg_with_64b_values("indices", s, [(1 << 3) | i for i in range(8)])
+        mask = BitVec("mask", 8)
+        output = _mm512_mask_permutex2var_pd(a, mask, indices, b)
+        
+        s.add(output == b)
+        result = s.check()
+        
+        assert result == sat, "Z3 failed to find mask for full permutation"
+        model_mask = s.model().evaluate(mask).as_long()
+        assert model_mask == 0xFF, f"Z3 found unexpected mask for full permutation: got 0x{model_mask:02x}, expected 0xFF"
+    
+    def test_mm512_mask_permutex2var_pd_find_partial_mask(self):
+        """Test that Z3 can find mask for partial permutation"""
+        s = Solver()
+        
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        indices = zmm_reg_with_64b_values("indices", s, [(1 << 3) | i for i in range(8)])
+        mask = BitVec("mask", 8)
+        output = _mm512_mask_permutex2var_pd(a, mask, indices, b)
+        
+        expected_specs = []
+        for i in range(8):
+            if i < 3:
+                expected_specs.append((b, i))
+            else:
+                expected_specs.append((a, i))
+        
+        expected = construct_zmm_reg_from_elements(64, expected_specs)
+        
+        s.add(output == expected)
+        result = s.check()
+        
+        assert result == sat, "Z3 failed to find mask for partial permutation"
+        model_mask = s.model().evaluate(mask).as_long()
+        assert model_mask == 0x07, f"Z3 found unexpected mask for partial permutation: got 0x{model_mask:02x}, expected 0x07"
+    
+    def test_mm512_mask_permutex2var_pd_find_indices_with_mask(self):
+        """Test that Z3 can find indices to achieve pattern with fixed mask"""
+        s = Solver()
+        
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        mask = BitVecVal(0x55, 8)  # 01010101
+        indices = zmm_reg("indices")
+        output = _mm512_mask_permutex2var_pd(a, mask, indices, b)
+        
+        expected_specs = []
+        for i in range(8):
+            if i % 2 == 0:
+                expected_specs.append((b, 0))  # Want b[0] in even positions
+            else:
+                expected_specs.append((a, i))  # Original a[i] in odd positions
+        
+        expected = construct_zmm_reg_from_elements(64, expected_specs)
+        
+        s.add(output == expected)
+        result = s.check()
+        assert result == sat, "Z3 failed to find indices for target pattern"
+        model_indices = s.model().evaluate(indices).as_long()
+        
+        # For even positions, should have: source_selector=1 (b), offset=0
+        # Check position 0: should be (1 << 3) | 0 = 8
+        pos0_index = (model_indices >> (0 * 64)) & 0xF  # Extract 4 bits for position 0
+        assert pos0_index == 8, f"Position 0 index should be 8 (select b[0]), got {pos0_index}"
+    
+    def test_mm512_mask_permutex2var_pd_cross_source_reverse(self):
+        """Test reversing elements with cross-source selection"""
+        s = Solver()
+        
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        
+        # Create indices that reverse and alternate between sources
+        # Position 0 gets b[7] (source=1, offset=7), position 1 gets a[6] (source=0, offset=6), etc.
+        cross_reverse_indices = []
+        for i in range(8):
+            offset = 7 - i
+            # When i is even, select from b (source=1); when odd, select from a (source=0)
+            source = 1 if i % 2 == 0 else 0
+            cross_reverse_indices.append((source << 3) | offset)
+        
+        indices = zmm_reg_with_64b_values("indices", s, cross_reverse_indices)
+        mask = BitVecVal(0xFF, 8)  # All bits set
+        output = _mm512_mask_permutex2var_pd(a, mask, indices, b)
+        
+        expected_specs = []
+        for i in range(8):
+            offset = 7 - i
+            if i % 2 == 0:
+                expected_specs.append((b, offset))
+            else:
+                expected_specs.append((a, offset))
+        
+        expected = construct_zmm_reg_from_elements(64, expected_specs)
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for cross-source reverse: {s.model() if result == sat else 'No model'}"
+
+
 class TestUnpackEpi32:
     """Tests for unpack 32-bit integer instructions"""
     
@@ -1572,3 +2152,433 @@ class TestUnpackEpi32:
         s.add(lo_result != expected)
         result = s.check()
         assert result == unsat, f"Z3 found a counterexample for lane independence: {s.model() if result == sat else 'No model'}"
+
+
+class TestMaskPermutePs:
+    """Tests for _mm512_mask_permute_ps"""
+    
+    def test_mm512_mask_permute_ps_mask_all_zeros(self):
+        """Test with mask all zeros (should preserve src)"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=32)
+        a = zmm_reg_with_unique_values("a", s, bits=32)
+        mask = BitVecVal(0, 16)
+        
+        output = _mm512_mask_permute_ps(src, mask, a, null_permute_epi32_imm8)
+        
+        s.add(output != src)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permute_ps_mask_all_ones(self):
+        """Test with mask all ones (should equal unmasked)"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=32)
+        a = zmm_reg_with_unique_values("a", s, bits=32)
+        mask = BitVecVal(0xFFFF, 16)
+        
+        masked_output = _mm512_mask_permute_ps(src, mask, a, null_permute_epi32_imm8)
+        unmasked_output = _mm512_permute_ps(a, null_permute_epi32_imm8)
+        
+        s.add(masked_output != unmasked_output)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permute_ps_alternating_mask(self):
+        """Test with alternating mask pattern"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=32)
+        a = zmm_reg_with_unique_values("a", s, bits=32)
+        mask = BitVecVal(0x5555, 16)  # Alternating: 0101010101010101
+        imm8 = _MM_SHUFFLE(0, 1, 2, 3)  # Reverse within lanes
+        
+        output = _mm512_mask_permute_ps(src, mask, a, imm8)
+        unmasked = _mm512_permute_ps(a, imm8)
+        
+        # Expected: unmasked result in even positions, src in odd positions
+        expected_specs = []
+        for i in range(16):
+            if i % 2 == 0:
+                expected_specs.append((unmasked, i))
+            else:
+                expected_specs.append((src, i))
+        
+        expected = construct_zmm_reg_from_elements(32, expected_specs)
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for alternating mask: {s.model() if result == sat else 'No model'}"
+
+
+class TestMaskPermutePd:
+    """Tests for _mm512_mask_permute_pd"""
+    
+    def test_mm512_mask_permute_pd_mask_all_zeros(self):
+        """Test with mask all zeros (should preserve src)"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=64)
+        a = zmm_reg_with_unique_values("a", s, bits=64)
+        mask = BitVecVal(0, 8)
+        
+        output = _mm512_mask_permute_pd(src, mask, a, null_permute_pd_imm8)
+        
+        s.add(output != src)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permute_pd_mask_all_ones(self):
+        """Test with mask all ones (should equal unmasked)"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=64)
+        a = zmm_reg_with_unique_values("a", s, bits=64)
+        mask = BitVecVal(0xFF, 8)
+        
+        masked_output = _mm512_mask_permute_pd(src, mask, a, null_permute_pd_imm8)
+        unmasked_output = _mm512_permute_pd(a, null_permute_pd_imm8)
+        
+        s.add(masked_output != unmasked_output)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permute_pd_single_bit_mask(self):
+        """Test with only one bit set in mask"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=64)
+        a = zmm_reg_with_unique_values("a", s, bits=64)
+        mask = BitVecVal(1 << 3, 8)  # Only bit 3
+        imm8 = _MM_SHUFFLE2(0, 1)  # Swap within lanes
+        
+        output = _mm512_mask_permute_pd(src, mask, a, imm8)
+        unmasked = _mm512_permute_pd(a, imm8)
+        
+        # Expected: unmasked result only at position 3, src everywhere else
+        expected_specs = []
+        for i in range(8):
+            if i == 3:
+                expected_specs.append((unmasked, i))
+            else:
+                expected_specs.append((src, i))
+        
+        expected = construct_zmm_reg_from_elements(64, expected_specs)
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for single bit mask: {s.model() if result == sat else 'No model'}"
+
+
+class TestMaskShufflePs:
+    """Tests for _mm512_mask_shuffle_ps"""
+    
+    def test_mm512_mask_shuffle_ps_mask_all_zeros(self):
+        """Test with mask all zeros (should preserve src)"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=32)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
+        mask = BitVecVal(0, 16)
+        
+        output = _mm512_mask_shuffle_ps(src, mask, a, b, null_shuffle_ps_2vec_imm8)
+        
+        s.add(output != src)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_shuffle_ps_mask_all_ones(self):
+        """Test with mask all ones (should equal unmasked)"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=32)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
+        mask = BitVecVal(0xFFFF, 16)
+        
+        masked_output = _mm512_mask_shuffle_ps(src, mask, a, b, null_shuffle_ps_2vec_imm8)
+        unmasked_output = _mm512_shuffle_ps(a, b, null_shuffle_ps_2vec_imm8)
+        
+        s.add(masked_output != unmasked_output)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_shuffle_ps_partial_mask(self):
+        """Test with partial mask (lower half only)"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=32)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
+        mask = BitVecVal(0x00FF, 16)  # Lower 8 bits set
+        
+        output = _mm512_mask_shuffle_ps(src, mask, a, b, null_shuffle_ps_2vec_imm8)
+        unmasked = _mm512_shuffle_ps(a, b, null_shuffle_ps_2vec_imm8)
+        
+        # Expected: unmasked result in positions 0-7, src in positions 8-15
+        expected_specs = []
+        for i in range(16):
+            if i < 8:
+                expected_specs.append((unmasked, i))
+            else:
+                expected_specs.append((src, i))
+        
+        expected = construct_zmm_reg_from_elements(32, expected_specs)
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for partial mask: {s.model() if result == sat else 'No model'}"
+
+
+class TestMaskShufflePd:
+    """Tests for _mm512_mask_shuffle_pd"""
+    
+    def test_mm512_mask_shuffle_pd_mask_all_zeros(self):
+        """Test with mask all zeros (should preserve src)"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=64)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        mask = BitVecVal(0, 8)
+        
+        output = _mm512_mask_shuffle_pd(src, mask, a, b, null_shuffle_pd_avx512_imm8)
+        
+        s.add(output != src)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_shuffle_pd_mask_all_ones(self):
+        """Test with mask all ones (should equal unmasked)"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=64)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        mask = BitVecVal(0xFF, 8)
+        
+        masked_output = _mm512_mask_shuffle_pd(src, mask, a, b, null_shuffle_pd_avx512_imm8)
+        unmasked_output = _mm512_shuffle_pd(a, b, null_shuffle_pd_avx512_imm8)
+        
+        s.add(masked_output != unmasked_output)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_shuffle_pd_alternating_mask(self):
+        """Test with alternating mask pattern"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=64)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        mask = BitVecVal(0x55, 8)  # 01010101
+        
+        output = _mm512_mask_shuffle_pd(src, mask, a, b, null_shuffle_pd_avx512_imm8)
+        unmasked = _mm512_shuffle_pd(a, b, null_shuffle_pd_avx512_imm8)
+        
+        # Expected: unmasked result in even positions, src in odd positions
+        expected_specs = []
+        for i in range(8):
+            if i % 2 == 0:
+                expected_specs.append((unmasked, i))
+            else:
+                expected_specs.append((src, i))
+        
+        expected = construct_zmm_reg_from_elements(64, expected_specs)
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for alternating mask: {s.model() if result == sat else 'No model'}"
+
+
+class TestMaskPermutevarPs:
+    """Tests for _mm512_mask_permutevar_ps"""
+    
+    def test_mm512_mask_permutevar_ps_mask_all_zeros(self):
+        """Test with mask all zeros (should preserve src)"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=32)
+        a = zmm_reg_with_unique_values("a", s, bits=32)
+        # Create control vector for identity permute within lanes
+        ctrl = zmm_reg_with_32b_values("ctrl", s, [i % 4 for i in range(16)])
+        mask = BitVecVal(0, 16)
+        
+        output = _mm512_mask_permutevar_ps(src, mask, a, ctrl)
+        
+        s.add(output != src)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permutevar_ps_identity_permute(self):
+        """Test identity permutation within lanes"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=32)
+        a = zmm_reg_with_unique_values("a", s, bits=32)
+        # Create control vector: each element selects itself within its lane
+        # Lane 0: [0, 1, 2, 3], Lane 1: [0, 1, 2, 3], etc.
+        ctrl = zmm_reg_with_32b_values("ctrl", s, [i % 4 for i in range(16)])
+        mask = BitVecVal(0xFFFF, 16)
+        
+        output = _mm512_mask_permutevar_ps(src, mask, a, ctrl)
+        
+        s.add(output != a)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for identity permute: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permutevar_ps_reverse_within_lanes(self):
+        """Test reversing elements within each 128-bit lane"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=32)
+        a = zmm_reg_with_unique_values("a", s, bits=32)
+        # Create control vector: reverse within each lane [3, 2, 1, 0, 3, 2, 1, 0, ...]
+        ctrl = zmm_reg_with_32b_values("ctrl", s, [3 - (i % 4) for i in range(16)])
+        mask = BitVecVal(0xFFFF, 16)
+        
+        output = _mm512_mask_permutevar_ps(src, mask, a, ctrl)
+        
+        # Expected: each 128-bit lane is reversed
+        expected = construct_zmm_reg_from_elements(32, [
+            (a, 3), (a, 2), (a, 1), (a, 0),      # Lane 0 reversed
+            (a, 7), (a, 6), (a, 5), (a, 4),      # Lane 1 reversed
+            (a, 11), (a, 10), (a, 9), (a, 8),    # Lane 2 reversed
+            (a, 15), (a, 14), (a, 13), (a, 12)   # Lane 3 reversed
+        ])
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for reverse within lanes: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permutevar_ps_broadcast_within_lanes(self):
+        """Test broadcasting first element within each lane"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=32)
+        a = zmm_reg_with_unique_values("a", s, bits=32)
+        # Create control vector: all zeros (broadcast element 0 of each lane)
+        ctrl = zmm_reg_with_32b_values("ctrl", s, [0] * 16)
+        mask = BitVecVal(0xFFFF, 16)
+        
+        output = _mm512_mask_permutevar_ps(src, mask, a, ctrl)
+        
+        # Expected: first element of each lane broadcast to all positions in that lane
+        expected = construct_zmm_reg_from_elements(32, [
+            (a, 0), (a, 0), (a, 0), (a, 0),      # Lane 0: all a[0]
+            (a, 4), (a, 4), (a, 4), (a, 4),      # Lane 1: all a[4]
+            (a, 8), (a, 8), (a, 8), (a, 8),      # Lane 2: all a[8]
+            (a, 12), (a, 12), (a, 12), (a, 12)   # Lane 3: all a[12]
+        ])
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for broadcast within lanes: {s.model() if result == sat else 'No model'}"
+
+
+class TestMaskPermutevarPd:
+    """Tests for _mm512_mask_permutevar_pd"""
+    
+    def test_mm512_mask_permutevar_pd_mask_all_zeros(self):
+        """Test with mask all zeros (should preserve src)"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=64)
+        a = zmm_reg_with_unique_values("a", s, bits=64)
+        # Create control vector for identity permute (bits at positions 1, 65, 129, 193, 257, 321, 385, 449 = 0)
+        ctrl = zmm_reg("ctrl")
+        mask = BitVecVal(0, 8)
+        
+        output = _mm512_mask_permutevar_pd(src, mask, a, ctrl)
+        
+        s.add(output != src)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permutevar_pd_identity_permute(self):
+        """Test identity permutation within lanes"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=64)
+        a = zmm_reg_with_unique_values("a", s, bits=64)
+        # Create control vector with bits at correct positions set to 0 for identity
+        # Positions: [1, 65, 129, 193, 257, 321, 385, 449] should be [0, 1, 0, 1, 0, 1, 0, 1]
+        ctrl = zmm_reg("ctrl")
+        # Set control bits: element j%2 of each lane
+        s.add(Extract(1, 1, ctrl) == 0)      # Element 0 selects from position 0
+        s.add(Extract(65, 65, ctrl) == 1)    # Element 1 selects from position 1
+        s.add(Extract(129, 129, ctrl) == 0)  # Element 2 selects from position 0
+        s.add(Extract(193, 193, ctrl) == 1)  # Element 3 selects from position 1
+        s.add(Extract(257, 257, ctrl) == 0)  # Element 4 selects from position 0
+        s.add(Extract(321, 321, ctrl) == 1)  # Element 5 selects from position 1
+        s.add(Extract(385, 385, ctrl) == 0)  # Element 6 selects from position 0
+        s.add(Extract(449, 449, ctrl) == 1)  # Element 7 selects from position 1
+        mask = BitVecVal(0xFF, 8)
+        
+        output = _mm512_mask_permutevar_pd(src, mask, a, ctrl)
+        
+        s.add(output != a)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for identity permute: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permutevar_pd_swap_within_lanes(self):
+        """Test swapping elements within each 128-bit lane"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=64)
+        a = zmm_reg_with_unique_values("a", s, bits=64)
+        # Create control vector: swap within each lane
+        ctrl = zmm_reg("ctrl")
+        # Set control bits to swap: [1, 0, 1, 0, 1, 0, 1, 0]
+        s.add(Extract(1, 1, ctrl) == 1)      # Element 0 selects from position 1
+        s.add(Extract(65, 65, ctrl) == 0)    # Element 1 selects from position 0
+        s.add(Extract(129, 129, ctrl) == 1)  # Element 2 selects from position 1
+        s.add(Extract(193, 193, ctrl) == 0)  # Element 3 selects from position 0
+        s.add(Extract(257, 257, ctrl) == 1)  # Element 4 selects from position 1
+        s.add(Extract(321, 321, ctrl) == 0)  # Element 5 selects from position 0
+        s.add(Extract(385, 385, ctrl) == 1)  # Element 6 selects from position 1
+        s.add(Extract(449, 449, ctrl) == 0)  # Element 7 selects from position 0
+        mask = BitVecVal(0xFF, 8)
+        
+        output = _mm512_mask_permutevar_pd(src, mask, a, ctrl)
+        
+        # Expected: each pair within 128-bit lanes is swapped
+        expected = construct_zmm_reg_from_elements(64, [
+            (a, 1), (a, 0),  # Lane 0 swapped
+            (a, 3), (a, 2),  # Lane 1 swapped
+            (a, 5), (a, 4),  # Lane 2 swapped
+            (a, 7), (a, 6)   # Lane 3 swapped
+        ])
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for swap within lanes: {s.model() if result == sat else 'No model'}"
+    
+    def test_mm512_mask_permutevar_pd_broadcast_within_lanes(self):
+        """Test broadcasting first element within each lane"""
+        s = Solver()
+        
+        src = zmm_reg_with_unique_values("src", s, bits=64)
+        a = zmm_reg_with_unique_values("a", s, bits=64)
+        # Create control vector: all control bits = 0 (broadcast element 0 of each lane)
+        ctrl = zmm_reg("ctrl")
+        s.add(Extract(1, 1, ctrl) == 0)
+        s.add(Extract(65, 65, ctrl) == 0)
+        s.add(Extract(129, 129, ctrl) == 0)
+        s.add(Extract(193, 193, ctrl) == 0)
+        s.add(Extract(257, 257, ctrl) == 0)
+        s.add(Extract(321, 321, ctrl) == 0)
+        s.add(Extract(385, 385, ctrl) == 0)
+        s.add(Extract(449, 449, ctrl) == 0)
+        mask = BitVecVal(0xFF, 8)
+        
+        output = _mm512_mask_permutevar_pd(src, mask, a, ctrl)
+        
+        # Expected: first element of each lane broadcast
+        expected = construct_zmm_reg_from_elements(64, [
+            (a, 0), (a, 0),  # Lane 0: both a[0]
+            (a, 2), (a, 2),  # Lane 1: both a[2]
+            (a, 4), (a, 4),  # Lane 2: both a[4]
+            (a, 6), (a, 6)   # Lane 3: both a[6]
+        ])
+        
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for broadcast within lanes: {s.model() if result == sat else 'No model'}"
