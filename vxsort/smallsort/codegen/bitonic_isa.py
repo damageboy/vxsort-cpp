@@ -4,7 +4,6 @@ from utils import next_power_of_2
 
 
 class BitonicISA(ABC, metaclass=ABCMeta):
-
     @abstractmethod
     def vector_size(self):
         pass
@@ -14,7 +13,7 @@ class BitonicISA(ABC, metaclass=ABCMeta):
         pass
 
     def largest_merge_variant_needed(self):
-        return next_power_of_2(self.max_bitonic_sort_vectors());
+        return next_power_of_2(self.max_bitonic_sort_vectors())
 
     @abstractmethod
     def vector_size(self):
@@ -37,7 +36,6 @@ class BitonicISA(ABC, metaclass=ABCMeta):
     def generate_epilogue(self):
         pass
 
-
     @abstractmethod
     def generate_1v_basic_sorters(self, ascending: bool):
         pass
@@ -59,11 +57,11 @@ class BitonicISA(ABC, metaclass=ABCMeta):
         pass
 
     @abstractmethod
-    def generate_entry_points_full_vectors(self, ascending : bool):
+    def generate_entry_points_full_vectors(self, ascending: bool):
         pass
 
     @abstractmethod
-    def generate_master_entry_point_full(self, ascending : bool):
+    def generate_master_entry_point_full(self, ascending: bool):
         pass
 
     @abstractmethod

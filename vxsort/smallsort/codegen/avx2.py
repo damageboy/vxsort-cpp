@@ -97,7 +97,6 @@ class AVX2BitonicISA(BitonicISA):
             return self.d2t(f"_mm256_shuffle_pd({self.t2d(v)}, {self.t2d(v)}, 0b0'1'0'1)")
         raise Exception("WTF")
 
-
     def generate_shuffle_X2(self, v: str):
         size = self.vector_size()
         if size == 16:
@@ -107,7 +106,6 @@ class AVX2BitonicISA(BitonicISA):
         elif size == 4:
             return self.d2t(f"_mm256_permute4x64_pd({self.t2d(v)}, 0b01'00'11'10)")
         raise Exception("WTF")
-
 
     def generate_shuffle_X4(self, v: str):
         size = self.vector_size()
@@ -154,11 +152,10 @@ class AVX2BitonicISA(BitonicISA):
         if size == 16:
             size = 8
 
-
         mask = 0
         s = size
         while s > 0:
-            mask = mask <<  width | blend
+            mask = mask << width | blend
             s -= width
 
         if not asc:
@@ -173,13 +170,11 @@ class AVX2BitonicISA(BitonicISA):
         # There is only one known case where we need something like this,
         # So check for it or raise an exception:
         if size == 16 and width == 16 and blend == 0b0101010110101010:
-            return self.i2t(f"_mm256_blendv_epi8({self.t2i(v1)}, {self.t2i(v2)}, x1_blend)");
+            return self.i2t(f"_mm256_blendv_epi8({self.t2i(v1)}, {self.t2i(v2)}, x1_blend)")
 
         mask = self.generate_blend_mask(blend, width, asc)
         if size == 16:
             if width == 16:
-
-
                 return self.i2t(f"_mm256_blend_epi32({self.t2i(v1)}, {self.t2i(v2)}, 0b{mask:08b})")
             else:
                 return self.i2t(f"_mm256_blend_epi16({self.t2i(v1)}, {self.t2i(v2)}, 0b{mask:08b})")
@@ -188,7 +183,6 @@ class AVX2BitonicISA(BitonicISA):
         elif size == 4:
             return self.d2t(f"_mm256_blend_pd({self.t2d(v1)}, {self.t2d(v2)}, 0b{mask:08b})")
         raise Exception("WTF")
-
 
     def generate_vec_blend(self, v1: str, v2: str, blend: str):
         return
@@ -282,11 +276,10 @@ class AVX2BitonicISA(BitonicISA):
             load = f"_mm256_maskload_ps(({t} const *) ((__m256 const *) {v} + {offset}), {mask})"
             return f"_mm256_or_ps({load}, {max_value})"
 
-
         if t == "i64" or t == "u64":
             it = "long long"
         else:
-            it = t[1:] if t[0] == 'u' else t
+            it = t[1:] if t[0] == "u" else t
 
         load = f"_mm256_maskload_{int_suffix}(({it} const *) ((__m256i const *) {v} + {offset}), {mask})"
         return f"_mm256_or_si256({load}, {max_value})"
@@ -315,7 +308,7 @@ class AVX2BitonicISA(BitonicISA):
         if t == "i64" or t == "u64":
             it = "long long"
         else:
-            it = t[1:] if t[0] == 'u' else t;
+            it = t[1:] if t[0] == "u" else t
         return f"_mm256_maskstore_{int_suffix}(({it} *) ((__m256i *) {ptr} + {offset}), {mask}, {value})"
 
     def generate_cmp_var(self):
@@ -323,7 +316,6 @@ class AVX2BitonicISA(BitonicISA):
             return "TV cmp"
 
         return AVX2BitonicISA.REMOVE_ME
-
 
     def generate_topbit_vec(self):
         if self.type == "u64":
@@ -338,7 +330,6 @@ class AVX2BitonicISA(BitonicISA):
             return f"const TV x1 = _mm256_set_epi64x(0x{l2:08X}, 0x{l1:08X}, 0x{l2:08X}, 0x{l1:08X})"
 
         return AVX2BitonicISA.REMOVE_ME
-
 
     def generate_x1_epi16_blend_vec(self, asc: bool):
         if self.type == "u16" or self.type == "i16":
@@ -407,7 +398,7 @@ public:
 
 #include "../../vxsort_targets_disable.h"
 
-#endif""");
+#endif""")
 
     def generate_1v_basic_sorters(self, asc: bool):
         g = self
@@ -486,8 +477,7 @@ public:
         TV min, max, s;
         {g.generate_cmp_var()};
         {g.generate_topbit_vec()};
-        {g.generate_x1_epi16_shuffle_vec()};""");
-
+        {g.generate_x1_epi16_shuffle_vec()};""")
         if g.vector_size() >= 16:
             g.clean_print(f"""
         s = {g.generate_shuffle_X8("d01")};
@@ -521,8 +511,7 @@ public:
         type = self.type
         g = self
         maybe_cmp = lambda: ", cmp" if (type == "i64" or type == "u64") else ""
-        maybe_topbit = lambda: f"\n        TV topBit = _mm256_set1_epi64x(1LLU << 63);" if (
-                type == "u64") else ""
+        maybe_topbit = lambda: f"\n        TV topBit = _mm256_set1_epi64x(1LLU << 63);" if (type == "u64") else ""
 
         w1 = int(next_power_of_2(width) / 2)
         w2 = int(width - w1)
@@ -557,7 +546,6 @@ public:
         {r_var} = {g.generate_max(f"{l_var}", f"{r_var}")};
         {l_var} = {g.generate_min(f"{l_var}", "tmp")};""")
 
-
         g.clean_print(f"""
         merge_{w1:02d}v_{sfx}({g.generate_param_list(1, w1)});
         merge_{w2:02d}v_{sfx}({g.generate_param_list(w1 + 1, w2)});""")
@@ -567,8 +555,7 @@ public:
         type = self.type
         g = self
         maybe_cmp = lambda: ", cmp" if (type == "i64" or type == "u64") else ""
-        maybe_topbit = lambda: f"\n        TV topBit = _mm256_set1_epi64x(1LLU << 63);" if (
-                type == "u64") else ""
+        maybe_topbit = lambda: f"\n        TV topBit = _mm256_set1_epi64x(1LLU << 63);" if (type == "u64") else ""
 
         w1 = int(next_power_of_2(width) / 2)
         w2 = int(width - w1)
@@ -624,7 +611,6 @@ public:
         dr = {g.generate_max("dr", "tmp")};""")
         g.clean_print("    }\n")
 
-
     def generate_entry_points_full_vectors(self, asc: bool):
         type = self.type
         g = self
@@ -654,14 +640,14 @@ public:
         const auto mask = _mm256_cvtepi8_epi{int(256 / self.vector_size())}(_mm_loadu_si128((__m128i*)(mask_table_{self.vector_size()} + remainder * N)));
 """)
 
-            for l in range(0, m-1):
+            for l in range(0, m - 1):
                 g.clean_print(f"        TV d{l + 1:02d} = {g.get_load_intrinsic('ptr', l)};")
 
             g.clean_print(f"        TV d{m:02d} = {g.get_mask_load_intrinsic('ptr', m - 1, 'mask')};")
 
             g.clean_print(f"        sort_{m:02d}v_ascending({g.generate_param_list(1, m)});")
 
-            for l in range(0, m-1):
+            for l in range(0, m - 1):
                 g.clean_print(f"        {g.get_store_intrinsic('ptr', l, f'd{l + 1:02d}')};")
             g.clean_print(f"        {g.get_mask_store_intrinsic('ptr', m - 1, f'd{m:02d}', 'mask')};")
 
