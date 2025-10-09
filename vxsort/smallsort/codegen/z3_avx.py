@@ -541,22 +541,22 @@ def _mm512_permutex2var_epi64(a: BitVecRef, idx: BitVecRef, b: BitVecRef):
     return _generic_permutex2var(a, idx, b, 64)
 
 
-# AVX512: vpermt2ps/_mm512_mask_permutex2var_ps (masked version)
-def _mm512_mask_permutex2var_ps(a: BitVecRef, k: BitVecRef, idx: BitVecRef, b: BitVecRef):
+# AVX512: vpermi2d/vpermt2d/_mm512_mask_permutex2var_epi32 (masked version)
+def _mm512_mask_permutex2var_epi32(a: BitVecRef, k: BitVecRef, idx: BitVecRef, b: BitVecRef):
     """
-    Shuffle single-precision (32-bit) floating-point elements in a and b across lanes using writemask.
-    Implements __m512 _mm512_mask_permutex2var_ps (__m512 a, __mmask16 k, __m512i idx, __m512 b)
+    Shuffle 32-bit integer elements in a and b across lanes using writemask.
+    Implements __m512i _mm512_mask_permutex2var_epi32 (__m512i a, __mmask16 k, __m512i idx, __m512i b)
     Elements are copied from a when the corresponding mask bit is not set.
     See _generic_permutex2var for operation details.
     """
     return _generic_permutex2var(a, idx, b, 32, src=a, mask=k)
 
 
-# AVX512: vpermt2pd/_mm512_mask_permutex2var_pd (masked version for 64-bit)
-def _mm512_mask_permutex2var_pd(a: BitVecRef, k: BitVecRef, idx: BitVecRef, b: BitVecRef):
+# AVX512: vpermi2q/vpermt2q/_mm512_mask_permutex2var_epi64 (masked version for 64-bit)
+def _mm512_mask_permutex2var_epi64(a: BitVecRef, k: BitVecRef, idx: BitVecRef, b: BitVecRef):
     """
-    Shuffle double-precision (64-bit) floating-point elements in a and b across lanes using writemask.
-    Implements __m512d _mm512_mask_permutex2var_pd (__m512d a, __mmask8 k, __m512i idx, __m512d b)
+    Shuffle 64-bit integer elements in a and b across lanes using writemask.
+    Implements __m512i _mm512_mask_permutex2var_epi64 (__m512i a, __mmask8 k, __m512i idx, __m512i b)
     Elements are copied from a when the corresponding mask bit is not set.
     See _generic_permutex2var for operation details.
     """
