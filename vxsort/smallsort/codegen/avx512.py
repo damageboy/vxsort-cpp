@@ -57,7 +57,6 @@ class AVX512BitonicISA(BitonicISA):
     def mask_type(self):
         return self.bitonic_mask_map[self.type]
 
-
     @classmethod
     def supported_types(cls):
         return __class__.bitonic_type_map.keys()
@@ -192,7 +191,7 @@ class AVX512BitonicISA(BitonicISA):
         mask = 0
         s = size
         while s > 0:
-            mask = mask <<  width | blend
+            mask = mask << width | blend
             s -= width
 
         if not ascending:
@@ -284,12 +283,11 @@ class AVX512BitonicISA(BitonicISA):
 
     def generate_x1_epi16_shuffle_vec(self):
         if self.type == "u16" or self.type == "i16":
-            l = [None]*8
+            l = [None] * 8
             l[0] = 0x0504070601000302
             for i in range(1, 8):
-                l[i] = l[i-1] + 0x0808080808080808
-            return f"const TV x1 = _mm512_set_epi64(0x{l[3]:08X}, 0x{l[2]:08X}, 0x{l[1]:08X}, 0x{l[0]:08X}," "\n" \
-                   f"                               0x{l[7]:08X}, 0x{l[6]:08X}, 0x{l[5]:08X}, 0x{l[4]:08X})"
+                l[i] = l[i - 1] + 0x0808080808080808
+            return f"const TV x1 = _mm512_set_epi64(0x{l[3]:08X}, 0x{l[2]:08X}, 0x{l[1]:08X}, 0x{l[0]:08X},\n                               0x{l[7]:08X}, 0x{l[6]:08X}, 0x{l[5]:08X}, 0x{l[4]:08X})"
 
         return AVX512BitonicISA.REMOVE_ME
 
@@ -581,22 +579,21 @@ public:
         const auto mask = 0x{((1 << self.vector_size()) - 1):X} >> ((N - remainder) & (N-1));
 """)
 
-            for l in range(0, m-1):
+            for l in range(0, m - 1):
                 g.clean_print(f"        TV d{l + 1:02d} = {g.get_load_intrinsic('ptr', l)};")
 
             g.clean_print(f"        TV d{m:02d} = {g.get_mask_load_intrinsic('ptr', m - 1, 'mask')};")
 
             g.clean_print(f"        sort_{m:02d}v_ascending({g.generate_param_list(1, m)});")
 
-            for l in range(0, m-1):
+            for l in range(0, m - 1):
                 g.clean_print(f"        {g.get_store_intrinsic('ptr', l, f'd{l + 1:02d}')};")
 
             g.clean_print(f"        {g.get_mask_store_intrinsic('ptr', m - 1, f'd{m:02d}', 'mask')};")
 
             g.clean_print("    }")
 
-
-    def generate_master_entry_point_full(self, asc : bool):
+    def generate_master_entry_point_full(self, asc: bool):
         t = self.type
         g = self
         sfx = "ascending" if asc else "descending"
@@ -611,7 +608,6 @@ public:
             g.clean_print(f"            case {m}: sort_{m:02d}v_full_{sfx}(ptr); break;")
         g.clean_print("        }")
         g.clean_print("    }")
-
 
     #     s = f"""void vxsort::smallsort::bitonic<{t}, vector_machine::AVX512 >::sort({t} *ptr, size_t length) {{
     # const auto fullvlength = length / N;
