@@ -255,7 +255,6 @@ def _create_element_selector(source_reg: BitVecRef, idx_bits: BitVecRef, num_ele
     return _create_if_tree(idx_bits, elements)
 
 
-# Generic implementation for permutexvar instructions
 def _generic_permutexvar(op1: BitVecRef, op_idx: BitVecRef, total_width: int, element_width: int, src: BitVecRef | None = None, mask: BitVecRef | None = None):
     """
     Generic implementation for permutexvar instructions that shuffle elements across lanes.
@@ -336,7 +335,6 @@ def _generic_permutexvar(op1: BitVecRef, op_idx: BitVecRef, total_width: int, el
     return simplify(Concat(elems[::-1]))
 
 
-# AVX2: vpermd/_mm256_permutevar_epi32
 def _mm256_permutexvar_epi32(op1: BitVecRef, op_idx: BitVecRef):
     """
     Shuffle 32-bit integers across lanes in a 256-bit vector.
@@ -346,7 +344,6 @@ def _mm256_permutexvar_epi32(op1: BitVecRef, op_idx: BitVecRef):
     return _generic_permutexvar(op1, op_idx, 256, 32)
 
 
-# AVX512: vpermd/_mm512_permutexvar_epi32
 def _mm512_permutexvar_epi32(op1: BitVecRef, op_idx: BitVecRef):
     """
     Shuffle 32-bit integers across lanes in a 512-bit vector.
@@ -356,7 +353,6 @@ def _mm512_permutexvar_epi32(op1: BitVecRef, op_idx: BitVecRef):
     return _generic_permutexvar(op1, op_idx, 512, 32)
 
 
-# AVX2: vpermq/_mm256_permutexvar_epi64
 def _mm256_permutexvar_epi64(op1: BitVecRef, idx: BitVecRef):
     """
     Shuffle 64-bit integers across lanes in a 256-bit vector.
@@ -366,7 +362,6 @@ def _mm256_permutexvar_epi64(op1: BitVecRef, idx: BitVecRef):
     return _generic_permutexvar(op1, idx, 256, 64)
 
 
-# AVX512: vpermq/_mm512_permutexvar_epi64
 def _mm512_permutexvar_epi64(op1: BitVecRef, idx: BitVecRef):
     """
     Shuffle 64-bit integers across lanes in a 512-bit vector.
@@ -376,7 +371,6 @@ def _mm512_permutexvar_epi64(op1: BitVecRef, idx: BitVecRef):
     return _generic_permutexvar(op1, idx, 512, 64)
 
 
-# AVX512: vpermd/_mm512_mask_permutexvar_epi32 (masked variant)
 def _mm512_mask_permutexvar_epi32(src: BitVecRef, mask: BitVecRef, idx: BitVecRef, op1: BitVecRef):
     """
     Shuffle 32-bit integers across lanes in a 512-bit vector using writemask.
@@ -387,7 +381,6 @@ def _mm512_mask_permutexvar_epi32(src: BitVecRef, mask: BitVecRef, idx: BitVecRe
     return _generic_permutexvar(op1, idx, 512, 32, src=src, mask=mask)
 
 
-# AVX512: vpermq/_mm512_mask_permutexvar_epi64 (masked variant)
 def _mm512_mask_permutexvar_epi64(src: BitVecRef, mask: BitVecRef, idx: BitVecRef, op1: BitVecRef):
     """
     Shuffle 64-bit integers across lanes in a 512-bit vector using writemask.
@@ -427,7 +420,6 @@ def _create_two_source_element_selector(a: BitVecRef, b: BitVecRef, offset_bits:
     return _create_element_selector(selected_source, offset_bits, num_elements, element_bits)
 
 
-# Generic implementation for permutex2var instructions
 def _generic_permutex2var(a: BitVecRef, idx: BitVecRef, b: BitVecRef, element_width: int, src: BitVecRef | None = None, mask: BitVecRef | None = None):
     """
     Generic implementation for permutex2var instructions that shuffle elements from two source vectors.
@@ -521,7 +513,6 @@ def _generic_permutex2var(a: BitVecRef, idx: BitVecRef, b: BitVecRef, element_wi
     return simplify(Concat(elems[::-1]))
 
 
-# AVX512: vpermi2d/vpermt2d/_mm512_permutex2var_epi32
 def _mm512_permutex2var_epi32(a: BitVecRef, idx: BitVecRef, b: BitVecRef):
     """
     Shuffle 32-bit integers in a and b across lanes using two-source permutation.
@@ -531,7 +522,6 @@ def _mm512_permutex2var_epi32(a: BitVecRef, idx: BitVecRef, b: BitVecRef):
     return _generic_permutex2var(a, idx, b, 32)
 
 
-# AVX512: vpermi2q/vpermt2q/_mm512_permutex2var_epi64
 def _mm512_permutex2var_epi64(a: BitVecRef, idx: BitVecRef, b: BitVecRef):
     """
     Shuffle 64-bit integers in a and b across lanes using two-source permutation.
@@ -541,7 +531,6 @@ def _mm512_permutex2var_epi64(a: BitVecRef, idx: BitVecRef, b: BitVecRef):
     return _generic_permutex2var(a, idx, b, 64)
 
 
-# AVX512: vpermi2d/vpermt2d/_mm512_mask_permutex2var_epi32 (masked version)
 def _mm512_mask_permutex2var_epi32(a: BitVecRef, k: BitVecRef, idx: BitVecRef, b: BitVecRef):
     """
     Shuffle 32-bit integer elements in a and b across lanes using writemask.
@@ -552,7 +541,6 @@ def _mm512_mask_permutex2var_epi32(a: BitVecRef, k: BitVecRef, idx: BitVecRef, b
     return _generic_permutex2var(a, idx, b, 32, src=a, mask=k)
 
 
-# AVX512: vpermi2q/vpermt2q/_mm512_mask_permutex2var_epi64 (masked version for 64-bit)
 def _mm512_mask_permutex2var_epi64(a: BitVecRef, k: BitVecRef, idx: BitVecRef, b: BitVecRef):
     """
     Shuffle 64-bit integer elements in a and b across lanes using writemask.
@@ -563,8 +551,6 @@ def _mm512_mask_permutex2var_epi64(a: BitVecRef, k: BitVecRef, idx: BitVecRef, b
     return _generic_permutex2var(a, idx, b, 64, src=a, mask=k)
 
 
-##
-# Helpers function for permutes/shuffles
 def _select4_ps(src_128: BitVecRef, select: BitVecRef | BitVecNumRef) -> BitVecRef:
     """Selects a 32-bit element from a 128-bit vector based on a 2-bit control."""
     return simplify(
@@ -584,7 +570,6 @@ def _select4_ps(src_128: BitVecRef, select: BitVecRef | BitVecNumRef) -> BitVecR
     )
 
 
-# Helper function for permutes/shuffles (64-bit elements)
 def _select2_pd(src_128: BitVecRef, select: BitVecRef | BitVecNumRef) -> BitVecRef:
     """Selects a 64-bit element from a 128-bit vector based on a 1-bit control."""
     return simplify(
@@ -596,7 +581,6 @@ def _select2_pd(src_128: BitVecRef, select: BitVecRef | BitVecNumRef) -> BitVecR
     )
 
 
-# Helper function for cross-lane permutes (64-bit elements from 256-bit vector)
 def _select4_epi64(src_256: BitVecRef, select: BitVecRef | BitVecNumRef) -> BitVecRef:
     """Selects a 64-bit element from a 256-bit vector based on a 2-bit control."""
     return simplify(
@@ -663,7 +647,6 @@ def vpermilpd_lane(lane_idx: int, a: BitVecRef, ctrl0: BitVecRef, ctrl1: BitVecR
     return chunks
 
 
-# Generic permute_ps function
 def _permute_ps_generic(op1: BitVecRef, imm8: BitVecRef | int, num_lanes: int, k: BitVecRef | None = None, src: BitVecRef | None = None):
     """
     Generic permute_ps implementation for any number of 128-bit lanes.
@@ -712,19 +695,16 @@ def _permute_ps_generic(op1: BitVecRef, imm8: BitVecRef | int, num_lanes: int, k
     return result
 
 
-# AVX2: vpermilps (_mm256_permute_ps)
 def _mm256_permute_ps(op1: BitVecRef, imm8: BitVecRef | int):
     """Permutes 32-bit elements within 128-bit lanes. Operates on YMM registers (2 lanes)."""
     return _permute_ps_generic(op1, imm8, 2)
 
 
-# AVX512: vpermilps (_mm512_permute_ps)
 def _mm512_permute_ps(op1: BitVecRef, imm8: BitVecRef | int):
     """Permutes 32-bit elements within 128-bit lanes. Operates on ZMM registers (4 lanes)."""
     return _permute_ps_generic(op1, imm8, 4)
 
 
-# AVX512: vpermilps (_mm512_mask_permute_ps)
 def _mm512_mask_permute_ps(src: BitVecRef, k: BitVecRef, a: BitVecRef, imm8: BitVecRef | int):
     """
     Shuffle single-precision (32-bit) floating-point elements in a within 128-bit lanes using the control in imm8,
@@ -734,7 +714,6 @@ def _mm512_mask_permute_ps(src: BitVecRef, k: BitVecRef, a: BitVecRef, imm8: Bit
     return _permute_ps_generic(a, imm8, 4, k=k, src=src)
 
 
-# Generic permute_pd function
 def _permute_pd_generic(op1: BitVecRef, imm8: BitVecRef | int, num_lanes: int, k: BitVecRef | None = None, src: BitVecRef | None = None):
     """
     Generic permute_pd implementation for any number of 128-bit lanes.
@@ -779,19 +758,16 @@ def _permute_pd_generic(op1: BitVecRef, imm8: BitVecRef | int, num_lanes: int, k
     return result
 
 
-# AVX2: vpermilpd (_mm256_permute_pd)
 def _mm256_permute_pd(op1: BitVecRef, imm8: BitVecRef | int):
     """Permutes 64-bit elements within 128-bit lanes. Operates on YMM registers (2 lanes)."""
     return _permute_pd_generic(op1, imm8, 2)
 
 
-# AVX512: vpermilpd (_mm512_permute_pd)
 def _mm512_permute_pd(op1: BitVecRef, imm8: BitVecRef | int):
     """Permutes 64-bit elements within 128-bit lanes. Operates on ZMM registers (4 lanes)."""
     return _permute_pd_generic(op1, imm8, 4)
 
 
-# AVX512: vpermilpd (_mm512_mask_permute_pd)
 def _mm512_mask_permute_pd(src: BitVecRef, k: BitVecRef, a: BitVecRef, imm8: BitVecRef | int):
     """
     Shuffle double-precision (64-bit) floating-point elements in a within 128-bit lanes using the control in imm8,
@@ -865,7 +841,6 @@ def vshufps_lane(lane_idx: int, a: BitVecRef, b: BitVecRef, ctrl01: BitVecRef, c
     return chunks
 
 
-# Generic shuffle_ps function
 def _shuffle_ps_generic(op1: BitVecRef, op2: BitVecRef, imm8: BitVecRef | int, num_lanes: int, k: BitVecRef | None = None, src: BitVecRef | None = None):
     """
     Generic shuffle_ps implementation for any number of 128-bit lanes.
@@ -913,19 +888,16 @@ def _shuffle_ps_generic(op1: BitVecRef, op2: BitVecRef, imm8: BitVecRef | int, n
     return result
 
 
-# AVX2: vshufps (_mm256_shuffle_ps)
 def _mm256_shuffle_ps(op1: BitVecRef, op2: BitVecRef, imm8: BitVecRef | int):
     """Shuffles 32-bit elements within 128-bit lanes. Operates on YMM registers (2 lanes)."""
     return _shuffle_ps_generic(op1, op2, imm8, 2)
 
 
-# AVX512: vshufps (_mm512_shuffle_ps)
 def _mm512_shuffle_ps(op1: BitVecRef, op2: BitVecRef, imm8: BitVecRef | int):
     """Shuffles 32-bit elements within 128-bit lanes. Operates on ZMM registers (4 lanes)."""
     return _shuffle_ps_generic(op1, op2, imm8, 4)
 
 
-# AVX512: vshufps (_mm512_mask_shuffle_ps)
 def _mm512_mask_shuffle_ps(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
     """
     Shuffle single-precision (32-bit) floating-point elements in a within 128-bit lanes using the control in imm8,
@@ -949,7 +921,6 @@ def vshufpd_lane(lane_idx: int, a: BitVecRef, b: BitVecRef, imm: BitVecRef):
     return chunks
 
 
-# Generic shuffle_pd function
 def _shuffle_pd_generic(op1: BitVecRef, op2: BitVecRef, imm8: BitVecRef | int, num_lanes: int, k: BitVecRef | None = None, src: BitVecRef | None = None):
     """
     Generic shuffle_pd implementation for any number of 128-bit lanes.
@@ -985,19 +956,16 @@ def _shuffle_pd_generic(op1: BitVecRef, op2: BitVecRef, imm8: BitVecRef | int, n
     return result
 
 
-# AVX2: vshufpd (_mm256_shuffle_pd)
 def _mm256_shuffle_pd(op1: BitVecRef, op2: BitVecRef, imm8: BitVecRef | int):
     """Shuffles 64-bit elements within 128-bit lanes. Operates on YMM registers (2 lanes)."""
     return _shuffle_pd_generic(op1, op2, imm8, 2)
 
 
-# AVX512: vshufpd (_mm512_shuffle_pd)
 def _mm512_shuffle_pd(op1: BitVecRef, op2: BitVecRef, imm8: BitVecRef | int):
     """Shuffles 64-bit elements within 128-bit lanes. Operates on ZMM registers (4 lanes)."""
     return _shuffle_pd_generic(op1, op2, imm8, 4)
 
 
-# AVX512: vshufpd (_mm512_mask_shuffle_pd)
 def _mm512_mask_shuffle_pd(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
     """
     Shuffle double-precision (64-bit) floating-point elements within 128-bit lanes using the control in imm8,
@@ -1014,7 +982,6 @@ def _mm512_mask_shuffle_pd(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVec
 #   -  _mm512_[mask_]permutevar_p{s,d}
 
 
-# Generic implementation for permutevar instructions
 def _generic_permutevar(a: BitVecRef, b: BitVecRef, total_width: int, element_width: int, k: BitVecRef | None = None, src: BitVecRef | None = None):
     """
     Generic implementation for permutevar instructions that shuffle elements within 128-bit lanes.
@@ -1119,7 +1086,6 @@ def _generic_permutevar(a: BitVecRef, b: BitVecRef, total_width: int, element_wi
     return simplify(Concat(elements[::-1]))
 
 
-# AVX2: vpermilps (_mm256_permutevar_ps)
 def _mm256_permutevar_ps(a: BitVecRef, b: BitVecRef):
     """
     Shuffle single-precision (32-bit) floating-point elements in a within 128-bit lanes using the control in b.
@@ -1128,7 +1094,6 @@ def _mm256_permutevar_ps(a: BitVecRef, b: BitVecRef):
     return _generic_permutevar(a, b, total_width=256, element_width=32)
 
 
-# AVX512: vpermilps (_mm512_permutevar_ps)
 def _mm512_permutevar_ps(a: BitVecRef, b: BitVecRef):
     """
     Shuffle single-precision (32-bit) floating-point elements in a within 128-bit lanes using the control in b.
@@ -1137,7 +1102,6 @@ def _mm512_permutevar_ps(a: BitVecRef, b: BitVecRef):
     return _generic_permutevar(a, b, total_width=512, element_width=32)
 
 
-# AVX512: vpermilps (_mm512_mask_permutevar_ps)
 def _mm512_mask_permutevar_ps(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef):
     """
     Shuffle single-precision (32-bit) floating-point elements in a within 128-bit lanes using the control in b,
@@ -1147,7 +1111,6 @@ def _mm512_mask_permutevar_ps(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: Bit
     return _generic_permutevar(a, b, total_width=512, element_width=32, k=k, src=src)
 
 
-# AVX2: vpermilpd (_mm256_permutevar_pd)
 def _mm256_permutevar_pd(a: BitVecRef, b: BitVecRef):
     """
     Shuffle double-precision (64-bit) floating-point elements in a within 128-bit lanes using the control in b.
@@ -1156,7 +1119,6 @@ def _mm256_permutevar_pd(a: BitVecRef, b: BitVecRef):
     return _generic_permutevar(a, b, total_width=256, element_width=64)
 
 
-# AVX512: vpermilpd (_mm512_permutevar_pd)
 def _mm512_permutevar_pd(a: BitVecRef, b: BitVecRef):
     """
     Shuffle double-precision (64-bit) floating-point elements in a within 128-bit lanes using the control in b.
@@ -1165,7 +1127,6 @@ def _mm512_permutevar_pd(a: BitVecRef, b: BitVecRef):
     return _generic_permutevar(a, b, total_width=512, element_width=64)
 
 
-# AVX512: vpermilpd (_mm512_mask_permutevar_pd)
 def _mm512_mask_permutevar_pd(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef):
     """
     Shuffle double-precision (64-bit) floating-point elements in a within 128-bit lanes using the control in b,
@@ -1186,7 +1147,6 @@ def _mm512_mask_permutevar_pd(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: Bit
 # into two separate functions: _mm512_shuffle_i32x4 and _mm512_mask_shuffle_i32x4
 
 
-# Helper function for permute2x128 intrinsics
 def _select4_128b(src1: BitVecRef, src2: BitVecRef, control: BitVecRef | BitVecNumRef) -> BitVecRef:
     """
     Selects a 128-bit lane based on 4-bit control according to vperm2i128 semantics.
@@ -1229,7 +1189,6 @@ def _select4_128b(src1: BitVecRef, src2: BitVecRef, control: BitVecRef | BitVecN
     return simplify(If(zero_flag == 1, BitVecVal(0, 128), selected_lane))
 
 
-# AVX2: vperm2i128/_mm256_permute2x128_si256
 def _mm256_permute2x128_si256(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
     """
     Shuffle 128-bits (composed of integer data) selected by imm8 from a and b, and store the results in dst.
@@ -1270,7 +1229,6 @@ def _mm256_permute2x128_si256(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int)
     return simplify(Concat(lanes[::-1]))
 
 
-# Helper function for shuffle_i32x4 intrinsics (512-bit)
 def _select4_4x32b(src: BitVecRef, control: BitVecRef | BitVecNumRef) -> BitVecRef:
     """
     Selects a 128-bit lane from a 512-bit source based on 2-bit control according to vshufi32x4 semantics.
@@ -1306,7 +1264,6 @@ def _select4_4x32b(src: BitVecRef, control: BitVecRef | BitVecNumRef) -> BitVecR
     )
 
 
-# AVX512: vshufi32x4/_mm512_shuffle_i32x4
 def _mm512_shuffle_i32x4(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
     """
     Shuffle 128-bits (composed of 4 32-bit integers) selected by imm8 from a and b, and store the results in dst.
@@ -1602,21 +1559,7 @@ def _mm256_blend_pd(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
     """
     Blend packed double-precision (64-bit) floating-point elements from "a" and "b" using control mask "imm8",
     and store the results in "dst".
-
     Implements __m256d _mm256_blend_pd (__m256d a, __m256d b, const int imm8)
-
-    Operation:
-    ```
-    FOR j := 0 to 3
-        i := j*64
-        IF imm8[j]
-            dst[i+63:i] := b[i+63:i]
-        ELSE
-            dst[i+63:i] := a[i+63:i]
-        FI
-    ENDFOR
-    dst[MAX:256] := 0
-    ```
     """
     return _generic_blend(a, b, imm8, 256, 64)
 
@@ -1625,21 +1568,7 @@ def _mm256_blend_ps(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
     """
     Blend packed single-precision (32-bit) floating-point elements from "a" and "b" using control mask "imm8",
     and store the results in "dst".
-
     Implements __m256 _mm256_blend_ps (__m256 a, __m256 b, const int imm8)
-
-    Operation:
-    ```
-    FOR j := 0 to 7
-        i := j*32
-        IF imm8[j]
-            dst[i+31:i] := b[i+31:i]
-        ELSE
-            dst[i+31:i] := a[i+31:i]
-        FI
-    ENDFOR
-    dst[MAX:256] := 0
-    ```
     """
     return _generic_blend(a, b, imm8, 256, 32)
 
@@ -1648,21 +1577,7 @@ def _mm256_blendv_pd(a: BitVecRef, b: BitVecRef, mask: BitVecRef):
     """
     Blend packed double-precision (64-bit) floating-point elements from "a" and "b" using "mask",
     and store the results in "dst".
-
     Implements __m256d _mm256_blendv_pd (__m256d a, __m256d b, __m256d mask)
-
-    Operation:
-    ```
-    FOR j := 0 to 3
-        i := j*64
-        IF mask[i+63]
-            dst[i+63:i] := b[i+63:i]
-        ELSE
-            dst[i+63:i] := a[i+63:i]
-        FI
-    ENDFOR
-    dst[MAX:256] := 0
-    ```
     """
     return _generic_blendv(a, b, mask, 256, 64)
 
@@ -1671,20 +1586,6 @@ def _mm256_blendv_ps(a: BitVecRef, b: BitVecRef, mask: BitVecRef):
     """
     Blend packed single-precision (32-bit) floating-point elements from "a" and "b" using "mask",
     and store the results in "dst".
-
     Implements __m256 _mm256_blendv_ps (__m256 a, __m256 b, __m256 mask)
-
-    Operation:
-    ```
-    FOR j := 0 to 7
-        i := j*32
-        IF mask[i+31]
-            dst[i+31:i] := b[i+31:i]
-        ELSE
-            dst[i+31:i] := a[i+31:i]
-        FI
-    ENDFOR
-    dst[MAX:256] := 0
-    ```
     """
     return _generic_blendv(a, b, mask, 256, 32)
