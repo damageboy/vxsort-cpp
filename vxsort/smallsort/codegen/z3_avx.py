@@ -949,44 +949,127 @@ def _mm512_mask_shuffle_pd(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVec
 #   -  _mm512_[mask_]permutevar_p{s,d}
 
 
-# Generic permutevar_ps implementation for 512-bit
-def _permutevar_ps_512(a: BitVecRef, b: BitVecRef, k: BitVecRef | None = None, src: BitVecRef | None = None):
+# Generic implementation for permutevar instructions
+def _generic_permutevar(a: BitVecRef, b: BitVecRef, total_width: int, element_width: int, k: BitVecRef | None = None, src: BitVecRef | None = None):
     """
-    Shuffle single-precision (32-bit) floating-point elements in a within 128-bit lanes using the control in b.
+    Generic implementation for permutevar instructions that shuffle elements within 128-bit lanes.
 
-    If k (mask) and src are provided, applies masking: elements are copied from src when mask bit is not set.
+    These instructions use a variable index vector to permute elements within each 128-bit lane.
+    Each element in the output is selected from the corresponding 128-bit lane based on control bits
+    in the index vector. Optional masking is supported for AVX512 variants.
 
-    Operation:
-    For each output element j (0-15):
-      - Extract 2 control bits from b at positions [j*32+1:j*32]
-      - Select element from the corresponding 128-bit lane of a (4 elements per lane)
-      - If mask is provided and k[j] is not set, use src[j]
+    Args:
+        a: Source vector to permute
+        b: Control/index vector containing the control bits for each destination element
+        total_width: Total bit width of the vectors (256 or 512)
+        element_width: Width of each element in bits (32 for ps, 64 for pd)
+        k: Optional predicate mask (if provided, src must also be provided)
+        src: Optional source vector for masked operations (values used when mask bit is 0)
+
+    Returns:
+        Permuted vector (optionally masked)
+
+    Generic Operation (where N = total_width / element_width, LANE_ELEMENTS = 128 / element_width):
+
+        For element_width=32 (ps - single precision):
+            - 4 elements per 128-bit lane
+            - Uses 2 control bits per element: b[i+1:i] where i = element_index * 32
+
+        For element_width=64 (pd - double precision):
+            - 2 elements per 128-bit lane
+            - Uses 1 control bit per element at specific positions:
+              b[1], b[65], b[129], b[193] for 256-bit (4 elements)
+              b[1], b[65], b[129], b[193], b[257], b[321], b[385], b[449] for 512-bit (8 elements)
+
+        Without mask:
+        ```
+        FOR j := 0 to N-1
+            lane_idx := j / LANE_ELEMENTS
+            lane := a[lane_idx*128+127 : lane_idx*128]
+            control_bits := extract_control_bits(b, j, element_width)
+            dst[j*element_width+element_width-1 : j*element_width] := SELECT(lane, control_bits)
+        ENDFOR
+        dst[MAX:total_width] := 0
+        ```
+
+        With mask:
+        ```
+        FOR j := 0 to N-1
+            lane_idx := j / LANE_ELEMENTS
+            lane := a[lane_idx*128+127 : lane_idx*128]
+            control_bits := extract_control_bits(b, j, element_width)
+            tmp_elem := SELECT(lane, control_bits)
+            IF k[j]
+                dst[j*element_width+element_width-1 : j*element_width] := tmp_elem
+            ELSE
+                dst[j*element_width+element_width-1 : j*element_width] := src[j*element_width+element_width-1 : j*element_width]
+            FI
+        ENDFOR
+        dst[MAX:total_width] := 0
+        ```
+
+    Examples:
+        - _mm256_permutevar_ps: total_width=256, element_width=32 → 8 elements, 2 lanes
+        - _mm512_permutevar_ps: total_width=512, element_width=32 → 16 elements, 4 lanes
+        - _mm256_permutevar_pd: total_width=256, element_width=64 → 4 elements, 2 lanes
+        - _mm512_permutevar_pd: total_width=512, element_width=64 → 8 elements, 4 lanes
+        - _mm512_mask_permutevar_ps: total_width=512, element_width=32, with src and mask
+        - _mm512_mask_permutevar_pd: total_width=512, element_width=64, with src and mask
     """
-    elements = [None] * 16
+    num_elements = total_width // element_width
+    elements_per_lane = 128 // element_width
 
-    for j in range(16):
-        i = j * 32
-        lane_idx = j // 4  # Which 128-bit lane (0-3)
+    elements = [None] * num_elements
+
+    for j in range(num_elements):
+        i = j * element_width
+        lane_idx = j // elements_per_lane
         lane_start = lane_idx * 128
-
-        # Extract 2 control bits from b at position [j*32+1:j*32]
-        ctrl_bits = Extract(i + 1, i, b)
 
         # Extract the 128-bit lane from a
         lane = Extract(lane_start + 127, lane_start, a)
 
-        # Select element within the lane using control bits
-        selected = _select4_ps(lane, ctrl_bits)
+        # Extract control bits and select element based on element width
+        if element_width == 32:  # ps (single-precision)
+            # Extract 2 control bits at position [i+1:i]
+            ctrl_bits = Extract(i + 1, i, b)
+            selected = _select4_ps(lane, ctrl_bits)
+        elif element_width == 64:  # pd (double-precision)
+            # Control bit positions depend on element index
+            # Pattern: bit 1, 65, 129, 193, 257, 321, 385, 449 for successive elements
+            ctrl_bit_pos = i + 1
+            ctrl_bit = Extract(ctrl_bit_pos, ctrl_bit_pos, b)
+            selected = _select2_pd(lane, ctrl_bit)
+        else:
+            raise ValueError(f"Unsupported element_width: {element_width}")
 
         # Apply mask if provided
         if k is not None and src is not None:
-            src_elem = Extract(i + 31, i, src)
+            src_elem = Extract(i + element_width - 1, i, src)
             mask_bit = Extract(j, j, k)
             elements[j] = simplify(If(mask_bit == 1, selected, src_elem))
         else:
             elements[j] = selected
 
     return simplify(Concat(elements[::-1]))
+
+
+# AVX2: vpermilps (_mm256_permutevar_ps)
+def _mm256_permutevar_ps(a: BitVecRef, b: BitVecRef):
+    """
+    Shuffle single-precision (32-bit) floating-point elements in a within 128-bit lanes using the control in b.
+    Implements __m256 _mm256_permutevar_ps (__m256 a, __m256i b)
+    """
+    return _generic_permutevar(a, b, total_width=256, element_width=32)
+
+
+# AVX512: vpermilps (_mm512_permutevar_ps)
+def _mm512_permutevar_ps(a: BitVecRef, b: BitVecRef):
+    """
+    Shuffle single-precision (32-bit) floating-point elements in a within 128-bit lanes using the control in b.
+    Implements __m512 _mm512_permutevar_ps (__m512 a, __m512i b)
+    """
+    return _generic_permutevar(a, b, total_width=512, element_width=32)
 
 
 # AVX512: vpermilps (_mm512_mask_permutevar_ps)
@@ -996,50 +1079,25 @@ def _mm512_mask_permutevar_ps(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: Bit
     and store the results in dst using writemask k (elements are copied from src when the corresponding mask bit is not set).
     Implements __m512 _mm512_mask_permutevar_ps (__m512 src, __mmask16 k, __m512 a, __m512i b)
     """
-    return _permutevar_ps_512(a, b, k=k, src=src)
+    return _generic_permutevar(a, b, total_width=512, element_width=32, k=k, src=src)
 
 
-# Generic permutevar_pd implementation for 512-bit
-def _permutevar_pd_512(a: BitVecRef, b: BitVecRef, k: BitVecRef | None = None, src: BitVecRef | None = None):
+# AVX2: vpermilpd (_mm256_permutevar_pd)
+def _mm256_permutevar_pd(a: BitVecRef, b: BitVecRef):
     """
     Shuffle double-precision (64-bit) floating-point elements in a within 128-bit lanes using the control in b.
-
-    If k (mask) and src are provided, applies masking: elements are copied from src when mask bit is not set.
-
-    Operation:
-    For each output element j (0-7):
-      - Extract 1 control bit from b at specific positions (b[1], b[65], b[129], b[193], b[257], b[321], b[385], b[449])
-      - Select element from the corresponding 128-bit lane of a (2 elements per lane)
-      - If mask is provided and k[j] is not set, use src[j]
+    Implements __m256d _mm256_permutevar_pd (__m256d a, __m256i b)
     """
-    elements = [None] * 8
+    return _generic_permutevar(a, b, total_width=256, element_width=64)
 
-    # Control bit positions: [1, 65, 129, 193, 257, 321, 385, 449]
-    ctrl_bit_positions = [1, 65, 129, 193, 257, 321, 385, 449]
 
-    for j in range(8):
-        i = j * 64
-        lane_idx = j // 2  # Which 128-bit lane (0-3)
-        lane_start = lane_idx * 128
-
-        # Extract 1 control bit from b at the specific position
-        ctrl_bit = Extract(ctrl_bit_positions[j], ctrl_bit_positions[j], b)
-
-        # Extract the 128-bit lane from a
-        lane = Extract(lane_start + 127, lane_start, a)
-
-        # Select element within the lane using control bit
-        selected = _select2_pd(lane, ctrl_bit)
-
-        # Apply mask if provided
-        if k is not None and src is not None:
-            src_elem = Extract(i + 63, i, src)
-            mask_bit = Extract(j, j, k)
-            elements[j] = simplify(If(mask_bit == 1, selected, src_elem))
-        else:
-            elements[j] = selected
-
-    return simplify(Concat(elements[::-1]))
+# AVX512: vpermilpd (_mm512_permutevar_pd)
+def _mm512_permutevar_pd(a: BitVecRef, b: BitVecRef):
+    """
+    Shuffle double-precision (64-bit) floating-point elements in a within 128-bit lanes using the control in b.
+    Implements __m512d _mm512_permutevar_pd (__m512d a, __m512i b)
+    """
+    return _generic_permutevar(a, b, total_width=512, element_width=64)
 
 
 # AVX512: vpermilpd (_mm512_mask_permutevar_pd)
@@ -1049,7 +1107,7 @@ def _mm512_mask_permutevar_pd(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: Bit
     and store the results in dst using writemask k (elements are copied from src when the corresponding mask bit is not set).
     Implements __m512d _mm512_mask_permutevar_pd (__m512d src, __mmask8 k, __m512d a, __m512i b)
     """
-    return _permutevar_pd_512(a, b, k=k, src=src)
+    return _generic_permutevar(a, b, total_width=512, element_width=64, k=k, src=src)
 
 
 ##

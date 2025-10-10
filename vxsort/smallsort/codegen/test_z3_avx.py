@@ -27,7 +27,8 @@ from z3_avx import _mm512_unpacklo_epi32, _mm512_unpackhi_epi32
 from z3_avx import _mm512_mask_unpacklo_epi32, _mm512_mask_unpackhi_epi32
 from z3_avx import _mm512_mask_permute_ps, _mm512_mask_permute_pd
 from z3_avx import _mm512_mask_shuffle_ps, _mm512_mask_shuffle_pd
-from z3_avx import _mm512_mask_permutevar_ps, _mm512_mask_permutevar_pd
+from z3_avx import _mm256_permutevar_ps, _mm512_permutevar_ps, _mm512_mask_permutevar_ps
+from z3_avx import _mm256_permutevar_pd, _mm512_permutevar_pd, _mm512_mask_permutevar_pd
 from z3_avx import ymm_reg, ymm_reg_with_32b_values, ymm_reg_with_64b_values, ymm_reg_with_unique_values, ymm_reg_pair_with_unique_values, construct_ymm_reg_from_elements
 from z3_avx import zmm_reg, zmm_reg_with_32b_values, zmm_reg_with_64b_values, zmm_reg_with_unique_values, zmm_reg_pair_with_unique_values, construct_zmm_reg_from_elements
 from z3_avx import ymm_reg_reversed, zmm_reg_reversed
@@ -2711,3 +2712,476 @@ class TestMaskPermutevarPd:
         s.add(output != expected)
         result = s.check()
         assert result == unsat, f"Z3 found a counterexample for broadcast within lanes: {s.model() if result == sat else 'No model'}"
+
+
+class TestPermutevarPs:
+    """Tests for _mm256_permutevar_ps and _mm512_permutevar_ps (non-masked variants)"""
+
+    def test_mm256_permutevar_ps_identity_permute(self):
+        """Test identity permutation within lanes for 256-bit"""
+        s = Solver()
+
+        a = ymm_reg_with_unique_values("a", s, bits=32)
+        # Create control vector: each element selects itself within its lane
+        # Lane 0: [0, 1, 2, 3], Lane 1: [0, 1, 2, 3]
+        ctrl = ymm_reg_with_32b_values("ctrl", s, [i % 4 for i in range(8)])
+
+        output = _mm256_permutevar_ps(a, ctrl)
+
+        s.add(output != a)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for 256-bit identity permute: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_permutevar_ps_reverse_within_lanes(self):
+        """Test reversing elements within each 128-bit lane for 256-bit"""
+        s = Solver()
+
+        a = ymm_reg_with_unique_values("a", s, bits=32)
+        # Create control vector: reverse within each lane [3, 2, 1, 0, 3, 2, 1, 0]
+        ctrl = ymm_reg_with_32b_values("ctrl", s, [3 - (i % 4) for i in range(8)])
+
+        output = _mm256_permutevar_ps(a, ctrl)
+
+        # Expected: each 128-bit lane is reversed
+        expected = construct_ymm_reg_from_elements(
+            32,
+            [
+                (a, 3),
+                (a, 2),
+                (a, 1),
+                (a, 0),  # Lane 0 reversed
+                (a, 7),
+                (a, 6),
+                (a, 5),
+                (a, 4),  # Lane 1 reversed
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for 256-bit reverse within lanes: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_permutevar_ps_broadcast_within_lanes(self):
+        """Test broadcasting first element within each lane for 256-bit"""
+        s = Solver()
+
+        a = ymm_reg_with_unique_values("a", s, bits=32)
+        # Create control vector: all zeros (broadcast element 0 of each lane)
+        ctrl = ymm_reg_with_32b_values("ctrl", s, [0] * 8)
+
+        output = _mm256_permutevar_ps(a, ctrl)
+
+        # Expected: first element of each lane broadcast to all positions in that lane
+        expected = construct_ymm_reg_from_elements(
+            32,
+            [
+                (a, 0),
+                (a, 0),
+                (a, 0),
+                (a, 0),  # Lane 0: all a[0]
+                (a, 4),
+                (a, 4),
+                (a, 4),
+                (a, 4),  # Lane 1: all a[4]
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for 256-bit broadcast within lanes: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_permutevar_ps_mixed_permute(self):
+        """Test mixed permutation pattern for 256-bit"""
+        s = Solver()
+
+        a = ymm_reg_with_unique_values("a", s, bits=32)
+        # Create control vector: [1, 0, 3, 2, 2, 3, 0, 1]
+        ctrl = ymm_reg_with_32b_values("ctrl", s, [1, 0, 3, 2, 2, 3, 0, 1])
+
+        output = _mm256_permutevar_ps(a, ctrl)
+
+        # Expected: permuted according to control vector
+        expected = construct_ymm_reg_from_elements(
+            32,
+            [
+                (a, 1),  # Lane 0[0] = a[1]
+                (a, 0),  # Lane 0[1] = a[0]
+                (a, 3),  # Lane 0[2] = a[3]
+                (a, 2),  # Lane 0[3] = a[2]
+                (a, 6),  # Lane 1[0] = a[6] (4+2)
+                (a, 7),  # Lane 1[1] = a[7] (4+3)
+                (a, 4),  # Lane 1[2] = a[4] (4+0)
+                (a, 5),  # Lane 1[3] = a[5] (4+1)
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for 256-bit mixed permute: {s.model() if result == sat else 'No model'}"
+
+    def test_mm512_permutevar_ps_identity_permute(self):
+        """Test identity permutation within lanes for 512-bit"""
+        s = Solver()
+
+        a = zmm_reg_with_unique_values("a", s, bits=32)
+        # Create control vector: each element selects itself within its lane
+        ctrl = zmm_reg_with_32b_values("ctrl", s, [i % 4 for i in range(16)])
+
+        output = _mm512_permutevar_ps(a, ctrl)
+
+        s.add(output != a)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for 512-bit identity permute: {s.model() if result == sat else 'No model'}"
+
+    def test_mm512_permutevar_ps_reverse_within_lanes(self):
+        """Test reversing elements within each 128-bit lane for 512-bit"""
+        s = Solver()
+
+        a = zmm_reg_with_unique_values("a", s, bits=32)
+        # Create control vector: reverse within each lane [3, 2, 1, 0, ...]
+        ctrl = zmm_reg_with_32b_values("ctrl", s, [3 - (i % 4) for i in range(16)])
+
+        output = _mm512_permutevar_ps(a, ctrl)
+
+        # Expected: each 128-bit lane is reversed
+        expected = construct_zmm_reg_from_elements(
+            32,
+            [
+                (a, 3),
+                (a, 2),
+                (a, 1),
+                (a, 0),  # Lane 0 reversed
+                (a, 7),
+                (a, 6),
+                (a, 5),
+                (a, 4),  # Lane 1 reversed
+                (a, 11),
+                (a, 10),
+                (a, 9),
+                (a, 8),  # Lane 2 reversed
+                (a, 15),
+                (a, 14),
+                (a, 13),
+                (a, 12),  # Lane 3 reversed
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for 512-bit reverse within lanes: {s.model() if result == sat else 'No model'}"
+
+    def test_mm512_permutevar_ps_broadcast_within_lanes(self):
+        """Test broadcasting last element within each lane for 512-bit"""
+        s = Solver()
+
+        a = zmm_reg_with_unique_values("a", s, bits=32)
+        # Create control vector: all 3s (broadcast element 3 of each lane)
+        ctrl = zmm_reg_with_32b_values("ctrl", s, [3] * 16)
+
+        output = _mm512_permutevar_ps(a, ctrl)
+
+        # Expected: last element of each lane broadcast to all positions in that lane
+        expected = construct_zmm_reg_from_elements(
+            32,
+            [
+                (a, 3),
+                (a, 3),
+                (a, 3),
+                (a, 3),  # Lane 0: all a[3]
+                (a, 7),
+                (a, 7),
+                (a, 7),
+                (a, 7),  # Lane 1: all a[7]
+                (a, 11),
+                (a, 11),
+                (a, 11),
+                (a, 11),  # Lane 2: all a[11]
+                (a, 15),
+                (a, 15),
+                (a, 15),
+                (a, 15),  # Lane 3: all a[15]
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for 512-bit broadcast within lanes: {s.model() if result == sat else 'No model'}"
+
+    def test_mm512_permutevar_ps_alternating_pattern(self):
+        """Test alternating permutation pattern for 512-bit"""
+        s = Solver()
+
+        a = zmm_reg_with_unique_values("a", s, bits=32)
+        # Create control vector: alternating [0, 2, 0, 2, ...]
+        ctrl = zmm_reg_with_32b_values("ctrl", s, [0 if i % 2 == 0 else 2 for i in range(16)])
+
+        output = _mm512_permutevar_ps(a, ctrl)
+
+        # Expected: alternating between element 0 and 2 of each lane
+        expected = construct_zmm_reg_from_elements(
+            32,
+            [
+                (a, 0),
+                (a, 2),
+                (a, 0),
+                (a, 2),  # Lane 0
+                (a, 4),
+                (a, 6),
+                (a, 4),
+                (a, 6),  # Lane 1
+                (a, 8),
+                (a, 10),
+                (a, 8),
+                (a, 10),  # Lane 2
+                (a, 12),
+                (a, 14),
+                (a, 12),
+                (a, 14),  # Lane 3
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for 512-bit alternating pattern: {s.model() if result == sat else 'No model'}"
+
+
+class TestPermutevarPd:
+    """Tests for _mm256_permutevar_pd and _mm512_permutevar_pd (non-masked variants)"""
+
+    def test_mm256_permutevar_pd_identity_permute(self):
+        """Test identity permutation within lanes for 256-bit"""
+        s = Solver()
+
+        a = ymm_reg_with_unique_values("a", s, bits=64)
+        # Create control vector with bits at correct positions set for identity [0, 1, 0, 1]
+        ctrl = ymm_reg("ctrl")
+        s.add(Extract(1, 1, ctrl) == 0)  # Element 0 selects from position 0
+        s.add(Extract(65, 65, ctrl) == 1)  # Element 1 selects from position 1
+        s.add(Extract(129, 129, ctrl) == 0)  # Element 2 selects from position 0
+        s.add(Extract(193, 193, ctrl) == 1)  # Element 3 selects from position 1
+
+        output = _mm256_permutevar_pd(a, ctrl)
+
+        s.add(output != a)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for 256-bit identity permute: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_permutevar_pd_swap_within_lanes(self):
+        """Test swapping elements within each 128-bit lane for 256-bit"""
+        s = Solver()
+
+        a = ymm_reg_with_unique_values("a", s, bits=64)
+        # Create control vector: swap within each lane [1, 0, 1, 0]
+        ctrl = ymm_reg("ctrl")
+        s.add(Extract(1, 1, ctrl) == 1)  # Element 0 selects from position 1
+        s.add(Extract(65, 65, ctrl) == 0)  # Element 1 selects from position 0
+        s.add(Extract(129, 129, ctrl) == 1)  # Element 2 selects from position 1
+        s.add(Extract(193, 193, ctrl) == 0)  # Element 3 selects from position 0
+
+        output = _mm256_permutevar_pd(a, ctrl)
+
+        # Expected: each pair within 128-bit lanes is swapped
+        expected = construct_ymm_reg_from_elements(
+            64,
+            [
+                (a, 1),
+                (a, 0),  # Lane 0 swapped
+                (a, 3),
+                (a, 2),  # Lane 1 swapped
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for 256-bit swap within lanes: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_permutevar_pd_broadcast_first_within_lanes(self):
+        """Test broadcasting first element within each lane for 256-bit"""
+        s = Solver()
+
+        a = ymm_reg_with_unique_values("a", s, bits=64)
+        # Create control vector: all control bits = 0 (broadcast element 0 of each lane)
+        ctrl = ymm_reg("ctrl")
+        s.add(Extract(1, 1, ctrl) == 0)
+        s.add(Extract(65, 65, ctrl) == 0)
+        s.add(Extract(129, 129, ctrl) == 0)
+        s.add(Extract(193, 193, ctrl) == 0)
+
+        output = _mm256_permutevar_pd(a, ctrl)
+
+        # Expected: first element of each lane broadcast
+        expected = construct_ymm_reg_from_elements(
+            64,
+            [
+                (a, 0),
+                (a, 0),  # Lane 0: both a[0]
+                (a, 2),
+                (a, 2),  # Lane 1: both a[2]
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for 256-bit broadcast first within lanes: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_permutevar_pd_broadcast_second_within_lanes(self):
+        """Test broadcasting second element within each lane for 256-bit"""
+        s = Solver()
+
+        a = ymm_reg_with_unique_values("a", s, bits=64)
+        # Create control vector: all control bits = 1 (broadcast element 1 of each lane)
+        ctrl = ymm_reg("ctrl")
+        s.add(Extract(1, 1, ctrl) == 1)
+        s.add(Extract(65, 65, ctrl) == 1)
+        s.add(Extract(129, 129, ctrl) == 1)
+        s.add(Extract(193, 193, ctrl) == 1)
+
+        output = _mm256_permutevar_pd(a, ctrl)
+
+        # Expected: second element of each lane broadcast
+        expected = construct_ymm_reg_from_elements(
+            64,
+            [
+                (a, 1),
+                (a, 1),  # Lane 0: both a[1]
+                (a, 3),
+                (a, 3),  # Lane 1: both a[3]
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for 256-bit broadcast second within lanes: {s.model() if result == sat else 'No model'}"
+
+    def test_mm512_permutevar_pd_identity_permute(self):
+        """Test identity permutation within lanes for 512-bit"""
+        s = Solver()
+
+        a = zmm_reg_with_unique_values("a", s, bits=64)
+        # Create control vector with bits at correct positions set for identity
+        ctrl = zmm_reg("ctrl")
+        s.add(Extract(1, 1, ctrl) == 0)  # Element 0 selects from position 0
+        s.add(Extract(65, 65, ctrl) == 1)  # Element 1 selects from position 1
+        s.add(Extract(129, 129, ctrl) == 0)  # Element 2 selects from position 0
+        s.add(Extract(193, 193, ctrl) == 1)  # Element 3 selects from position 1
+        s.add(Extract(257, 257, ctrl) == 0)  # Element 4 selects from position 0
+        s.add(Extract(321, 321, ctrl) == 1)  # Element 5 selects from position 1
+        s.add(Extract(385, 385, ctrl) == 0)  # Element 6 selects from position 0
+        s.add(Extract(449, 449, ctrl) == 1)  # Element 7 selects from position 1
+
+        output = _mm512_permutevar_pd(a, ctrl)
+
+        s.add(output != a)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for 512-bit identity permute: {s.model() if result == sat else 'No model'}"
+
+    def test_mm512_permutevar_pd_swap_within_lanes(self):
+        """Test swapping elements within each 128-bit lane for 512-bit"""
+        s = Solver()
+
+        a = zmm_reg_with_unique_values("a", s, bits=64)
+        # Create control vector: swap within each lane [1, 0, 1, 0, 1, 0, 1, 0]
+        ctrl = zmm_reg("ctrl")
+        s.add(Extract(1, 1, ctrl) == 1)  # Element 0 selects from position 1
+        s.add(Extract(65, 65, ctrl) == 0)  # Element 1 selects from position 0
+        s.add(Extract(129, 129, ctrl) == 1)  # Element 2 selects from position 1
+        s.add(Extract(193, 193, ctrl) == 0)  # Element 3 selects from position 0
+        s.add(Extract(257, 257, ctrl) == 1)  # Element 4 selects from position 1
+        s.add(Extract(321, 321, ctrl) == 0)  # Element 5 selects from position 0
+        s.add(Extract(385, 385, ctrl) == 1)  # Element 6 selects from position 1
+        s.add(Extract(449, 449, ctrl) == 0)  # Element 7 selects from position 0
+
+        output = _mm512_permutevar_pd(a, ctrl)
+
+        # Expected: each pair within 128-bit lanes is swapped
+        expected = construct_zmm_reg_from_elements(
+            64,
+            [
+                (a, 1),
+                (a, 0),  # Lane 0 swapped
+                (a, 3),
+                (a, 2),  # Lane 1 swapped
+                (a, 5),
+                (a, 4),  # Lane 2 swapped
+                (a, 7),
+                (a, 6),  # Lane 3 swapped
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for 512-bit swap within lanes: {s.model() if result == sat else 'No model'}"
+
+    def test_mm512_permutevar_pd_broadcast_first_within_lanes(self):
+        """Test broadcasting first element within each lane for 512-bit"""
+        s = Solver()
+
+        a = zmm_reg_with_unique_values("a", s, bits=64)
+        # Create control vector: all control bits = 0 (broadcast element 0 of each lane)
+        ctrl = zmm_reg("ctrl")
+        s.add(Extract(1, 1, ctrl) == 0)
+        s.add(Extract(65, 65, ctrl) == 0)
+        s.add(Extract(129, 129, ctrl) == 0)
+        s.add(Extract(193, 193, ctrl) == 0)
+        s.add(Extract(257, 257, ctrl) == 0)
+        s.add(Extract(321, 321, ctrl) == 0)
+        s.add(Extract(385, 385, ctrl) == 0)
+        s.add(Extract(449, 449, ctrl) == 0)
+
+        output = _mm512_permutevar_pd(a, ctrl)
+
+        # Expected: first element of each lane broadcast
+        expected = construct_zmm_reg_from_elements(
+            64,
+            [
+                (a, 0),
+                (a, 0),  # Lane 0: both a[0]
+                (a, 2),
+                (a, 2),  # Lane 1: both a[2]
+                (a, 4),
+                (a, 4),  # Lane 2: both a[4]
+                (a, 6),
+                (a, 6),  # Lane 3: both a[6]
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for 512-bit broadcast first within lanes: {s.model() if result == sat else 'No model'}"
+
+    def test_mm512_permutevar_pd_broadcast_second_within_lanes(self):
+        """Test broadcasting second element within each lane for 512-bit"""
+        s = Solver()
+
+        a = zmm_reg_with_unique_values("a", s, bits=64)
+        # Create control vector: all control bits = 1 (broadcast element 1 of each lane)
+        ctrl = zmm_reg("ctrl")
+        s.add(Extract(1, 1, ctrl) == 1)
+        s.add(Extract(65, 65, ctrl) == 1)
+        s.add(Extract(129, 129, ctrl) == 1)
+        s.add(Extract(193, 193, ctrl) == 1)
+        s.add(Extract(257, 257, ctrl) == 1)
+        s.add(Extract(321, 321, ctrl) == 1)
+        s.add(Extract(385, 385, ctrl) == 1)
+        s.add(Extract(449, 449, ctrl) == 1)
+
+        output = _mm512_permutevar_pd(a, ctrl)
+
+        # Expected: second element of each lane broadcast
+        expected = construct_zmm_reg_from_elements(
+            64,
+            [
+                (a, 1),
+                (a, 1),  # Lane 0: both a[1]
+                (a, 3),
+                (a, 3),  # Lane 1: both a[3]
+                (a, 5),
+                (a, 5),  # Lane 2: both a[5]
+                (a, 7),
+                (a, 7),  # Lane 3: both a[7]
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for 512-bit broadcast second within lanes: {s.model() if result == sat else 'No model'}"
