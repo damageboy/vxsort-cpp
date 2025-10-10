@@ -596,6 +596,26 @@ def _select2_pd(src_128: BitVecRef, select: BitVecRef | BitVecNumRef) -> BitVecR
     )
 
 
+# Helper function for cross-lane permutes (64-bit elements from 256-bit vector)
+def _select4_epi64(src_256: BitVecRef, select: BitVecRef | BitVecNumRef) -> BitVecRef:
+    """Selects a 64-bit element from a 256-bit vector based on a 2-bit control."""
+    return simplify(
+        If(
+            select == 0,
+            Extract(63, 0, src_256),
+            If(
+                select == 1,
+                Extract(127, 64, src_256),
+                If(
+                    select == 2,
+                    Extract(191, 128, src_256),
+                    Extract(255, 192, src_256),  # select == 3
+                ),
+            ),
+        )
+    )
+
+
 # Helper function for permutes/shuffles
 def _extract_ctl4(imm: BitVecRef | BitVecNumRef):
     ctrl01 = Extract(1, 0, imm)
@@ -779,6 +799,51 @@ def _mm512_mask_permute_pd(src: BitVecRef, k: BitVecRef, a: BitVecRef, imm8: Bit
     Implements __m512d _mm512_mask_permute_pd (__m512d src, __mmask8 k, __m512d a, const int imm8)
     """
     return _permute_pd_generic(a, imm8, 4, k=k, src=src)
+
+
+##
+# 1xInput->1xOutput, cross-lane static(imm) permutes
+# - vpermq:
+#   -  _mm256_permute4x64_epi64
+
+
+def _mm256_permute4x64_epi64(a: BitVecRef, imm8: BitVecRef | int):
+    """
+    Shuffle 64-bit integers in "a" across lanes using the control in "imm8", and store the results in "dst".
+
+    Implements __m256i _mm256_permute4x64_epi64 (__m256i a, const int imm8)
+
+    Operation:
+    ```
+    DEFINE SELECT4(src, control) {
+        CASE(control[1:0]) OF
+        0:	tmp[63:0] := src[63:0]
+        1:	tmp[63:0] := src[127:64]
+        2:	tmp[63:0] := src[191:128]
+        3:	tmp[63:0] := src[255:192]
+        ESAC
+        RETURN tmp[63:0]
+    }
+    dst[63:0] := SELECT4(a[255:0], imm8[1:0])
+    dst[127:64] := SELECT4(a[255:0], imm8[3:2])
+    dst[191:128] := SELECT4(a[255:0], imm8[5:4])
+    dst[255:192] := SELECT4(a[255:0], imm8[7:6])
+    dst[MAX:256] := 0
+    ```
+
+    Args:
+        a: Source vector (256-bit)
+        imm8: Immediate 8-bit control mask (uses all 8 bits for 4 elements, 2 bits each)
+
+    Returns:
+        Permuted 256-bit vector
+    """
+    imm = imm8 if isinstance(imm8, BitVecRef) else BitVecVal(imm8, 8)
+
+    # Extract 2-bit control for each element position and select from source
+    elements = [_select4_epi64(a, Extract(j * 2 + 1, j * 2, imm)) for j in range(4)]
+
+    return simplify(Concat(elements[::-1]))
 
 
 ##

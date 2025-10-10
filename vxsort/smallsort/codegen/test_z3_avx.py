@@ -29,6 +29,8 @@ from z3_avx import _mm512_mask_permute_ps, _mm512_mask_permute_pd
 from z3_avx import _mm512_mask_shuffle_ps, _mm512_mask_shuffle_pd
 from z3_avx import _mm256_permutevar_ps, _mm512_permutevar_ps, _mm512_mask_permutevar_ps
 from z3_avx import _mm256_permutevar_pd, _mm512_permutevar_pd, _mm512_mask_permutevar_pd
+from z3_avx import _mm256_blend_pd, _mm256_blend_ps, _mm256_blendv_pd, _mm256_blendv_ps
+from z3_avx import _mm256_permute4x64_epi64
 from z3_avx import ymm_reg, ymm_reg_with_32b_values, ymm_reg_with_64b_values, ymm_reg_with_unique_values, ymm_reg_pair_with_unique_values, construct_ymm_reg_from_elements
 from z3_avx import zmm_reg, zmm_reg_with_32b_values, zmm_reg_with_64b_values, zmm_reg_with_unique_values, zmm_reg_pair_with_unique_values, construct_zmm_reg_from_elements
 from z3_avx import ymm_reg_reversed, zmm_reg_reversed
@@ -3650,3 +3652,183 @@ class TestBlendvPs:
             sign_bit = model.evaluate(Extract(i + 31, i + 31, mask_val)).as_long()
             expected_bit = 1 if j % 2 == 0 else 0
             assert sign_bit == expected_bit, f"Expected sign bit {j} to be {expected_bit}, got {sign_bit}"
+
+
+class TestPermute4x64Epi64:
+    """Tests for _mm256_permute4x64_epi64 (cross-lane 64-bit permute)"""
+
+    def test_mm256_permute4x64_epi64_identity(self):
+        """Test identity permutation"""
+        s = Solver()
+        input = ymm_reg("ymm0")
+        # Identity: [0, 1, 2, 3] - each 2-bit field selects its corresponding element
+        imm8 = _MM_SHUFFLE(3, 2, 1, 0)  # dst[0]=src[0], dst[1]=src[1], dst[2]=src[2], dst[3]=src[3]
+
+        output = _mm256_permute4x64_epi64(input, imm8)
+
+        # Output should equal input
+        s.add(output != input)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for identity permute: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_permute4x64_epi64_reverse(self):
+        """Test reverse permutation"""
+        s = Solver()
+        input = ymm_reg_with_unique_values("ymm0", s, bits=64)
+        # Reverse: [3, 2, 1, 0]
+        imm8 = _MM_SHUFFLE(0, 1, 2, 3)  # dst[0]=src[3], dst[1]=src[2], dst[2]=src[1], dst[3]=src[0]
+
+        output = _mm256_permute4x64_epi64(input, imm8)
+
+        # Create reversed input using constraints
+        reversed_input = ymm_reg_reversed("ymm_reversed", s, input, bits=64)
+
+        # Output should equal reversed input
+        s.add(output != reversed_input)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for reverse permute: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_permute4x64_epi64_broadcast_first(self):
+        """Test broadcasting first element"""
+        s = Solver()
+        input = ymm_reg_with_unique_values("ymm0", s, bits=64)
+        # Broadcast element 0: [0, 0, 0, 0]
+        imm8 = _MM_SHUFFLE(0, 0, 0, 0)  # dst[0..3]=src[0]
+
+        output = _mm256_permute4x64_epi64(input, imm8)
+
+        # Expected: all elements should be input[0]
+        expected = construct_ymm_reg_from_elements(
+            64,
+            [
+                (input, 0),
+                (input, 0),
+                (input, 0),
+                (input, 0),
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for broadcast first: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_permute4x64_epi64_broadcast_last(self):
+        """Test broadcasting last element"""
+        s = Solver()
+        input = ymm_reg_with_unique_values("ymm0", s, bits=64)
+        # Broadcast element 3: [3, 3, 3, 3]
+        imm8 = _MM_SHUFFLE(3, 3, 3, 3)  # dst[0..3]=src[3]
+
+        output = _mm256_permute4x64_epi64(input, imm8)
+
+        # Expected: all elements should be input[3]
+        expected = construct_ymm_reg_from_elements(
+            64,
+            [
+                (input, 3),
+                (input, 3),
+                (input, 3),
+                (input, 3),
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for broadcast last: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_permute4x64_epi64_swap_pairs(self):
+        """Test swapping adjacent pairs"""
+        s = Solver()
+        input = ymm_reg_with_unique_values("ymm0", s, bits=64)
+        # Swap pairs: [1, 0, 3, 2]
+        imm8 = _MM_SHUFFLE(2, 3, 0, 1)  # dst[0]=src[1], dst[1]=src[0], dst[2]=src[3], dst[3]=src[2]
+
+        output = _mm256_permute4x64_epi64(input, imm8)
+
+        expected = construct_ymm_reg_from_elements(
+            64,
+            [
+                (input, 1),
+                (input, 0),
+                (input, 3),
+                (input, 2),
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for swap pairs: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_permute4x64_epi64_swap_halves(self):
+        """Test swapping halves"""
+        s = Solver()
+        input = ymm_reg_with_unique_values("ymm0", s, bits=64)
+        # Swap halves: [2, 3, 0, 1]
+        imm8 = _MM_SHUFFLE(1, 0, 3, 2)  # dst[0]=src[2], dst[1]=src[3], dst[2]=src[0], dst[3]=src[1]
+
+        output = _mm256_permute4x64_epi64(input, imm8)
+
+        expected = construct_ymm_reg_from_elements(
+            64,
+            [
+                (input, 2),
+                (input, 3),
+                (input, 0),
+                (input, 1),
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for swap halves: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_permute4x64_epi64_custom_pattern(self):
+        """Test custom pattern [1, 3, 2, 0]"""
+        s = Solver()
+        input = ymm_reg_with_unique_values("ymm0", s, bits=64)
+        # Custom pattern: [1, 3, 2, 0] (from low to high)
+        imm8 = _MM_SHUFFLE(0, 2, 3, 1)  # dst[0]=src[1], dst[1]=src[3], dst[2]=src[2], dst[3]=src[0]
+
+        output = _mm256_permute4x64_epi64(input, imm8)
+
+        expected = construct_ymm_reg_from_elements(
+            64,
+            [
+                (input, 1),  # dst[63:0]
+                (input, 3),  # dst[127:64]
+                (input, 2),  # dst[191:128]
+                (input, 0),  # dst[255:192]
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for custom pattern: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_permute4x64_epi64_symbolic_imm(self):
+        """Test that Z3 can find the imm8 value to produce a specific permutation"""
+        s = Solver()
+        input = ymm_reg_with_unique_values("ymm0", s, bits=64)
+        imm8 = BitVec("imm8", 8)
+
+        output = _mm256_permute4x64_epi64(input, imm8)
+
+        # Want: [input[2], input[0], input[3], input[1]]
+        expected = construct_ymm_reg_from_elements(
+            64,
+            [
+                (input, 2),
+                (input, 0),
+                (input, 3),
+                (input, 1),
+            ],
+        )
+
+        s.add(output == expected)
+        result = s.check()
+
+        assert result == sat, "Z3 failed to find permute mask"
+        model_imm8 = s.model().evaluate(imm8).as_long()
+        # Expected imm8: [1, 3, 0, 2] = 0b01110010 = 0x72
+        expected_mask = _MM_SHUFFLE(1, 3, 0, 2)
+        assert model_imm8 == expected_mask, f"Z3 found unexpected mask: got 0x{model_imm8:02x}, expected 0x{expected_mask:02x}"
