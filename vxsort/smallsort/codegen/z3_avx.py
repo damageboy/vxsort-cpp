@@ -1305,6 +1305,17 @@ def _unpack_epi32_generic(a: BitVecRef, b: BitVecRef, high: bool, total_bits: in
 
     Returns:
         BitVecRef representing the unpacked result
+
+    Pseudocode:
+    For each 128-bit lane in the input:
+      If high is False (unpacklo), interleave elements 0 and 1 of a and b within each lane:
+        dst[0] = a[0], dst[1] = b[0], dst[2] = a[1], dst[3] = b[1]
+      If high is True (unpackhi), interleave elements 2 and 3 of a and b within each lane:
+        dst[0] = a[2], dst[1] = b[2], dst[2] = a[3], dst[3] = b[3]
+
+    For total_bits=256, process 2 lanes; for 512, process 4 lanes.
+    If masking is requested (src and k are not None), for each 32-bit element, choose the result from
+    the unpacked value if the corresponding mask bit is set, otherwise use the value from src.
     """
     assert total_bits in [256, 512], "total_bits must be 256 or 512"
 
@@ -1361,20 +1372,6 @@ def _mm256_unpacklo_epi32(a: BitVecRef, b: BitVecRef):
     """
     Unpack and interleave 32-bit integers from the low half of each 128-bit lane in "a" and "b", and store the results in "dst".
     Implements __m256i _mm256_unpacklo_epi32(__m256i a, __m256i b)
-
-    Operation:
-    ```
-    DEFINE INTERLEAVE_DWORDS(src1[127:0], src2[127:0]) {
-        dst[31:0] := src1[31:0]
-        dst[63:32] := src2[31:0]
-        dst[95:64] := src1[63:32]
-        dst[127:96] := src2[63:32]
-        RETURN dst[127:0]
-    }
-    dst[127:0] := INTERLEAVE_DWORDS(a[127:0], b[127:0])
-    dst[255:128] := INTERLEAVE_DWORDS(a[255:128], b[255:128])
-    dst[MAX:256] := 0
-    ```
     """
     return _unpack_epi32_generic(a, b, high=False, total_bits=256)
 
@@ -1383,20 +1380,6 @@ def _mm256_unpackhi_epi32(a: BitVecRef, b: BitVecRef):
     """
     Unpack and interleave 32-bit integers from the high half of each 128-bit lane in "a" and "b", and store the results in "dst".
     Implements __m256i _mm256_unpackhi_epi32(__m256i a, __m256i b)
-
-    Operation:
-    ```
-    DEFINE INTERLEAVE_HIGH_DWORDS(src1[127:0], src2[127:0]) {
-        dst[31:0] := src1[95:64]
-        dst[63:32] := src2[95:64]
-        dst[95:64] := src1[127:96]
-        dst[127:96] := src2[127:96]
-        RETURN dst[127:0]
-    }
-    dst[127:0] := INTERLEAVE_HIGH_DWORDS(a[127:0], b[127:0])
-    dst[255:128] := INTERLEAVE_HIGH_DWORDS(a[255:128], b[255:128])
-    dst[MAX:256] := 0
-    ```
     """
     return _unpack_epi32_generic(a, b, high=True, total_bits=256)
 
@@ -1405,22 +1388,6 @@ def _mm512_unpacklo_epi32(a: BitVecRef, b: BitVecRef):
     """
     Unpack and interleave 32-bit integers from the low half of each 128-bit lane in "a" and "b", and store the results in "dst".
     Implements __m512i _mm512_unpacklo_epi32(__m512i a, __m512i b)
-
-    Operation:
-    ```
-    DEFINE INTERLEAVE_DWORDS(src1[127:0], src2[127:0]) {
-        dst[31:0] := src1[31:0]
-        dst[63:32] := src2[31:0]
-        dst[95:64] := src1[63:32]
-        dst[127:96] := src2[63:32]
-        RETURN dst[127:0]
-    }
-    dst[127:0] := INTERLEAVE_DWORDS(a[127:0], b[127:0])
-    dst[255:128] := INTERLEAVE_DWORDS(a[255:128], b[255:128])
-    dst[383:256] := INTERLEAVE_DWORDS(a[383:256], b[383:256])
-    dst[511:384] := INTERLEAVE_DWORDS(a[511:384], b[511:384])
-    dst[MAX:512] := 0
-    ```
     """
     return _unpack_epi32_generic(a, b, high=False, total_bits=512)
 
@@ -1429,22 +1396,6 @@ def _mm512_unpackhi_epi32(a: BitVecRef, b: BitVecRef):
     """
     Unpack and interleave 32-bit integers from the high half of each 128-bit lane in "a" and "b", and store the results in "dst".
     Implements __m512i _mm512_unpackhi_epi32(__m512i a, __m512i b)
-
-    Operation:
-    ```
-    DEFINE INTERLEAVE_HIGH_DWORDS(src1[127:0], src2[127:0]) {
-        dst[31:0] := src1[95:64]
-        dst[63:32] := src2[95:64]
-        dst[95:64] := src1[127:96]
-        dst[127:96] := src2[127:96]
-        RETURN dst[127:0]
-    }
-    dst[127:0] := INTERLEAVE_HIGH_DWORDS(a[127:0], b[127:0])
-    dst[255:128] := INTERLEAVE_HIGH_DWORDS(a[255:128], b[255:128])
-    dst[383:256] := INTERLEAVE_HIGH_DWORDS(a[383:256], b[383:256])
-    dst[511:384] := INTERLEAVE_HIGH_DWORDS(a[511:384], b[511:384])
-    dst[MAX:512] := 0
-    ```
     """
     return _unpack_epi32_generic(a, b, high=True, total_bits=512)
 
@@ -1454,28 +1405,6 @@ def _mm512_mask_unpacklo_epi32(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: Bi
     Unpack and interleave 32-bit integers from the low half of each 128-bit lane in "a" and "b", and store the results in "dst"
     using writemask "k" (elements are copied from "src" when the corresponding mask bit is not set).
     Implements __m512i _mm512_mask_unpacklo_epi32(__m512i src, __mmask16 k, __m512i a, __m512i b)
-
-    Operation:
-    ```
-    DEFINE INTERLEAVE_DWORDS(src1[127:0], src2[127:0]) {
-        dst[31:0] := src1[31:0]
-        dst[63:32] := src2[31:0]
-        dst[95:64] := src1[63:32]
-        dst[127:96] := src2[63:32]
-        RETURN dst[127:0]
-    }
-    tmp_dst[127:0] := INTERLEAVE_DWORDS(a[127:0], b[127:0])
-    tmp_dst[255:128] := INTERLEAVE_DWORDS(a[255:128], b[255:128])
-    FOR j := 0 to 15
-        i := j*32
-        IF k[j]
-            dst[i+31:i] := tmp_dst[i+31:i]
-        ELSE
-            dst[i+31:i] := src[i+31:i]
-        FI
-    ENDFOR
-    dst[MAX:512] := 0
-    ```
     """
     return _unpack_epi32_generic(a, b, high=False, total_bits=512, src=src, k=k)
 
@@ -1485,29 +1414,212 @@ def _mm512_mask_unpackhi_epi32(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: Bi
     Unpack and interleave 32-bit integers from the high half of each 128-bit lane in "a" and "b", and store the results in "dst"
     using writemask "k" (elements are copied from "src" when the corresponding mask bit is not set).
     Implements __m512i _mm512_mask_unpackhi_epi32(__m512i src, __mmask16 k, __m512i a, __m512i b)
+    """
+    return _unpack_epi32_generic(a, b, high=True, total_bits=512, src=src, k=k)
+
+
+##
+# 2xInput -> 1xOutput, blend operations
+# - vblendpd:
+#   -  _mm256_blend_pd
+# - vblendps:
+#   -  _mm256_blend_ps
+# - vblendvpd:
+#   -  _mm256_blendv_pd
+# - vblendvps:
+#   -  _mm256_blendv_ps
+
+
+def _generic_blend(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int, total_width: int, element_width: int):
+    """
+    Generic implementation for immediate blend instructions that select elements from two source vectors.
+
+    These instructions use an immediate mask where each bit controls the selection for one element.
+    If the mask bit is 1, the element is selected from b; otherwise from a.
+
+    Args:
+        a: First source vector
+        b: Second source vector
+        imm8: Immediate 8-bit control mask
+        total_width: Total bit width of the vectors (256)
+        element_width: Width of each element in bits (32 or 64)
+
+    Returns:
+        Blended vector
+
+    Generic Operation (where N = total_width / element_width):
+        ```
+        FOR j := 0 to N-1
+            i := j * element_width
+            IF imm8[j]
+                dst[i + element_width - 1 : i] := b[i + element_width - 1 : i]
+            ELSE
+                dst[i + element_width - 1 : i] := a[i + element_width - 1 : i]
+            FI
+        ENDFOR
+        dst[MAX:total_width] := 0
+        ```
+
+    Examples:
+        - _mm256_blend_pd: total_width=256, element_width=64 → 4 elements
+        - _mm256_blend_ps: total_width=256, element_width=32 → 8 elements
+    """
+    num_elements = total_width // element_width
+    imm = imm8 if isinstance(imm8, BitVecRef) else BitVecVal(imm8, 8)
+
+    elements = [None] * num_elements
+
+    for j in range(num_elements):
+        i = j * element_width
+        # Extract mask bit for this element
+        mask_bit = Extract(j, j, imm)
+        # Extract elements from both sources
+        a_elem = Extract(i + element_width - 1, i, a)
+        b_elem = Extract(i + element_width - 1, i, b)
+        # Blend: if mask bit is 1, use b; otherwise use a
+        elements[j] = simplify(If(mask_bit == 1, b_elem, a_elem))
+
+    return simplify(Concat(elements[::-1]))
+
+
+def _generic_blendv(a: BitVecRef, b: BitVecRef, mask: BitVecRef, total_width: int, element_width: int):
+    """
+    Generic implementation for variable blend instructions that select elements from two source vectors.
+
+    These instructions use a mask vector where the sign bit (MSB) of each element controls the selection.
+    If the sign bit is 1, the element is selected from b; otherwise from a.
+
+    Args:
+        a: First source vector
+        b: Second source vector
+        mask: Variable mask vector (uses sign bit of each element)
+        total_width: Total bit width of the vectors (256)
+        element_width: Width of each element in bits (32 or 64)
+
+    Returns:
+        Blended vector
+
+    Generic Operation (where N = total_width / element_width):
+        ```
+        FOR j := 0 to N-1
+            i := j * element_width
+            IF mask[i + element_width - 1]  // sign bit (MSB)
+                dst[i + element_width - 1 : i] := b[i + element_width - 1 : i]
+            ELSE
+                dst[i + element_width - 1 : i] := a[i + element_width - 1 : i]
+            FI
+        ENDFOR
+        dst[MAX:total_width] := 0
+        ```
+
+    Examples:
+        - _mm256_blendv_pd: total_width=256, element_width=64 → 4 elements
+        - _mm256_blendv_ps: total_width=256, element_width=32 → 8 elements
+    """
+    num_elements = total_width // element_width
+
+    elements = [None] * num_elements
+
+    for j in range(num_elements):
+        i = j * element_width
+        # Extract sign bit (MSB) for this element: mask[i + element_width - 1]
+        sign_bit = Extract(i + element_width - 1, i + element_width - 1, mask)
+        # Extract elements from both sources
+        a_elem = Extract(i + element_width - 1, i, a)
+        b_elem = Extract(i + element_width - 1, i, b)
+        # Blend: if sign bit is 1, use b; otherwise use a
+        elements[j] = simplify(If(sign_bit == 1, b_elem, a_elem))
+
+    return simplify(Concat(elements[::-1]))
+
+
+def _mm256_blend_pd(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
+    """
+    Blend packed double-precision (64-bit) floating-point elements from "a" and "b" using control mask "imm8",
+    and store the results in "dst".
+
+    Implements __m256d _mm256_blend_pd (__m256d a, __m256d b, const int imm8)
 
     Operation:
     ```
-    DEFINE INTERLEAVE_HIGH_DWORDS(src1[127:0], src2[127:0]) {
-        dst[31:0] := src1[95:64]
-        dst[63:32] := src2[95:64]
-        dst[95:64] := src1[127:96]
-        dst[127:96] := src2[127:96]
-        RETURN dst[127:0]
-    }
-    tmp_dst[127:0] := INTERLEAVE_HIGH_DWORDS(a[127:0], b[127:0])
-    tmp_dst[255:128] := INTERLEAVE_HIGH_DWORDS(a[255:128], b[255:128])
-    tmp_dst[383:256] := INTERLEAVE_HIGH_DWORDS(a[383:256], b[383:256])
-    tmp_dst[511:384] := INTERLEAVE_HIGH_DWORDS(a[511:384], b[511:384])
-    FOR j := 0 to 15
-        i := j*32
-        IF k[j]
-            dst[i+31:i] := tmp_dst[i+31:i]
+    FOR j := 0 to 3
+        i := j*64
+        IF imm8[j]
+            dst[i+63:i] := b[i+63:i]
         ELSE
-            dst[i+31:i] := src[i+31:i]
+            dst[i+63:i] := a[i+63:i]
         FI
     ENDFOR
-    dst[MAX:512] := 0
+    dst[MAX:256] := 0
     ```
     """
-    return _unpack_epi32_generic(a, b, high=True, total_bits=512, src=src, k=k)
+    return _generic_blend(a, b, imm8, 256, 64)
+
+
+def _mm256_blend_ps(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
+    """
+    Blend packed single-precision (32-bit) floating-point elements from "a" and "b" using control mask "imm8",
+    and store the results in "dst".
+
+    Implements __m256 _mm256_blend_ps (__m256 a, __m256 b, const int imm8)
+
+    Operation:
+    ```
+    FOR j := 0 to 7
+        i := j*32
+        IF imm8[j]
+            dst[i+31:i] := b[i+31:i]
+        ELSE
+            dst[i+31:i] := a[i+31:i]
+        FI
+    ENDFOR
+    dst[MAX:256] := 0
+    ```
+    """
+    return _generic_blend(a, b, imm8, 256, 32)
+
+
+def _mm256_blendv_pd(a: BitVecRef, b: BitVecRef, mask: BitVecRef):
+    """
+    Blend packed double-precision (64-bit) floating-point elements from "a" and "b" using "mask",
+    and store the results in "dst".
+
+    Implements __m256d _mm256_blendv_pd (__m256d a, __m256d b, __m256d mask)
+
+    Operation:
+    ```
+    FOR j := 0 to 3
+        i := j*64
+        IF mask[i+63]
+            dst[i+63:i] := b[i+63:i]
+        ELSE
+            dst[i+63:i] := a[i+63:i]
+        FI
+    ENDFOR
+    dst[MAX:256] := 0
+    ```
+    """
+    return _generic_blendv(a, b, mask, 256, 64)
+
+
+def _mm256_blendv_ps(a: BitVecRef, b: BitVecRef, mask: BitVecRef):
+    """
+    Blend packed single-precision (32-bit) floating-point elements from "a" and "b" using "mask",
+    and store the results in "dst".
+
+    Implements __m256 _mm256_blendv_ps (__m256 a, __m256 b, __m256 mask)
+
+    Operation:
+    ```
+    FOR j := 0 to 7
+        i := j*32
+        IF mask[i+31]
+            dst[i+31:i] := b[i+31:i]
+        ELSE
+            dst[i+31:i] := a[i+31:i]
+        FI
+    ENDFOR
+    dst[MAX:256] := 0
+    ```
+    """
+    return _generic_blendv(a, b, mask, 256, 32)

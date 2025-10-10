@@ -3185,3 +3185,468 @@ class TestPermutevarPd:
         s.add(output != expected)
         result = s.check()
         assert result == unsat, f"Z3 found a counterexample for 512-bit broadcast second within lanes: {s.model() if result == sat else 'No model'}"
+
+
+class TestBlendPd:
+    """Tests for _mm256_blend_pd (immediate blend for double-precision)"""
+
+    def test_mm256_blend_pd_all_from_a(self):
+        """Test blend_pd with all elements from a (imm8 = 0b0000)"""
+        s = Solver()
+        a = ymm_reg("a")
+        b = ymm_reg("b")
+        imm8 = 0b0000  # All bits 0: select all from a
+
+        output = _mm256_blend_pd(a, b, imm8)
+
+        # Output should equal a
+        s.add(output != a)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for all-from-a blend: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_blend_pd_all_from_b(self):
+        """Test blend_pd with all elements from b (imm8 = 0b1111)"""
+        s = Solver()
+        a = ymm_reg("a")
+        b = ymm_reg("b")
+        imm8 = 0b1111  # All bits 1: select all from b
+
+        output = _mm256_blend_pd(a, b, imm8)
+
+        # Output should equal b
+        s.add(output != b)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for all-from-b blend: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_blend_pd_alternating(self):
+        """Test blend_pd with alternating pattern (imm8 = 0b1010)"""
+        s = Solver()
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=64)
+        imm8 = 0b1010  # Pattern: b, a, b, a (from element 0 to 3)
+
+        output = _mm256_blend_pd(a, b, imm8)
+
+        # Expected: elements 0,2 from a; elements 1,3 from b
+        expected = construct_ymm_reg_from_elements(
+            64,
+            [
+                (a, 0),  # bit 0 = 0
+                (b, 1),  # bit 1 = 1
+                (a, 2),  # bit 2 = 0
+                (b, 3),  # bit 3 = 1
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for alternating blend: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_blend_pd_first_two_from_b(self):
+        """Test blend_pd with first two elements from b (imm8 = 0b0011)"""
+        s = Solver()
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=64)
+        imm8 = 0b0011  # First two from b, last two from a
+
+        output = _mm256_blend_pd(a, b, imm8)
+
+        expected = construct_ymm_reg_from_elements(
+            64,
+            [
+                (b, 0),  # bit 0 = 1
+                (b, 1),  # bit 1 = 1
+                (a, 2),  # bit 2 = 0
+                (a, 3),  # bit 3 = 0
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for first-two-from-b blend: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_blend_pd_symbolic_mask(self):
+        """Test that Z3 can find the correct mask to produce a specific blend"""
+        s = Solver()
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=64)
+        imm8 = BitVec("imm8", 8)
+
+        output = _mm256_blend_pd(a, b, imm8)
+
+        # Want: [a[0], b[1], a[2], b[3]]
+        expected = construct_ymm_reg_from_elements(
+            64,
+            [
+                (a, 0),
+                (b, 1),
+                (a, 2),
+                (b, 3),
+            ],
+        )
+
+        s.add(output == expected)
+        result = s.check()
+
+        assert result == sat, "Z3 failed to find blend mask"
+        model_imm8 = s.model().evaluate(imm8).as_long()
+        expected_mask = 0b1010
+        assert (model_imm8 & 0xF) == expected_mask, f"Z3 found unexpected mask: got 0x{model_imm8:02x}, expected 0x{expected_mask:02x}"
+
+
+class TestBlendPs:
+    """Tests for _mm256_blend_ps (immediate blend for single-precision)"""
+
+    def test_mm256_blend_ps_all_from_a(self):
+        """Test blend_ps with all elements from a (imm8 = 0b00000000)"""
+        s = Solver()
+        a = ymm_reg("a")
+        b = ymm_reg("b")
+        imm8 = 0b00000000  # All bits 0: select all from a
+
+        output = _mm256_blend_ps(a, b, imm8)
+
+        # Output should equal a
+        s.add(output != a)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for all-from-a blend: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_blend_ps_all_from_b(self):
+        """Test blend_ps with all elements from b (imm8 = 0b11111111)"""
+        s = Solver()
+        a = ymm_reg("a")
+        b = ymm_reg("b")
+        imm8 = 0b11111111  # All bits 1: select all from b
+
+        output = _mm256_blend_ps(a, b, imm8)
+
+        # Output should equal b
+        s.add(output != b)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for all-from-b blend: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_blend_ps_alternating(self):
+        """Test blend_ps with alternating pattern (imm8 = 0b10101010)"""
+        s = Solver()
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32)
+        imm8 = 0b10101010  # Pattern: a, b, a, b, a, b, a, b
+
+        output = _mm256_blend_ps(a, b, imm8)
+
+        # Expected: even indices from a, odd indices from b
+        expected = construct_ymm_reg_from_elements(
+            32,
+            [
+                (a, 0),  # bit 0 = 0
+                (b, 1),  # bit 1 = 1
+                (a, 2),  # bit 2 = 0
+                (b, 3),  # bit 3 = 1
+                (a, 4),  # bit 4 = 0
+                (b, 5),  # bit 5 = 1
+                (a, 6),  # bit 6 = 0
+                (b, 7),  # bit 7 = 1
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for alternating blend: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_blend_ps_first_four_from_b(self):
+        """Test blend_ps with first four elements from b (imm8 = 0b00001111)"""
+        s = Solver()
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32)
+        imm8 = 0b00001111  # First four from b, last four from a
+
+        output = _mm256_blend_ps(a, b, imm8)
+
+        expected = construct_ymm_reg_from_elements(
+            32,
+            [
+                (b, 0),  # bit 0 = 1
+                (b, 1),  # bit 1 = 1
+                (b, 2),  # bit 2 = 1
+                (b, 3),  # bit 3 = 1
+                (a, 4),  # bit 4 = 0
+                (a, 5),  # bit 5 = 0
+                (a, 6),  # bit 6 = 0
+                (a, 7),  # bit 7 = 0
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for first-four-from-b blend: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_blend_ps_symbolic_mask(self):
+        """Test that Z3 can find the correct mask to produce a specific blend"""
+        s = Solver()
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32)
+        imm8 = BitVec("imm8", 8)
+
+        output = _mm256_blend_ps(a, b, imm8)
+
+        # Want: [b[0], a[1], b[2], a[3], b[4], a[5], b[6], a[7]]
+        expected = construct_ymm_reg_from_elements(
+            32,
+            [
+                (b, 0),
+                (a, 1),
+                (b, 2),
+                (a, 3),
+                (b, 4),
+                (a, 5),
+                (b, 6),
+                (a, 7),
+            ],
+        )
+
+        s.add(output == expected)
+        result = s.check()
+
+        assert result == sat, "Z3 failed to find blend mask"
+        model_imm8 = s.model().evaluate(imm8).as_long()
+        expected_mask = 0b01010101
+        assert model_imm8 == expected_mask, f"Z3 found unexpected mask: got 0x{model_imm8:02x}, expected 0x{expected_mask:02x}"
+
+
+class TestBlendvPd:
+    """Tests for _mm256_blendv_pd (variable blend for double-precision)"""
+
+    def test_mm256_blendv_pd_all_from_a(self):
+        """Test blendv_pd with all sign bits 0 (select all from a)"""
+        s = Solver()
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=64)
+
+        # Create mask with all sign bits = 0 (all positive)
+        mask = ymm_reg("mask")
+        for j in range(4):
+            i = j * 64
+            s.add(Extract(i + 63, i + 63, mask) == 0)
+
+        output = _mm256_blendv_pd(a, b, mask)
+
+        # Output should equal a
+        s.add(output != a)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for all-from-a blend: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_blendv_pd_all_from_b(self):
+        """Test blendv_pd with all sign bits 1 (select all from b)"""
+        s = Solver()
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=64)
+
+        # Create mask with all sign bits = 1 (all negative)
+        mask = ymm_reg("mask")
+        for j in range(4):
+            i = j * 64
+            s.add(Extract(i + 63, i + 63, mask) == 1)
+
+        output = _mm256_blendv_pd(a, b, mask)
+
+        # Output should equal b
+        s.add(output != b)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for all-from-b blend: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_blendv_pd_alternating(self):
+        """Test blendv_pd with alternating sign bits"""
+        s = Solver()
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=64)
+
+        # Create mask with alternating sign bits: 0, 1, 0, 1
+        mask = ymm_reg("mask")
+        s.add(Extract(63, 63, mask) == 0)  # Element 0: from a
+        s.add(Extract(127, 127, mask) == 1)  # Element 1: from b
+        s.add(Extract(191, 191, mask) == 0)  # Element 2: from a
+        s.add(Extract(255, 255, mask) == 1)  # Element 3: from b
+
+        output = _mm256_blendv_pd(a, b, mask)
+
+        expected = construct_ymm_reg_from_elements(
+            64,
+            [
+                (a, 0),
+                (b, 1),
+                (a, 2),
+                (b, 3),
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for alternating blend: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_blendv_pd_symbolic_mask(self):
+        """Test that Z3 can find the correct mask to produce a specific blend"""
+        s = Solver()
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=64)
+        mask = ymm_reg("mask")
+
+        output = _mm256_blendv_pd(a, b, mask)
+
+        # Want: [b[0], b[1], a[2], a[3]]
+        expected = construct_ymm_reg_from_elements(
+            64,
+            [
+                (b, 0),
+                (b, 1),
+                (a, 2),
+                (a, 3),
+            ],
+        )
+
+        s.add(output == expected)
+        result = s.check()
+
+        assert result == sat, "Z3 failed to find blend mask"
+        # Verify sign bits match expected pattern
+        model = s.model()
+        mask_val = model.evaluate(mask)
+        sign_bit_0 = model.evaluate(Extract(63, 63, mask_val)).as_long()
+        sign_bit_1 = model.evaluate(Extract(127, 127, mask_val)).as_long()
+        sign_bit_2 = model.evaluate(Extract(191, 191, mask_val)).as_long()
+        sign_bit_3 = model.evaluate(Extract(255, 255, mask_val)).as_long()
+
+        assert sign_bit_0 == 1, f"Expected sign bit 0 to be 1, got {sign_bit_0}"
+        assert sign_bit_1 == 1, f"Expected sign bit 1 to be 1, got {sign_bit_1}"
+        assert sign_bit_2 == 0, f"Expected sign bit 2 to be 0, got {sign_bit_2}"
+        assert sign_bit_3 == 0, f"Expected sign bit 3 to be 0, got {sign_bit_3}"
+
+
+class TestBlendvPs:
+    """Tests for _mm256_blendv_ps (variable blend for single-precision)"""
+
+    def test_mm256_blendv_ps_all_from_a(self):
+        """Test blendv_ps with all sign bits 0 (select all from a)"""
+        s = Solver()
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32)
+
+        # Create mask with all sign bits = 0 (all positive)
+        mask = ymm_reg("mask")
+        for j in range(8):
+            i = j * 32
+            s.add(Extract(i + 31, i + 31, mask) == 0)
+
+        output = _mm256_blendv_ps(a, b, mask)
+
+        # Output should equal a
+        s.add(output != a)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for all-from-a blend: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_blendv_ps_all_from_b(self):
+        """Test blendv_ps with all sign bits 1 (select all from b)"""
+        s = Solver()
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32)
+
+        # Create mask with all sign bits = 1 (all negative)
+        mask = ymm_reg("mask")
+        for j in range(8):
+            i = j * 32
+            s.add(Extract(i + 31, i + 31, mask) == 1)
+
+        output = _mm256_blendv_ps(a, b, mask)
+
+        # Output should equal b
+        s.add(output != b)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for all-from-b blend: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_blendv_ps_alternating(self):
+        """Test blendv_ps with alternating sign bits"""
+        s = Solver()
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32)
+
+        # Create mask with alternating sign bits: 0, 1, 0, 1, 0, 1, 0, 1
+        mask = ymm_reg("mask")
+        for j in range(8):
+            i = j * 32
+            expected_bit = j % 2
+            s.add(Extract(i + 31, i + 31, mask) == expected_bit)
+
+        output = _mm256_blendv_ps(a, b, mask)
+
+        expected = construct_ymm_reg_from_elements(
+            32,
+            [
+                (a, 0),
+                (b, 1),
+                (a, 2),
+                (b, 3),
+                (a, 4),
+                (b, 5),
+                (a, 6),
+                (b, 7),
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for alternating blend: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_blendv_ps_first_four_from_b(self):
+        """Test blendv_ps with first four elements from b"""
+        s = Solver()
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32)
+
+        # Create mask: first four sign bits = 1, last four = 0
+        mask = ymm_reg("mask")
+        for j in range(8):
+            i = j * 32
+            expected_bit = 1 if j < 4 else 0
+            s.add(Extract(i + 31, i + 31, mask) == expected_bit)
+
+        output = _mm256_blendv_ps(a, b, mask)
+
+        expected = construct_ymm_reg_from_elements(
+            32,
+            [
+                (b, 0),
+                (b, 1),
+                (b, 2),
+                (b, 3),
+                (a, 4),
+                (a, 5),
+                (a, 6),
+                (a, 7),
+            ],
+        )
+
+        s.add(output != expected)
+        result = s.check()
+        assert result == unsat, f"Z3 found a counterexample for first-four-from-b blend: {s.model() if result == sat else 'No model'}"
+
+    def test_mm256_blendv_ps_symbolic_mask(self):
+        """Test that Z3 can find the correct mask to produce a specific blend"""
+        s = Solver()
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32)
+        mask = ymm_reg("mask")
+
+        output = _mm256_blendv_ps(a, b, mask)
+
+        # Want: [b[0], a[1], b[2], a[3], b[4], a[5], b[6], a[7]]
+        expected = construct_ymm_reg_from_elements(
+            32,
+            [
+                (b, 0),
+                (a, 1),
+                (b, 2),
+                (a, 3),
+                (b, 4),
+                (a, 5),
+                (b, 6),
+                (a, 7),
+            ],
+        )
+
+        s.add(output == expected)
+        result = s.check()
+
+        assert result == sat, "Z3 failed to find blend mask"
+        # Verify sign bits match expected pattern (alternating starting with 1)
+        model = s.model()
+        mask_val = model.evaluate(mask)
+
+        for j in range(8):
+            i = j * 32
+            sign_bit = model.evaluate(Extract(i + 31, i + 31, mask_val)).as_long()
+            expected_bit = 1 if j % 2 == 0 else 0
+            assert sign_bit == expected_bit, f"Expected sign bit {j} to be {expected_bit}, got {sign_bit}"
