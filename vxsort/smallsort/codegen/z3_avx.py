@@ -1589,3 +1589,177 @@ def _mm256_blendv_ps(a: BitVecRef, b: BitVecRef, mask: BitVecRef):
     Implements __m256 _mm256_blendv_ps (__m256 a, __m256 b, __m256 mask)
     """
     return _generic_blendv(a, b, mask, 256, 32)
+
+
+##
+# 2xInput -> 1xOutput, alignr (concatenate and shift right)
+# - valignd:
+#   -  _mm256_alignr_epi32
+#   -  _mm512_alignr_epi32
+#   -  _mm512_mask_alignr_epi32
+# - valignq:
+#   -  _mm256_alignr_epi64
+#   -  _mm512_alignr_epi64
+#   -  _mm512_mask_alignr_epi64
+
+
+def _generic_alignr(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int, total_width: int, element_width: int, src: BitVecRef | None = None, k: BitVecRef | None = None):
+    """
+    Generic implementation for alignr instructions that concatenate two vectors and shift right.
+
+    These instructions concatenate vector a (high part) and vector b (low part) into a
+    double-width temporary, shift the result right by imm8 elements, and store the
+    low half in the destination. Optional masking is supported for AVX512 variants.
+
+    Args:
+        a: First source vector (becomes high part of concatenation)
+        b: Second source vector (becomes low part of concatenation)
+        imm8: Immediate value specifying shift amount in elements
+        total_width: Total bit width of each vector (256 or 512)
+        element_width: Width of each element in bits (32 or 64)
+        src: Optional source vector for masked operations (values used when mask bit is 0)
+        k: Optional predicate mask (if provided, src must also be provided)
+
+    Returns:
+        Aligned/shifted vector (optionally masked)
+
+    Generic Operation (where N = total_width / element_width):
+        Without mask:
+        ```
+        temp[2*total_width-1:total_width] := a[total_width-1:0]
+        temp[total_width-1:0] := b[total_width-1:0]
+        temp[2*total_width-1:0] := temp[2*total_width-1:0] >> (element_width * imm8)
+        dst[total_width-1:0] := temp[total_width-1:0]
+        dst[MAX:total_width] := 0
+        ```
+
+        With mask:
+        ```
+        temp[2*total_width-1:total_width] := a[total_width-1:0]
+        temp[total_width-1:0] := b[total_width-1:0]
+        temp[2*total_width-1:0] := temp[2*total_width-1:0] >> (element_width * imm8)
+        FOR j := 0 to N-1
+            i := j * element_width
+            IF k[j]
+                dst[i + element_width - 1 : i] := temp[i + element_width - 1 : i]
+            ELSE
+                dst[i + element_width - 1 : i] := src[i + element_width - 1 : i]
+            FI
+        ENDFOR
+        dst[MAX:total_width] := 0
+        ```
+
+    Examples:
+        - _mm256_alignr_epi32: total_width=256, element_width=32 → 8 elements, shift by 0-7
+        - _mm512_alignr_epi32: total_width=512, element_width=32 → 16 elements, shift by 0-15
+        - _mm256_alignr_epi64: total_width=256, element_width=64 → 4 elements, shift by 0-3
+        - _mm512_alignr_epi64: total_width=512, element_width=64 → 8 elements, shift by 0-7
+        - _mm512_mask_alignr_epi32: total_width=512, element_width=32, with src and k
+        - _mm512_mask_alignr_epi64: total_width=512, element_width=64, with src and k
+    """
+    num_elements = total_width // element_width
+    imm = imm8 if isinstance(imm8, BitVecRef) else BitVecVal(imm8, 8)
+
+    # Extract the relevant bits from imm8 based on the number of elements
+    # For 32-bit elements: 256-bit uses 3 bits, 512-bit uses 4 bits
+    # For 64-bit elements: 256-bit uses 2 bits, 512-bit uses 3 bits
+    shift_bits_needed = (num_elements - 1).bit_length()
+    shift_amount = Extract(shift_bits_needed - 1, 0, imm)
+
+    # Extract all elements from both vectors to form the concatenated temp
+    # temp = [a_elements | b_elements] (a is high, b is low)
+    a_elements = [Extract(element_width * (i + 1) - 1, element_width * i, a) for i in range(num_elements)]
+    b_elements = [Extract(element_width * (i + 1) - 1, element_width * i, b) for i in range(num_elements)]
+
+    # Concatenate: b elements first (indices 0..N-1), then a elements (indices N..2N-1)
+    all_elements = b_elements + a_elements
+
+    # Select elements after shifting by shift_amount
+    # After shifting right by shift_amount, we take elements [shift_amount : shift_amount + num_elements)
+    result_elements = [None] * num_elements
+
+    for j in range(num_elements):
+        # For each output position, we need to select from all_elements[shift_amount + j]
+        # Use nested If statements to handle all possible shift amounts
+        selected = all_elements[-1]  # Default to last element (shouldn't happen if shift is in range)
+
+        # Build the selection tree from the end
+        for shift_val in range(2 * num_elements - 1, -1, -1):
+            if shift_val + j < 2 * num_elements:
+                selected = If(shift_amount == shift_val, all_elements[shift_val + j], selected)
+
+        result_elements[j] = selected
+
+    # Apply mask if provided
+    if k is not None and src is not None:
+        masked_elements = [None] * num_elements
+        for j in range(num_elements):
+            i = j * element_width
+            mask_bit = Extract(j, j, k)
+            src_elem = Extract(i + element_width - 1, i, src)
+            masked_elements[j] = simplify(If(mask_bit == 1, result_elements[j], src_elem))
+        result_elements = masked_elements
+
+    return simplify(Concat(result_elements[::-1]))
+
+
+def _mm256_alignr_epi32(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
+    """
+    Concatenate a and b into a 64-byte result, shift right by imm8 32-bit elements,
+    and store the low 32 bytes (8 elements) in dst.
+    Implements __m256i _mm256_alignr_epi32(__m256i a, __m256i b, const int imm8)
+    See _generic_alignr for operation details.
+    """
+    return _generic_alignr(a, b, imm8, 256, 32)
+
+
+def _mm512_alignr_epi32(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
+    """
+    Concatenate a and b into a 128-byte result, shift right by imm8 32-bit elements,
+    and store the low 64 bytes (16 elements) in dst.
+    Implements __m512i _mm512_alignr_epi32(__m512i a, __m512i b, const int imm8)
+    See _generic_alignr for operation details.
+    """
+    return _generic_alignr(a, b, imm8, 512, 32)
+
+
+def _mm512_mask_alignr_epi32(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
+    """
+    Concatenate a and b into a 128-byte result, shift right by imm8 32-bit elements,
+    and store the low 64 bytes (16 elements) in dst using writemask k.
+    Elements are copied from src when the corresponding mask bit is not set.
+    Implements __m512i _mm512_mask_alignr_epi32(__m512i src, __mmask16 k, __m512i a, __m512i b, const int imm8)
+    See _generic_alignr for operation details.
+    """
+    return _generic_alignr(a, b, imm8, 512, 32, src=src, k=k)
+
+
+def _mm256_alignr_epi64(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
+    """
+    Concatenate a and b into a 64-byte result, shift right by imm8 64-bit elements,
+    and store the low 32 bytes (4 elements) in dst.
+    Implements __m256i _mm256_alignr_epi64(__m256i a, __m256i b, const int imm8)
+    See _generic_alignr for operation details.
+    """
+    return _generic_alignr(a, b, imm8, 256, 64)
+
+
+def _mm512_alignr_epi64(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
+    """
+    Concatenate a and b into a 128-byte result, shift right by imm8 64-bit elements,
+    and store the low 64 bytes (8 elements) in dst.
+    Implements __m512i _mm512_alignr_epi64(__m512i a, __m512i b, const int imm8)
+    See _generic_alignr for operation details.
+    """
+    return _generic_alignr(a, b, imm8, 512, 64)
+
+
+def _mm512_mask_alignr_epi64(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
+    """
+    Concatenate a and b into a 128-byte result, shift right by imm8 64-bit elements,
+    and store the low 64 bytes (8 elements) in dst using writemask k.
+    Elements are copied from src when the corresponding mask bit is not set.
+    Implements __m512i _mm512_mask_alignr_epi64(__m512i src, __mmask8 k, __m512i a, __m512i b, const int imm8)
+    See _generic_alignr for operation details.
+    """
+    return _generic_alignr(a, b, imm8, 512, 64, src=src, k=k)

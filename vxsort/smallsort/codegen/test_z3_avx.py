@@ -31,6 +31,8 @@ from z3_avx import _mm256_permutevar_ps, _mm512_permutevar_ps, _mm512_mask_permu
 from z3_avx import _mm256_permutevar_pd, _mm512_permutevar_pd, _mm512_mask_permutevar_pd
 from z3_avx import _mm256_blend_pd, _mm256_blend_ps, _mm256_blendv_pd, _mm256_blendv_ps
 from z3_avx import _mm256_permute4x64_epi64
+from z3_avx import _mm256_alignr_epi32, _mm512_alignr_epi32, _mm512_mask_alignr_epi32
+from z3_avx import _mm256_alignr_epi64, _mm512_alignr_epi64, _mm512_mask_alignr_epi64
 from z3_avx import ymm_reg, ymm_reg_with_32b_values, ymm_reg_with_64b_values, ymm_reg_with_unique_values, ymm_reg_pair_with_unique_values, construct_ymm_reg_from_elements
 from z3_avx import zmm_reg, zmm_reg_with_32b_values, zmm_reg_with_64b_values, zmm_reg_with_unique_values, zmm_reg_pair_with_unique_values, construct_zmm_reg_from_elements
 from z3_avx import ymm_reg_reversed, zmm_reg_reversed
@@ -3832,3 +3834,418 @@ class TestPermute4x64Epi64:
         # Expected imm8: [1, 3, 0, 2] = 0b01110010 = 0x72
         expected_mask = _MM_SHUFFLE(1, 3, 0, 2)
         assert model_imm8 == expected_mask, f"Z3 found unexpected mask: got 0x{model_imm8:02x}, expected 0x{expected_mask:02x}"
+
+
+class TestAlignrEpi32:
+    """Tests for _mm256_alignr_epi32 and _mm512_alignr_epi32"""
+
+    def test_mm256_alignr_epi32_shift_zero(self):
+        """Shift by 0 should return b unchanged"""
+        s = Solver()
+        a = ymm_reg_with_32b_values("a", s, list(range(10, 18)))
+        b = ymm_reg_with_32b_values("b", s, list(range(8)))
+
+        output = _mm256_alignr_epi32(a, b, 0)
+        expected = ymm_reg_with_32b_values("expected", s, list(range(8)))
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm256_alignr_epi32_shift_one(self):
+        """Shift by 1 should shift one element from b to a"""
+        s = Solver()
+        a = ymm_reg_with_32b_values("a", s, list(range(10, 18)))
+        b = ymm_reg_with_32b_values("b", s, list(range(8)))
+
+        # Concatenated: [10, 11, 12, 13, 14, 15, 16, 17, 0, 1, 2, 3, 4, 5, 6, 7]
+        # Shift right by 1: [1, 2, 3, 4, 5, 6, 7, 10, ...]
+        # Take low 8: [1, 2, 3, 4, 5, 6, 7, 10]
+        output = _mm256_alignr_epi32(a, b, 1)
+        expected = ymm_reg_with_32b_values("expected", s, list(range(1, 8)) + [10])
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm256_alignr_epi32_shift_seven(self):
+        """Shift by 7 (max for 3 bits) should get mostly from a"""
+        s = Solver()
+        a = ymm_reg_with_32b_values("a", s, list(range(10, 18)))
+        b = ymm_reg_with_32b_values("b", s, list(range(8)))
+
+        # Concatenated: [10, 11, 12, 13, 14, 15, 16, 17, 0, 1, 2, 3, 4, 5, 6, 7]
+        # Shift right by 7: [7, 10, 11, 12, 13, 14, 15, 16, ...]
+        # Take low 8: [7, 10, 11, 12, 13, 14, 15, 16]
+        output = _mm256_alignr_epi32(a, b, 7)
+        expected = ymm_reg_with_32b_values("expected", s, [7] + list(range(10, 17)))
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm256_alignr_epi32_shift_four(self):
+        """Shift by 4 should get half from each"""
+        s = Solver()
+        a = ymm_reg_with_32b_values("a", s, list(range(10, 18)))
+        b = ymm_reg_with_32b_values("b", s, list(range(8)))
+
+        # Concatenated: [10, 11, 12, 13, 14, 15, 16, 17, 0, 1, 2, 3, 4, 5, 6, 7]
+        # Shift right by 4: [4, 5, 6, 7, 10, 11, 12, 13, ...]
+        # Take low 8: [4, 5, 6, 7, 10, 11, 12, 13]
+        output = _mm256_alignr_epi32(a, b, 4)
+        expected = ymm_reg_with_32b_values("expected", s, list(range(4, 8)) + list(range(10, 14)))
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm512_alignr_epi32_shift_zero(self):
+        """Shift by 0 should return b unchanged"""
+        s = Solver()
+        a = zmm_reg_with_32b_values("a", s, list(range(20, 36)))
+        b = zmm_reg_with_32b_values("b", s, list(range(16)))
+
+        output = _mm512_alignr_epi32(a, b, 0)
+        expected = zmm_reg_with_32b_values("expected", s, list(range(16)))
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm512_alignr_epi32_shift_fifteen(self):
+        """Shift by 15 (max for 4 bits) should get mostly from a"""
+        s = Solver()
+        a = zmm_reg_with_32b_values("a", s, list(range(20, 36)))
+        b = zmm_reg_with_32b_values("b", s, list(range(16)))
+
+        # Shift right by 15: [15, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34]
+        output = _mm512_alignr_epi32(a, b, 15)
+        expected = zmm_reg_with_32b_values("expected", s, [15] + list(range(20, 35)))
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm512_alignr_epi32_shift_four(self):
+        """Shift by 3 elements"""
+        s = Solver()
+        a = zmm_reg_with_32b_values("a", s, [i for i in range(16, 32)])
+        b = zmm_reg_with_32b_values("b", s, [i for i in range(16)])
+
+        output = _mm512_alignr_epi32(a, b, 4)
+        expected = zmm_reg_with_32b_values("expected", s, [i for i in range(4, 20)])
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm256_alignr_epi32_find_shift(self):
+        """Use Z3 to find the shift amount"""
+        s = Solver()
+        a = ymm_reg_with_32b_values("a", s, list(range(10, 18)))
+        b = ymm_reg_with_32b_values("b", s, list(range(8)))
+        imm8 = BitVec("imm8", 8)
+
+        output = _mm256_alignr_epi32(a, b, imm8)
+        expected = ymm_reg_with_32b_values("expected", s, list(range(2, 8)) + list(range(10, 12)))
+
+        s.add(output == expected)
+        assert s.check() == sat
+        model_imm8 = s.model().evaluate(imm8).as_long()
+        assert model_imm8 == 2
+
+
+class TestAlignrEpi64:
+    """Tests for _mm256_alignr_epi64 and _mm512_alignr_epi64"""
+
+    def test_mm256_alignr_epi64_shift_zero(self):
+        """Shift by 0 should return b unchanged"""
+        s = Solver()
+        a = ymm_reg_with_64b_values("a", s, list(range(100, 104)))
+        b = ymm_reg_with_64b_values("b", s, list(range(4)))
+
+        output = _mm256_alignr_epi64(a, b, 0)
+        expected = ymm_reg_with_64b_values("expected", s, list(range(4)))
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm256_alignr_epi64_shift_one(self):
+        """Shift by 1 element"""
+        s = Solver()
+        a = ymm_reg_with_64b_values("a", s, list(range(100, 104)))
+        b = ymm_reg_with_64b_values("b", s, list(range(4)))
+
+        # Concatenated: [100, 101, 102, 103, 0, 1, 2, 3]
+        # Shift right by 1: [1, 2, 3, 100, ...]
+        # Take low 4: [1, 2, 3, 100]
+        output = _mm256_alignr_epi64(a, b, 1)
+        expected = ymm_reg_with_64b_values("expected", s, list(range(1, 4)) + [100])
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm256_alignr_epi64_shift_two(self):
+        """Shift by 2 should get half from each"""
+        s = Solver()
+        a = ymm_reg_with_64b_values("a", s, list(range(100, 104)))
+        b = ymm_reg_with_64b_values("b", s, list(range(4)))
+
+        output = _mm256_alignr_epi64(a, b, 2)
+        expected = ymm_reg_with_64b_values("expected", s, list(range(2, 4)) + list(range(100, 102)))
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm256_alignr_epi64_shift_three(self):
+        """Shift by 3 (max for 2 bits) should get mostly from a"""
+        s = Solver()
+        a = ymm_reg_with_64b_values("a", s, list(range(100, 104)))
+        b = ymm_reg_with_64b_values("b", s, list(range(4)))
+
+        # Shift right by 3: [3, 100, 101, 102]
+        output = _mm256_alignr_epi64(a, b, 3)
+        expected = ymm_reg_with_64b_values("expected", s, [3] + list(range(100, 103)))
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm512_alignr_epi64_shift_zero(self):
+        """Shift by 0 should return b unchanged"""
+        s = Solver()
+        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)))
+        b = zmm_reg_with_64b_values("b", s, list(range(8)))
+
+        output = _mm512_alignr_epi64(a, b, 0)
+        expected = zmm_reg_with_64b_values("expected", s, list(range(8)))
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm512_alignr_epi64_shift_seven(self):
+        """Shift by 7 (max for 3 bits) should get mostly from a"""
+        s = Solver()
+        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)))
+        b = zmm_reg_with_64b_values("b", s, list(range(8)))
+
+        # Shift right by 7: [7, 200, 201, 202, 203, 204, 205, 206]
+        output = _mm512_alignr_epi64(a, b, 7)
+        expected = zmm_reg_with_64b_values("expected", s, [7] + list(range(200, 207)))
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm512_alignr_epi64_shift_four(self):
+        """Shift by 4 should get half from each"""
+        s = Solver()
+        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)))
+        b = zmm_reg_with_64b_values("b", s, list(range(8)))
+
+        output = _mm512_alignr_epi64(a, b, 4)
+        expected = zmm_reg_with_64b_values("expected", s, list(range(4, 8)) + list(range(200, 204)))
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm512_alignr_epi64_shift_three(self):
+        """Shift by 3 elements"""
+        s = Solver()
+        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)))
+        b = zmm_reg_with_64b_values("b", s, list(range(8)))
+
+        output = _mm512_alignr_epi64(a, b, 3)
+        expected = zmm_reg_with_64b_values("expected", s, list(range(3, 8)) + list(range(200, 203)))
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm256_alignr_epi64_find_shift(self):
+        """Use Z3 to find the shift amount"""
+        s = Solver()
+        a = ymm_reg_with_64b_values("a", s, list(range(100, 104)))
+        b = ymm_reg_with_64b_values("b", s, list(range(4)))
+        imm8 = BitVec("imm8", 8)
+
+        output = _mm256_alignr_epi64(a, b, imm8)
+        expected = ymm_reg_with_64b_values("expected", s, list(range(1, 4)) + [100])
+
+        s.add(output == expected)
+        assert s.check() == sat
+        model_imm8 = s.model().evaluate(imm8).as_long()
+        assert model_imm8 == 1
+
+
+class TestMaskAlignrEpi32:
+    """Tests for _mm512_mask_alignr_epi32"""
+
+    def test_mm512_mask_alignr_epi32_mask_all_zeros(self):
+        """All mask bits zero should return src unchanged"""
+        s = Solver()
+        src = zmm_reg_with_32b_values("src", s, list(range(100, 116)))
+        a = zmm_reg_with_32b_values("a", s, list(range(20, 36)))
+        b = zmm_reg_with_32b_values("b", s, list(range(16)))
+        k = BitVecVal(0x0000, 16)
+
+        output = _mm512_mask_alignr_epi32(src, k, a, b, 4)
+        expected = src
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm512_mask_alignr_epi32_mask_all_ones(self):
+        """All mask bits set should perform normal alignr"""
+        s = Solver()
+        src = zmm_reg_with_32b_values("src", s, list(range(100, 116)))
+        a = zmm_reg_with_32b_values("a", s, list(range(20, 36)))
+        b = zmm_reg_with_32b_values("b", s, list(range(16)))
+        k = BitVecVal(0xFFFF, 16)
+
+        output = _mm512_mask_alignr_epi32(src, k, a, b, 4)
+        expected = zmm_reg_with_32b_values("expected", s, list(range(4, 16)) + list(range(20, 24)))
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm512_mask_alignr_epi32_alternating_mask(self):
+        """Alternating mask bits"""
+        s = Solver()
+        src = zmm_reg_with_32b_values("src", s, list(range(100, 116)))
+        a = zmm_reg_with_32b_values("a", s, list(range(20, 36)))
+        b = zmm_reg_with_32b_values("b", s, list(range(16)))
+        k = BitVecVal(0xAAAA, 16)  # 0b1010101010101010
+
+        output = _mm512_mask_alignr_epi32(src, k, a, b, 2)
+        # Alignr by 2: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 20, 21]
+        # With mask 0xAAAA: [100, 3, 102, 5, 104, 7, 106, 9, 108, 11, 110, 13, 112, 15, 114, 21]
+        expected = zmm_reg_with_32b_values("expected", s, [100, 3, 102, 5, 104, 7, 106, 9, 108, 11, 110, 13, 112, 15, 114, 21])
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm512_mask_alignr_epi32_partial_mask(self):
+        """Partial mask - lower half masked"""
+        s = Solver()
+        src = zmm_reg_with_32b_values("src", s, list(range(100, 116)))
+        a = zmm_reg_with_32b_values("a", s, list(range(20, 36)))
+        b = zmm_reg_with_32b_values("b", s, list(range(16)))
+        k = BitVecVal(0x00FF, 16)  # Lower 8 elements enabled
+
+        output = _mm512_mask_alignr_epi32(src, k, a, b, 1)
+        # Alignr by 1: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 20]
+        # With mask 0x00FF: [1, 2, 3, 4, 5, 6, 7, 8, 108, 109, 110, 111, 112, 113, 114, 115]
+        expected = zmm_reg_with_32b_values("expected", s, list(range(1, 9)) + list(range(108, 116)))
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm512_mask_alignr_epi32_find_mask(self):
+        """Use Z3 to find the mask"""
+        s = Solver()
+        src = zmm_reg_with_32b_values("src", s, list(range(100, 116)))
+        a = zmm_reg_with_32b_values("a", s, list(range(20, 36)))
+        b = zmm_reg_with_32b_values("b", s, list(range(16)))
+        k = BitVec("k", 16)
+
+        output = _mm512_mask_alignr_epi32(src, k, a, b, 8)
+        # Alignr by 8: [8, 9, 10, 11, 12, 13, 14, 15, 20, 21, 22, 23, 24, 25, 26, 27]
+        # Want: [8, 101, 10, 103, 12, 105, 14, 107, 20, 109, 22, 111, 24, 113, 26, 115]
+        expected = zmm_reg_with_32b_values("expected", s, [8, 101, 10, 103, 12, 105, 14, 107, 20, 109, 22, 111, 24, 113, 26, 115])
+
+        s.add(output == expected)
+        assert s.check() == sat
+        model_k = s.model().evaluate(k).as_long()
+        assert model_k == 0x5555  # 0b0101010101010101
+
+
+class TestMaskAlignrEpi64:
+    """Tests for _mm512_mask_alignr_epi64"""
+
+    def test_mm512_mask_alignr_epi64_mask_all_zeros(self):
+        """All mask bits zero should return src unchanged"""
+        s = Solver()
+        src = zmm_reg_with_64b_values("src", s, list(range(100, 108)))
+        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)))
+        b = zmm_reg_with_64b_values("b", s, list(range(8)))
+        k = BitVecVal(0x00, 8)
+
+        output = _mm512_mask_alignr_epi64(src, k, a, b, 2)
+        expected = src
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm512_mask_alignr_epi64_mask_all_ones(self):
+        """All mask bits set should perform normal alignr"""
+        s = Solver()
+        src = zmm_reg_with_64b_values("src", s, list(range(100, 108)))
+        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)))
+        b = zmm_reg_with_64b_values("b", s, list(range(8)))
+        k = BitVecVal(0xFF, 8)
+
+        output = _mm512_mask_alignr_epi64(src, k, a, b, 2)
+        expected = zmm_reg_with_64b_values("expected", s, list(range(2, 8)) + list(range(200, 202)))
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm512_mask_alignr_epi64_alternating_mask(self):
+        """Alternating mask bits"""
+        s = Solver()
+        src = zmm_reg_with_64b_values("src", s, list(range(100, 108)))
+        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)))
+        b = zmm_reg_with_64b_values("b", s, list(range(8)))
+        k = BitVecVal(0xAA, 8)  # 0b10101010
+
+        output = _mm512_mask_alignr_epi64(src, k, a, b, 1)
+        # Alignr by 1: [1, 2, 3, 4, 5, 6, 7, 200]
+        # With mask 0xAA: [100, 2, 102, 4, 104, 6, 106, 200]
+        expected = zmm_reg_with_64b_values("expected", s, [100, 2, 102, 4, 104, 6, 106, 200])
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm512_mask_alignr_epi64_partial_mask(self):
+        """Partial mask - lower half enabled"""
+        s = Solver()
+        src = zmm_reg_with_64b_values("src", s, list(range(100, 108)))
+        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)))
+        b = zmm_reg_with_64b_values("b", s, list(range(8)))
+        k = BitVecVal(0x0F, 8)  # 0b00001111 - lower 4 elements enabled
+
+        output = _mm512_mask_alignr_epi64(src, k, a, b, 3)
+        # Alignr by 3: [3, 4, 5, 6, 7, 200, 201, 202]
+        # With mask 0x0F: [3, 4, 5, 6, 104, 105, 106, 107]
+        expected = zmm_reg_with_64b_values("expected", s, list(range(3, 7)) + list(range(104, 108)))
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm512_mask_alignr_epi64_single_bit_mask(self):
+        """Single bit mask"""
+        s = Solver()
+        src = zmm_reg_with_64b_values("src", s, list(range(100, 108)))
+        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)))
+        b = zmm_reg_with_64b_values("b", s, list(range(8)))
+        k = BitVecVal(0x10, 8)  # 0b00010000 - only element 4 enabled
+
+        output = _mm512_mask_alignr_epi64(src, k, a, b, 2)
+        # Alignr by 2: [2, 3, 4, 5, 6, 7, 200, 201]
+        # With mask 0x10: [100, 101, 102, 103, 6, 105, 106, 107]
+        expected = zmm_reg_with_64b_values("expected", s, list(range(100, 104)) + [6] + list(range(105, 108)))
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm512_mask_alignr_epi64_find_shift_and_mask(self):
+        """Use Z3 to find both shift and mask"""
+        s = Solver()
+        src = zmm_reg_with_64b_values("src", s, list(range(100, 108)))
+        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)))
+        b = zmm_reg_with_64b_values("b", s, list(range(8)))
+        k = BitVec("k", 8)
+        imm8 = BitVec("imm8", 8)
+
+        output = _mm512_mask_alignr_epi64(src, k, a, b, imm8)
+        # Want: [5, 6, 7, 103, 104, 105, 106, 107] (shift by 5, mask = 0x07)
+        expected = zmm_reg_with_64b_values("expected", s, list(range(5, 8)) + list(range(103, 108)))
+
+        s.add(output == expected)
+        assert s.check() == sat
+        model_k = s.model().evaluate(k).as_long()
+        model_imm8 = s.model().evaluate(imm8).as_long()
+        assert model_imm8 == 5
+        assert model_k == 0x07  # 0b00000111
