@@ -122,7 +122,6 @@ class VectorizedStage:
         stage: list[tuple[int, int]] | None = None,
         shuffels: list[ShuffleOps] | None = None,
     ):
-
         self.shuffles = shuffels
         self.apply_minmax()
 
@@ -160,6 +159,7 @@ def generate_bitonic_sorter(num_vecs: int, type: primitive_type, vm: vector_mach
 
     # Generate the list of pairs to be compared per stage
     # each stage is a list of pairs tha can be compared in parallel
+
     bitonic_sorter = BitonicSorter(total_elements)
 
     bitonic_vectorizer = BitonicVectorizer(bitonic_sorter.stages, type, vm)
