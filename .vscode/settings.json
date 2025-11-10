@@ -1,0 +1,37 @@
+{
+    "cSpell.words": [
+        "bitonic",
+        "minmax",
+        "regs",
+        "satisfiability",
+        "shuffels",
+        "tablefmt",
+        "unsat",
+        "vecs",
+        "Vectorizer"
+    ],
+    "python.testing.pytestArgs": [
+        "-s"
+        //"vxsort"
+    ],
+    "python.testing.pytestEnabled": true,
+    "python.testing.pytestPath": "uv run pytest",
+    "python.testing.unittestEnabled": false,
+    "python.analysis.inlayHints.variableTypes": true,
+    "python.analysis.inlayHints.pytestParameters": true,
+    "python.analysis.inlayHints.functionReturnTypes": true,
+    "editor.formatOnSave": true,
+    "cursorpyright.analysis.inlayHints.functionReturnTypes": true,
+    "cursorpyright.analysis.inlayHints.variableTypes": true,
+    "[python]": {
+        "editor.defaultFormatter": "charliermarsh.ruff",
+        "editor.formatOnSave": true
+    },
+    "ruff.organizeImports": true,
+    "ruff.path": [
+        "uv",
+        "run",
+        "ruff"
+    ], // optional if using uv
+    "editor.formatOnSaveTimeout": 5000
+}
