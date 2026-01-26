@@ -7,6 +7,7 @@ from typing import override
 
 from functional import seq
 from tabulate import tabulate
+from tqdm import tqdm
 from z3 import Solver, BitVecVal, BitVec, Extract, sat
 
 # Handle both relative and absolute imports
@@ -363,9 +364,12 @@ class GadgetSynthesizer:
                             if bit_size == 256:  # Control vector (YMM register)
                                 # Extract the entire 256-bit value
                                 concrete_bitvec = model.evaluate(value, model_completion=True)
-                                # Convert to a list of 8 32-bit elements for display
-                                # For now, keep as integer representation
-                                concrete_value = concrete_bitvec.as_long() if hasattr(concrete_bitvec, "as_long") else 0
+                                # Keep as BitVecVal for later use in compute_output_state
+                                if hasattr(concrete_bitvec, "as_long"):
+                                    # Convert to concrete BitVecVal
+                                    concrete_value = BitVecVal(concrete_bitvec.as_long(), 256)
+                                else:
+                                    concrete_value = concrete_bitvec
                                 concrete_args[key] = concrete_value
                             elif bit_size == 8:  # Immediate (imm8)
                                 concrete_value = model.evaluate(value, model_completion=True).as_long()
@@ -548,7 +552,7 @@ class GadgetSynthesizer:
         return current_reg
 
     def enumerate_gadgets(self, input_state: VectorState, target_pairs: list[tuple[int, int]], max_depth: int = 3) -> \
-            tuple[list[PermutationGadget], int]:
+    tuple[list[PermutationGadget], int]:
         """
         Generate candidate gadgets up to max_depth instructions per vector.
         Returns validated gadgets.
@@ -590,16 +594,20 @@ class GadgetSynthesizer:
                 return False
         return True
 
-    def _generate_gadgets_at_depth(self, input_state: VectorState, target_pairs: list[tuple[int, int]], top_depth: int,
-                                   bottom_depth: int) -> tuple[list[PermutationGadget], int]:
-        """Generate and validate gadgets with specific instruction depths."""
-        valid_gadgets = []
+    def _generate_candidate_gadgets(self, top_depth: int, bottom_depth: int) -> list[
+        tuple[list[InstructionSpec], list[InstructionSpec]]]:
+        """
+        Generate candidate instruction sequences without validation.
+        Returns list of (top_sequence, bottom_sequence) tuples.
+        """
         max_combinations_to_try = 50  # Reduced since symbolic synthesis is more powerful
+
         # Get instruction template pools (now with symbolic immediates)
         single_insts_top = self._enumerate_single_input_instructions("top")
         single_insts_bottom = self._enumerate_single_input_instructions("bottom")
         dual_insts_top_bottom = self._enumerate_dual_input_instructions("top", "bottom")
         dual_insts_bottom_top = self._enumerate_dual_input_instructions("bottom", "top")
+
         # Build instruction sequences for top
         top_sequences = []
         if top_depth > 0:
@@ -623,6 +631,7 @@ class GadgetSynthesizer:
                             top_sequences.append([inst1, inst2, inst3])
         else:
             top_sequences = [[]]  # Empty sequence for depth 0
+
         # Build instruction sequences for bottom
         bottom_sequences = []
         if bottom_depth > 0:
@@ -640,21 +649,67 @@ class GadgetSynthesizer:
                             bottom_sequences.append([inst1, inst2, inst3])
         else:
             bottom_sequences = [[]]  # Empty sequence for depth 0
-        # Try combinations (limited)
-        combinations_tried = 0
+
+        # Generate all combinations (limited)
+        candidates = []
+        combinations_generated = 0
         for top_seq in top_sequences:
-            if combinations_tried >= max_combinations_to_try:
+            if combinations_generated >= max_combinations_to_try:
                 break
             for bottom_seq in bottom_sequences:
-                if combinations_tried >= max_combinations_to_try:
+                if combinations_generated >= max_combinations_to_try:
                     break
+                candidates.append((top_seq, bottom_seq))
+                combinations_generated += 1
 
-                # Use symbolic synthesis instead of validation
-                gadgets = self.synthesize_gadget_with_symbolic(top_seq, bottom_seq, input_state, target_pairs)
-                valid_gadgets.extend(gadgets)
+        return candidates
 
-                combinations_tried += 1
-        return valid_gadgets, combinations_tried
+    def _validate_gadgets(
+            self, candidates_with_metadata: list[
+                tuple[list[InstructionSpec], list[InstructionSpec], VectorState, list[tuple[int, int]], dict]],
+            show_progress: bool = True
+    ) -> list[tuple[PermutationGadget, VectorState, list[tuple[int, int]], dict]]:
+        """
+        Validate candidate gadgets using synthesis.
+
+        Args:
+            candidates_with_metadata: List of (top_seq, bottom_seq, input_state, target_pairs, metadata) tuples
+            show_progress: Whether to show progress bar during validation
+
+        Returns:
+            List of (validated_gadget, input_state, target_pairs, metadata) tuples for successfully validated gadgets
+        """
+        validated_gadgets = []
+
+        # Wrap iterator with tqdm for progress reporting
+        iterator = tqdm(candidates_with_metadata, desc="Validating gadgets",
+                        disable=not show_progress) if show_progress else candidates_with_metadata
+
+        for top_seq, bottom_seq, input_state, target_pairs, metadata in iterator:
+            # Use symbolic synthesis to validate
+            gadgets = self.synthesize_gadget_with_symbolic(top_seq, bottom_seq, input_state, target_pairs)
+            for gadget in gadgets:
+                validated_gadgets.append((gadget, input_state, target_pairs, metadata))
+
+        return validated_gadgets
+
+    def _generate_gadgets_at_depth(self, input_state: VectorState, target_pairs: list[tuple[int, int]], top_depth: int,
+                                   bottom_depth: int) -> tuple[list[PermutationGadget], int]:
+        """Generate and validate gadgets with specific instruction depths."""
+        # Generate candidates
+        candidates = self._generate_candidate_gadgets(top_depth, bottom_depth)
+
+        # Create full candidate list with context and empty metadata
+        candidates_with_context = [(top_seq, bottom_seq, input_state, target_pairs, {}) for top_seq, bottom_seq in
+                                   candidates]
+
+        # Validate candidates
+        validated = self._validate_gadgets(candidates_with_context, show_progress=False)
+
+        # Extract just the gadgets
+        valid_gadgets = [gadget for gadget, _, _, _ in validated]
+
+        return valid_gadgets, len(candidates)
 
     def _enumerate_single_input_instructions(self, reg_name: str = "input") -> list[InstructionSpec]:
         """
@@ -805,36 +860,124 @@ class BitonicSuperVectorizer:
         Returns root nodes (first stage solutions).
         """
         initial_state = self._create_initial_state()
-        return self._build_tree_recursive(initial_state, 0)
+        # Start with empty parent path for the root
+        input_states_with_context = [(initial_state, ())]
+        nodes_by_path = self._build_tree_recursive(input_states_with_context, 0)
 
-    def _build_tree_recursive(self, input_state: VectorState, stage_idx: int) -> list[SolutionNode]:
-        """Recursively build solution tree from given state and stage."""
+        # Return root nodes (those with empty parent path)
+        return nodes_by_path.get((), [])
+
+    def _build_tree_recursive(self, input_states_with_context: list[tuple[VectorState, list]], stage_idx: int) -> dict[
+        tuple, list[SolutionNode]]:
+        """
+        Build solution tree collecting all candidates for entire stage before validation.
+
+        Args:
+            input_states_with_context: List of (input_state, parent_path) tuples where parent_path
+                                      tracks the chain of previous gadgets leading to this state
+            stage_idx: Current stage index
+
+        Returns:
+            Dictionary mapping parent_path to list of SolutionNodes for that path
+        """
         if stage_idx >= len(self.bitonic_sorter.stages):
-            # No more stages, return empty list
-            return []
+            # No more stages, return empty dict
+            return {}
 
         stage_pairs = self.bitonic_sorter.stages[stage_idx]
 
-        # Find all valid gadgets for this stage
-        gadgets, _ = self.synthesize_stage(input_state, stage_pairs)
+        print(
+            f"Stage {stage_idx}: Collecting candidates for {len(input_states_with_context)} nodes from the previous stage")
 
-        if not gadgets:
-            print(f"Warning: No gadgets found for stage {stage_idx}")
-            return []
+        # Phase 1: Collect all candidate gadgets for entire stage
+        all_candidates_with_metadata = []
+        special_case_gadgets = []  # Track (0,0) depth gadgets that don't need validation
 
-        nodes = []
-        for gadget in gadgets:
-            # Compute output state after applying gadget and min-max exchange
+        for input_state, parent_path in input_states_with_context:
+            # Try all depth combinations
+            for top_depth in range(4):  # 0 to 3
+                for bottom_depth in range(4):
+                    # Skip (0, 0) unless input matches target
+                    if top_depth == 0 and bottom_depth == 0:
+                        if self.synthesizer._check_input_matches_target(input_state, stage_pairs):
+                            # Special case: create gadget with no instructions
+                            gadget = PermutationGadget([], [], validated=True)
+                            special_case_gadgets.append(
+                                {"gadget": gadget, "input_state": input_state, "parent_path": parent_path})
+                        continue
+
+                    # Generate candidate instruction sequences
+                    candidates = self.synthesizer._generate_candidate_gadgets(top_depth, bottom_depth)
+
+                    # Add context and metadata to each candidate
+                    for top_seq, bottom_seq in candidates:
+                        metadata = {"input_state": input_state, "parent_path": parent_path, "top_depth": top_depth,
+                                    "bottom_depth": bottom_depth}
+                        all_candidates_with_metadata.append((top_seq, bottom_seq, input_state, stage_pairs, metadata))
+
+        print(f"Stage {stage_idx}: Generated {len(all_candidates_with_metadata)} candidates to validate")
+
+        # Phase 2: Validate all candidates in batch with progress reporting
+        validated_gadgets = self.synthesizer._validate_gadgets(all_candidates_with_metadata, show_progress=True)
+
+        print(
+            f"Stage {stage_idx}: Successfully validated {len(validated_gadgets)}/{len(all_candidates_with_metadata)} gadgets")
+
+        # Phase 3: Build nodes and collect next stage input states
+        # Group validated gadgets by parent path
+        nodes_by_parent = {}
+        next_stage_inputs = []
+
+        # Process validated gadgets with their preserved metadata
+        for gadget, input_state, _, metadata in validated_gadgets:
+            parent_path = metadata["parent_path"]
+
+            # Compute output state
             next_input_state = self._compute_output_state(input_state, gadget, stage_pairs)
 
-            # Recursively build children for next stage
-            children = self._build_tree_recursive(next_input_state, stage_idx + 1)
+            # Create node (children will be added later)
+            node = SolutionNode(stage=stage_idx, input_state=input_state, output_state=next_input_state, gadget=gadget,
+                                children=[])
+
+            # Add to nodes_by_parent
+            if parent_path not in nodes_by_parent:
+                nodes_by_parent[parent_path] = []
+            nodes_by_parent[parent_path].append(node)
+
+            # Prepare for next stage
+            new_path = parent_path + (id(node),)
+            next_stage_inputs.append((next_input_state, new_path))
+
+        # Handle special case gadgets (0,0 depth)
+        for special_case in special_case_gadgets:
+            gadget = special_case["gadget"]
+            input_state = special_case["input_state"]
+            parent_path = special_case["parent_path"]
+
+            next_input_state = self._compute_output_state(input_state, gadget, stage_pairs)
 
             node = SolutionNode(stage=stage_idx, input_state=input_state, output_state=next_input_state, gadget=gadget,
-                                children=children)
-            nodes.append(node)
+                                children=[])
 
-        return nodes
+            if parent_path not in nodes_by_parent:
+                nodes_by_parent[parent_path] = []
+            nodes_by_parent[parent_path].append(node)
+
+            new_path = parent_path + (id(node),)
+            next_stage_inputs.append((next_input_state, new_path))
+
+        # Phase 4: Recursively process next stage
+        if next_stage_inputs:
+            children_by_path = self._build_tree_recursive(next_stage_inputs, stage_idx + 1)
+
+            # Attach children to their parent nodes
+            for parent_path, nodes in nodes_by_parent.items():
+                for node in nodes:
+                    node_path = parent_path + (id(node),)
+                    if node_path in children_by_path:
+                        node.children = children_by_path[node_path]
+
+        return nodes_by_parent
 
     def _compute_output_state(self, input_state: VectorState, gadget: PermutationGadget,
                               stage_pairs: list[tuple[int, int]]) -> VectorState:
