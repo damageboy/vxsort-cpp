@@ -39,13 +39,13 @@ solutions = generate_bitonic_sorter(2, primitive_type.i32, vector_machine.AVX2)
 
 ```bash
 # Run unit tests
-uv run python test_super_vectorizer.py
+uv run pytest
 
 # Run demonstration
-uv run python demo_super_vectorizer.py
+uv run python src/demo_super_vectorizer.py
 
 # Run full synthesis (may take time)
-uv run python bitonic_compiler.py
+uv run python src/bitonic_compiler.py
 ```
 
 ### Current Status
