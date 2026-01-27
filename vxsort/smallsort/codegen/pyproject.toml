@@ -1,0 +1,21 @@
+[project]
+name = "vxsort-codegen"
+version = "0.1.0"
+description = "Codegen for vxsort bitonic sorters"
+requires-python = ">=3.12"
+dependencies = [
+    "pyfunctional",
+    "ipython",
+    "z3-solver>=4.14.1.0",
+    "pytest>=8.3.5",
+    "pytest-cov>=7.0.0",
+    "tabulate>=0.9.0",
+    "tqdm>=4.67.1",
+]
+
+[dependency-groups]
+dev = ["ruff>=0.14.0", "setuptools>=80.9.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

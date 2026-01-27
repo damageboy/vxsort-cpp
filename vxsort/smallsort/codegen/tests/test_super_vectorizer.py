@@ -2,11 +2,6 @@
 """Tests for the BitonicSuperVectorizer."""
 
 import sys
-import os
-
-# Add current directory to path for imports
-sys.path.insert(0, os.path.dirname(__file__))
-
 from bitonic_compiler import BitonicSuperVectorizer, BitonicSorter, VectorState, PermutationGadget, InstructionSpec, primitive_type, vector_machine, GadgetSynthesizer
 
 

@@ -2,11 +2,6 @@
 """Test the new symbolic immediate synthesis."""
 
 import sys
-import os
-
-# Add current directory to path for imports
-sys.path.insert(0, os.path.dirname(__file__))
-
 from bitonic_compiler import GadgetSynthesizer, VectorState, InstructionSpec, primitive_type, vector_machine
 from z3 import BitVec
 
@@ -35,7 +30,7 @@ def test_symbolic_synthesis():
         print("✓ Identity test passed!\n")
     else:
         print("✗ Identity test failed!\n")
-        return 1
+        assert False, "Identity test failed!"
 
     # Test case 2: Simple permutation using _mm256_permute2x128_si256
     # Swap the two 128-bit lanes
@@ -65,12 +60,12 @@ def test_symbolic_synthesis():
                 imm8_value = inst.args["imm8"]
                 print(f"Z3 found immediate value: {imm8_value} (0x{imm8_value:02x})")
                 print("✓ Symbolic synthesis test passed!")
-                return 0
+                return
 
     print("✗ No valid gadget found for permute2x128 test")
     print("(This may be expected if the permutation isn't achievable)")
     print("Let's try existing tests instead...")
-    return 0  # Don't fail, just inform
+    return
 
 
 def test_enumerate_instruction_count():
@@ -103,8 +98,6 @@ def test_enumerate_instruction_count():
     print(f"Previous implementation would have generated ~62 candidates with sampled immediates")
     print(f"New implementation generates only {len(single_insts) + len(dual_insts)} templates!")
     print(f"Improvement: {62 / (len(single_insts) + len(dual_insts)):.1f}x reduction in candidates to try")
-
-    return 0
 
 
 if __name__ == "__main__":
