@@ -38,7 +38,6 @@ def test_bitonic_sorter():
         # If unsat, then no counter-example exists, so the network is correct.
         return s.check() == unsat
 
-    # Test with 16 elements (2 AVX2 i32 vectors)
     N = 16
     sorter = BitonicSorter(N)
 
