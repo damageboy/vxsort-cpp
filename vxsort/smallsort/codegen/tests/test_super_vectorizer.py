@@ -2,23 +2,49 @@
 """Tests for the BitonicSuperVectorizer."""
 
 import sys
+from functional import seq
 from bitonic_compiler import BitonicSuperVectorizer, BitonicSorter, VectorState, PermutationGadget, InstructionSpec, primitive_type, vector_machine, GadgetSynthesizer
+from z3 import Solver, Int, And, Not, If, unsat
 
 
 def test_bitonic_sorter():
     """Test that BitonicSorter generates correct comparison stages."""
-    print("Testing BitonicSorter...")
+
+    def sorted_list(x):
+        """Check if a list of z3 variables is sorted."""
+        return And([x[i] <= x[i + 1] for i in range(len(x) - 1)])
+
+    def compare_and_swap_z3(x, y):
+        """z3 symbolic implementation of compare-and-swap (min, max)."""
+        return If(x < y, x, y), If(x < y, y, x), x < y
+
+    def verify_network(pairs_to_compare, N):
+        """Verify that a given sorting network (list of pairs) correctly sorts N elements."""
+        s = Solver()
+
+        # Initial array of symbolic variables
+        a = [Int(f"x_{i}") for i in range(N)]
+
+        # Apply all comparison stages
+        for i, j in pairs_to_compare:
+            x1, y1, _ = compare_and_swap_z3(a[i], a[j])
+            a[i] = x1
+            a[j] = y1
+
+        # We want to prove that for all inputs, the result is sorted.
+        # So we look for a counter-example: an input where the result is NOT sorted.
+        s.add(Not(sorted_list(a)))
+
+        # If unsat, then no counter-example exists, so the network is correct.
+        return s.check() == unsat
 
     # Test with 16 elements (2 AVX2 i32 vectors)
-    sorter = BitonicSorter(16)
+    N = 16
+    sorter = BitonicSorter(N)
 
-    print(f"Number of stages: {len(sorter.stages)}")
-    for stage_id in sorted(sorter.stages.keys()):
-        pairs = sorter.stages[stage_id]
-        print(f"  Stage {stage_id}: {pairs}")
+    all_pairs = seq(sorted(sorter.stages)).flat_map(lambda sid: sorter.stages[sid]).to_list()
 
-    assert len(sorter.stages) > 0, "Should have at least one stage"
-    print("✓ BitonicSorter test passed\n")
+    assert verify_network(all_pairs, N), f"Bitonic sorting network for N={N} failed verification!"
 
 
 def test_vector_state():
