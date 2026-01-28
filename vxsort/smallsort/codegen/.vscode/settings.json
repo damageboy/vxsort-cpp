@@ -19,6 +19,9 @@
     "python.testing.unittestEnabled": false,
     "python.analysis.inlayHints.variableTypes": true,
     "python.analysis.inlayHints.pytestParameters": true,
+    "python.analysis.extraPaths": [
+        "src"
+    ],
     "python.analysis.inlayHints.functionReturnTypes": true,
     "editor.formatOnSave": true,
     "cursorpyright.analysis.inlayHints.functionReturnTypes": true,
