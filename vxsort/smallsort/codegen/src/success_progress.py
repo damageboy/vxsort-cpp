@@ -6,7 +6,6 @@ from rich.progress import (
     BarColumn,
     TextColumn,
     TaskProgressColumn,
-    TimeRemainingColumn,
     MofNCompleteColumn,
     ProgressColumn,
 )
@@ -39,7 +38,7 @@ class DualBarColumn(BarColumn):
         # Safely get progress numbers
         total = task.total or 1  # avoid division by zero
         attempted_fraction = min(max(task.completed / total, 0.0), 1.0)
-        
+
         # Get successes from fields (managed by SuccessProgress)
         successes = task.fields.get("successes", 0)
         success_fraction = min(max(successes / total, 0.0), attempted_fraction)
@@ -136,7 +135,9 @@ class SuccessProgress(Progress):
             ),
             MofNCompleteColumn(),
             # Use success_label for the "Good" count
-            TextColumn(f"[{success_style}]{success_label}: {{task.fields[successes]}}[/]"),
+            TextColumn(
+                f"[{success_style}]{success_label}: {{task.fields[successes]}}[/]"
+            ),
             TqdmColumn(),
             console=console,
         )
@@ -168,7 +169,7 @@ def demo():
             sleep(0.04)
             # simulate success on 2 of 3 tries
             is_success = i % 3 != 0
-            
+
             # mark attempt and pass success increment
             progress.update(task_id, advance=1, success=1 if is_success else 0)
 

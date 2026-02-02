@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 
 from tabulate import tabulate
+
 try:
     from .success_progress import SuccessProgress
 except ImportError:
     from success_progress import SuccessProgress
+from multiprocessing import Pool
 from z3 import Solver, Extract, BitVecVal, sat, BitVec
 
 try:
@@ -45,6 +48,25 @@ class VectorState:
 
     def copy(self):
         return VectorState(top=self.top.copy(), bottom=self.bottom.copy())
+
+
+@dataclass
+class SymbolicPlaceholder:
+    """Represents a symbolic Z3 variable that can be safely pickled."""
+
+    name: str
+    size: int
+
+
+@dataclass
+class InstructionSpec:
+    """Represents a single AVX instruction with its arguments."""
+
+    intrinsic_name: str
+    args: dict  # operands, immediates, masks, etc.
+
+    def __repr__(self):
+        return f"{self.intrinsic_name}({self.args})"
 
 
 @dataclass
@@ -232,21 +254,38 @@ class GadgetSynthesizer:
             solver, input_state, pair_id_map
         )
 
-        # Collect all symbolic variables from instruction templates
+        # Collect all symbolic variables from instruction templates and resolve them
         symbolic_vars = {}
 
-        def collect_symbolic_vars(instructions: list[InstructionSpec]):
-            """Extract all Z3 symbolic variables from instruction arguments."""
+        def maybe_resolve_symbolic_vars(instructions: list[InstructionSpec]):
+            """Resolve SymbolicPlaceholder to actual Z3 variables."""
+
+            # SymbolicPlaceholder is used to communicate with multiprocessing
+            # z3 runs in "production"
+            # In testing code, the z3 expressions are passed directly
+            # So we need to handle both cases here
             for inst in instructions:
                 for key, value in inst.args.items():
-                    # Check if this is a Z3 expression (has decl method)
-                    if hasattr(value, "decl") and callable(
+                    if isinstance(value, SymbolicPlaceholder):
+                        if value.size == 8:
+                            actual_val = BitVec(value.name, 8)
+                        elif value.size == 256:
+                            actual_val = z3_avx.ymm_reg(value.name)
+                        elif value.size == 512:
+                            actual_val = z3_avx.zmm_reg(value.name)
+                        else:
+                            actual_val = BitVec(value.name, value.size)
+
+                        inst.args[key] = actual_val
+                        symbolic_vars[id(actual_val)] = actual_val
+                    elif hasattr(value, "decl") and callable(
                         getattr(value, "decl", None)
                     ):
+                        # Already a Z3 expression (e.g. from tests)
                         symbolic_vars[id(value)] = value
 
-        collect_symbolic_vars(top_instructions_template)
-        collect_symbolic_vars(bottom_instructions_template)
+        maybe_resolve_symbolic_vars(top_instructions_template)
+        maybe_resolve_symbolic_vars(bottom_instructions_template)
 
         # Apply gadget instructions to get output registers
         top_output = self._apply_instructions(
@@ -304,12 +343,9 @@ class GadgetSynthesizer:
                                 concrete_bitvec = model.evaluate(
                                     value, model_completion=True
                                 )
-                                # Keep as BitVecVal for later use in compute_output_state
+                                # Convert to plain Python long/int for pickling
                                 if hasattr(concrete_bitvec, "as_long"):
-                                    # Convert to concrete BitVecVal
-                                    concrete_value = BitVecVal(
-                                        concrete_bitvec.as_long(), 256
-                                    )
+                                    concrete_value = concrete_bitvec.as_long()
                                 else:
                                     concrete_value = concrete_bitvec
                                 concrete_args[key] = concrete_value
@@ -419,13 +455,18 @@ class GadgetSynthesizer:
             bottom_val = model.evaluate(bottom_lane, model_completion=True)
 
             # Convert Z3 bit-vector values to Python integers
-            output_top.append(top_val.as_long())
-            output_bottom.append(bottom_val.as_long())
+            top_val_long = top_val.as_long() if hasattr(top_val, "as_long") else top_val
+            bottom_val_long = (
+                bottom_val.as_long() if hasattr(bottom_val, "as_long") else bottom_val
+            )
+
+            output_top.append(top_val_long)
+            output_bottom.append(bottom_val_long)
 
         return VectorState(top=output_top, bottom=output_bottom)
 
     def _substitute_register_names(
-        self, arg, top_reg, bottom_reg, current_reg, symbolic_vars=None
+        self, arg, top_reg, bottom_reg, current_reg, symbolic_vars=None, key=None
     ):
         """
         Substitute register name strings with actual Z3 register variables.
@@ -447,10 +488,17 @@ class GadgetSynthesizer:
                 # Try to extract the variable name
                 try:
                     var_name = str(arg)
-                    symbolic_vars[var_name] = arg
+                    symbolic_vars[id(arg)] = arg
                 except:
                     pass
             return arg
+
+        if isinstance(arg, int):
+            # Check if this is a 256-bit (or 512-bit) control vector or an 8-bit immediate
+            if key == "imm8":
+                return BitVecVal(arg, 8)
+            else:
+                return BitVecVal(arg, width_dict[self.vm] * 8)
 
         if isinstance(arg, str):
             if arg == "top":
@@ -496,7 +544,7 @@ class GadgetSynthesizer:
             args = {}
             for key, value in inst.args.items():
                 args[key] = self._substitute_register_names(
-                    value, top_reg, bottom_reg, current_reg, symbolic_vars
+                    value, top_reg, bottom_reg, current_reg, symbolic_vars, key=key
                 )
 
             # Determine how to call the intrinsic based on its signature
@@ -526,39 +574,6 @@ class GadgetSynthesizer:
                 current_reg = intrinsic(*arg_values)
 
         return current_reg
-
-    def enumerate_gadgets(
-        self,
-        input_state: VectorState,
-        target_pairs: list[tuple[int, int]],
-        max_depth: int = 3,
-    ) -> tuple[list[PermutationGadget], int]:
-        """
-        Generate candidate gadgets up to max_depth instructions per vector.
-        Returns validated gadgets.
-        """
-        valid_gadgets = []
-        total_combinations_tried = 0
-
-        # Try all combinations of (top_depth, bottom_depth) from (0,0) to (max_depth, max_depth)
-        for top_depth in range(max_depth + 1):
-            for bottom_depth in range(max_depth + 1):
-                # Skip (0, 0) - no instructions means no change
-                if top_depth == 0 and bottom_depth == 0:
-                    # Check if input already satisfies target
-                    if self._check_input_matches_target(input_state, target_pairs):
-                        gadget = PermutationGadget([], [], validated=True)
-                        valid_gadgets.append(gadget)
-                    continue
-
-                # Generate gadgets for this depth combination
-                gadgets, combinations_tried = self._generate_gadgets_at_depth(
-                    input_state, target_pairs, top_depth, bottom_depth
-                )
-                valid_gadgets.extend(gadgets)
-                total_combinations_tried += combinations_tried
-
-        return valid_gadgets, total_combinations_tried
 
     def _check_input_matches_target(
         self, input_state: VectorState, target_pairs: list[tuple[int, int]]
@@ -654,26 +669,11 @@ class GadgetSynthesizer:
 
     def _validate_gadgets(
         self,
-        candidates_with_metadata: list[
-            tuple[
-                list[InstructionSpec],
-                list[InstructionSpec],
-                VectorState,
-                list[tuple[int, int]],
-                dict,
-            ]
-        ],
+        jobs: list[tuple],
         show_progress: bool = True,
     ) -> list[tuple[PermutationGadget, VectorState, list[tuple[int, int]], dict]]:
         """
-        Validate candidate gadgets using synthesis.
-
-        Args:
-            candidates_with_metadata: List of (top_seq, bottom_seq, input_state, target_pairs, metadata) tuples
-            show_progress: Whether to show progress bar during validation
-
-        Returns:
-            List of (validated_gadget, input_state, target_pairs, metadata) tuples for successfully validated gadgets
+        Validate candidate gadgets using synthesis in parallel.
         """
         validated_gadgets = []
 
@@ -688,58 +688,32 @@ class GadgetSynthesizer:
             )
             progress.start()
             task_id = progress.add_task(
-                "Validating gadgets", total=len(candidates_with_metadata), successes=0
+                "Validating gadgets", total=len(jobs), successes=0
             )
 
         try:
-            for (
-                top_seq,
-                bottom_seq,
-                input_state,
-                target_pairs,
-                metadata,
-            ) in candidates_with_metadata:
-                # Use symbolic synthesis to validate
-                gadgets = self.synthesize_gadget_with_symbolic(
-                    top_seq, bottom_seq, input_state, target_pairs
-                )
-                success_inc = 0
-                for gadget in gadgets:
-                    validated_gadgets.append((gadget, input_state, target_pairs, metadata))
-                    success_inc = 1
+            with Pool() as pool:
+                # Use imap_unordered for streaming results and progress updates
+                for (
+                    gadgets,
+                    job_input_state,
+                    job_target_pairs,
+                    job_metadata,
+                ) in pool.imap_unordered(_validate_gadget_worker, jobs):
+                    success_inc = 0
+                    for gadget in gadgets:
+                        validated_gadgets.append(
+                            (gadget, job_input_state, job_target_pairs, job_metadata)
+                        )
+                        success_inc = 1
 
-                if progress:
-                    progress.update(task_id, advance=1, success=success_inc)
+                    if progress:
+                        progress.update(task_id, advance=1, success=success_inc)
         finally:
             if progress:
                 progress.stop()
 
         return validated_gadgets
-
-    def _generate_gadgets_at_depth(
-        self,
-        input_state: VectorState,
-        target_pairs: list[tuple[int, int]],
-        top_depth: int,
-        bottom_depth: int,
-    ) -> tuple[list[PermutationGadget], int]:
-        """Generate and validate gadgets with specific instruction depths."""
-        # Generate candidates
-        candidates = self._generate_candidate_gadgets(top_depth, bottom_depth)
-
-        # Create full candidate list with context and empty metadata
-        candidates_with_context = [
-            (top_seq, bottom_seq, input_state, target_pairs, {})
-            for top_seq, bottom_seq in candidates
-        ]
-
-        # Validate candidates
-        validated = self._validate_gadgets(candidates_with_context, show_progress=False)
-
-        # Extract just the gadgets
-        valid_gadgets = [gadget for gadget, _, _, _ in validated]
-
-        return valid_gadgets, len(candidates)
 
     def _enumerate_single_input_instructions(
         self, reg_name: str = "input"
@@ -765,7 +739,10 @@ class GadgetSynthesizer:
             instructions.append(
                 InstructionSpec(
                     "_mm256_permute_ps",
-                    {"a": input_reg, "imm8": BitVec(f"imm8_permute_ps_{unique_id}", 8)},
+                    {
+                        "a": input_reg,
+                        "imm8": SymbolicPlaceholder(f"imm8_permute_ps_{unique_id}", 8),
+                    },
                 )
             )
 
@@ -775,7 +752,7 @@ class GadgetSynthesizer:
                     "_mm256_permute4x64_epi64",
                     {
                         "a": input_reg,
-                        "imm8": BitVec(f"imm8_permute4x64_{unique_id}", 8),
+                        "imm8": SymbolicPlaceholder(f"imm8_permute4x64_{unique_id}", 8),
                     },
                 )
             )
@@ -787,7 +764,9 @@ class GadgetSynthesizer:
                     "_mm256_permutexvar_epi32",
                     {
                         "a": input_reg,
-                        "op_idx": z3_avx.ymm_reg(f"ctrl_permutexvar_{unique_id}"),
+                        "op_idx": SymbolicPlaceholder(
+                            f"ctrl_permutexvar_{unique_id}", 256
+                        ),
                     },
                 )
             )
@@ -798,7 +777,9 @@ class GadgetSynthesizer:
                     "_mm256_permutevar_ps",
                     {
                         "a": input_reg,
-                        "b": z3_avx.ymm_reg(f"ctrl_permutevar_ps_{unique_id}"),
+                        "b": SymbolicPlaceholder(
+                            f"ctrl_permutevar_ps_{unique_id}", 256
+                        ),
                     },
                 )
             )
@@ -828,7 +809,7 @@ class GadgetSynthesizer:
                     {
                         "a": reg1,
                         "b": reg2,
-                        "imm8": BitVec(f"imm8_shuffle_{unique_id}", 8),
+                        "imm8": SymbolicPlaceholder(f"imm8_shuffle_{unique_id}", 8),
                     },
                 )
             )
@@ -848,7 +829,7 @@ class GadgetSynthesizer:
                     {
                         "a": reg1,
                         "b": reg2,
-                        "imm8": BitVec(f"imm8_perm2x128_{unique_id}", 8),
+                        "imm8": SymbolicPlaceholder(f"imm8_perm2x128_{unique_id}", 8),
                     },
                 )
             )
@@ -860,7 +841,7 @@ class GadgetSynthesizer:
                     {
                         "a": reg1,
                         "b": reg2,
-                        "imm8": BitVec(f"imm8_blend_{unique_id}", 8),
+                        "imm8": SymbolicPlaceholder(f"imm8_blend_{unique_id}", 8),
                     },
                 )
             )
@@ -872,7 +853,7 @@ class GadgetSynthesizer:
                     {
                         "a": reg1,
                         "b": reg2,
-                        "imm8": BitVec(f"imm8_alignr_{unique_id}", 8),
+                        "imm8": SymbolicPlaceholder(f"imm8_alignr_{unique_id}", 8),
                     },
                 )
             )
@@ -982,7 +963,7 @@ class BitonicSuperVectorizer:
         )
 
         # Phase 1: Collect all candidate gadgets for entire stage
-        all_candidates_with_metadata = []
+        all_jobs = []
         special_case_gadgets = []  # Track (0,0) depth gadgets that don't need validation
 
         for input_state, parent_path in input_states_with_context:
@@ -1010,7 +991,7 @@ class BitonicSuperVectorizer:
                         top_depth, bottom_depth
                     )
 
-                    # Add context and metadata to each candidate
+                    # Add context and metadata to each candidate and create job
                     for top_seq, bottom_seq in candidates:
                         metadata = {
                             "input_state": input_state,
@@ -1018,21 +999,27 @@ class BitonicSuperVectorizer:
                             "top_depth": top_depth,
                             "bottom_depth": bottom_depth,
                         }
-                        all_candidates_with_metadata.append(
-                            (top_seq, bottom_seq, input_state, stage_pairs, metadata)
+                        all_jobs.append(
+                            (
+                                top_seq,
+                                bottom_seq,
+                                input_state,
+                                stage_pairs,
+                                self.vm,
+                                self.prim_type,
+                                metadata,
+                            )
                         )
 
-        print(
-            f"Stage {stage_idx}: Generated {len(all_candidates_with_metadata)} candidates to validate"
-        )
+        print(f"Stage {stage_idx}: Generated {len(all_jobs)} candidates to validate")
 
-        # Phase 2: Validate all candidates in batch with progress reporting
+        # Phase 2: Validate all candidates in parallel with progress reporting
         validated_gadgets = self.synthesizer._validate_gadgets(
-            all_candidates_with_metadata, show_progress=True
+            all_jobs, show_progress=True
         )
 
         print(
-            f"Stage {stage_idx}: Successfully validated {len(validated_gadgets)}/{len(all_candidates_with_metadata)} gadgets"
+            f"Stage {stage_idx}: Validated {len(validated_gadgets)}/{len(all_jobs)} gadgets"
         )
 
         # Phase 3: Build nodes and collect next stage input states
@@ -1176,12 +1163,18 @@ class BitonicSuperVectorizer:
         print(f"Exported {len(roots)} solution trees to {output_path}")
 
 
-@dataclass
-class InstructionSpec:
-    """Represents a single AVX instruction with its arguments."""
+def _validate_gadget_worker(job):
+    """Worker function for parallel gadget validation."""
+    top_seq, bottom_seq, input_state, target_pairs, vm, prim_type, metadata = job
 
-    intrinsic_name: str
-    args: dict  # operands, immediates, masks, etc.
+    # Create clones of sequences to avoid modifying the ones in the main process
+    top_seq_clone = copy.deepcopy(top_seq)
+    bottom_seq_clone = copy.deepcopy(bottom_seq)
 
-    def __repr__(self):
-        return f"{self.intrinsic_name}({self.args})"
+    # Create a local synthesizer and synthesis in its own Z3 context
+    synthesizer = GadgetSynthesizer(vm, prim_type)
+    gadgets = synthesizer.synthesize_gadget_with_symbolic(
+        top_seq_clone, bottom_seq_clone, input_state, target_pairs
+    )
+
+    return gadgets, input_state, target_pairs, metadata
