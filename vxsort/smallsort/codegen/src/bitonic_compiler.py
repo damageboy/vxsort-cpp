@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
+import argparse
 
 # Handle both relative and absolute imports
 try:
@@ -54,5 +55,29 @@ def generate_bitonic_sorter(num_vecs: int, type: primitive_type, vm: vector_mach
 
 # Press the green button in the gutter to run the script.
 if __name__ == "__main__":
-    # Start with 2 vectors, i32, AVX2 as per plan
-    generate_bitonic_sorter(2, primitive_type.i32, vector_machine.AVX2)
+    parser = argparse.ArgumentParser(description="Generate bitonic sorter with optimized permutations.")
+    parser.add_argument(
+        "--num-vecs", type=int, default=2, help="Number of SIMD vectors to sort (default: 2)"
+    )
+    parser.add_argument(
+        "--vector-machine",
+        type=str,
+        required=True,
+        choices=list(vector_machine.__members__.keys()),
+        help="Vector architecture (AVX2, AVX512)",
+    )
+    parser.add_argument(
+        "--datatype",
+        type=str,
+        required=True,
+        choices=list(primitive_type.__members__.keys()),
+        help="Primitive data type (i16, u16, i32, u32, i64, u64, f32, f64)",
+    )
+
+    args = parser.parse_args()
+
+    # Convert string arguments to Enum members
+    vm = vector_machine[args.vector_machine]
+    dtype = primitive_type[args.datatype]
+
+    generate_bitonic_sorter(args.num_vecs, dtype, vm)
