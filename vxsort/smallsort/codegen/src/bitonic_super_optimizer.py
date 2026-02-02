@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from tabulate import tabulate
-from tqdm import tqdm
+try:
+    from .success_progress import SuccessProgress
+except ImportError:
+    from success_progress import SuccessProgress
 from z3 import Solver, Extract, BitVecVal, sat, BitVec
 
 try:
@@ -674,24 +677,42 @@ class GadgetSynthesizer:
         """
         validated_gadgets = []
 
-        # Wrap iterator with tqdm for progress reporting
-        iterator = (
-            tqdm(
-                candidates_with_metadata,
-                desc="Validating gadgets",
-                disable=not show_progress,
+        progress = None
+        task_id = None
+        if show_progress:
+            progress = SuccessProgress.create(
+                width=60,
+                success_style="green",
+                attempt_style="yellow",
+                success_label="Valid",
             )
-            if show_progress
-            else candidates_with_metadata
-        )
+            progress.start()
+            task_id = progress.add_task(
+                "Validating gadgets", total=len(candidates_with_metadata), successes=0
+            )
 
-        for top_seq, bottom_seq, input_state, target_pairs, metadata in iterator:
-            # Use symbolic synthesis to validate
-            gadgets = self.synthesize_gadget_with_symbolic(
-                top_seq, bottom_seq, input_state, target_pairs
-            )
-            for gadget in gadgets:
-                validated_gadgets.append((gadget, input_state, target_pairs, metadata))
+        try:
+            for (
+                top_seq,
+                bottom_seq,
+                input_state,
+                target_pairs,
+                metadata,
+            ) in candidates_with_metadata:
+                # Use symbolic synthesis to validate
+                gadgets = self.synthesize_gadget_with_symbolic(
+                    top_seq, bottom_seq, input_state, target_pairs
+                )
+                success_inc = 0
+                for gadget in gadgets:
+                    validated_gadgets.append((gadget, input_state, target_pairs, metadata))
+                    success_inc = 1
+
+                if progress:
+                    progress.update(task_id, advance=1, success=success_inc)
+        finally:
+            if progress:
+                progress.stop()
 
         return validated_gadgets
 
