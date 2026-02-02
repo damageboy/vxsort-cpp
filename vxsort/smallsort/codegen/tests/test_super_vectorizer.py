@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for the BitonicSuperVectorizer."""
 
+import pytest
 import sys
 
 from utils import vector_machine, primitive_type
@@ -246,11 +247,15 @@ def test_output_state_computation():
     print("✓ Output state computation test passed\n")
 
 
-def test_first_stage_requires_no_permutation():
+@pytest.mark.parametrize("vm", [vector_machine.AVX2])
+@pytest.mark.parametrize("dt", [primitive_type.i32])
+#@pytest.mark.parametrize("vm", [vector_machine.AVX2, vector_machine.AVX512])
+#@pytest.mark.parametrize("dt", [primitive_type.i16, primitive_type.i32, primitive_type.i64])
+def test_first_stage_requires_no_permutation(vm, dt):
     """Test that the initial state is constructed to make first stage a null operation."""
-    print("Testing first stage requires no permutation...")
+    print(f"Testing first stage requires no permutation for {vm.name}, {dt.name}...")
 
-    super_opt = BitonicSuperVectorizer(2, primitive_type.i32, vector_machine.AVX2)
+    super_opt = BitonicSuperVectorizer(2, dt, vm)
 
     # Get initial state and first stage pairs
     initial_state = super_opt._create_initial_state()
@@ -261,12 +266,8 @@ def test_first_stage_requires_no_permutation():
 
     # Verify that initial state matches first stage pairs
     for i, (a, b) in enumerate(first_stage_pairs):
-        assert initial_state.top[i] == a, f"Top element at index {i} should be {
-            a
-        }, got {initial_state.top[i]}"
-        assert initial_state.bottom[i] == b, f"Bottom element at index {i} should be {
-            b
-        }, got {initial_state.bottom[i]}"
+        assert initial_state.top[i] == a, f"Top element at index {i} should be {a}, got {initial_state.top[i]}"
+        assert initial_state.bottom[i] == b, f"Bottom element at index {i} should be {b}, got {initial_state.bottom[i]}"
 
     # Build solution tree for just the first stage
     solutions = super_opt.build_solution_tree(depth_limit=1)
@@ -280,11 +281,7 @@ def test_first_stage_requires_no_permutation():
         "Should find at least one solution with null (0-instruction) gadget for first stage"
     )
 
-    print(
-        f"  ✓ First gadget requires {
-            solutions[0].gadget.instruction_count()
-        } instructions (as expected)"
-    )
+    print(f"  ✓ First gadget requires {solutions[0].gadget.instruction_count()} instructions (as expected)")
     print("✓ First stage null permutation test passed\n")
 
 

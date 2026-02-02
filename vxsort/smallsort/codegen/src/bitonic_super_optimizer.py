@@ -783,6 +783,10 @@ class GadgetSynthesizer:
                     },
                 )
             )
+        else:
+            raise NotImplementedError(
+                f"Single-input instructions not implemented for {self.vm} and {self.prim_type}"
+            )
 
         return instructions
 
@@ -856,6 +860,10 @@ class GadgetSynthesizer:
                         "imm8": SymbolicPlaceholder(f"imm8_alignr_{unique_id}", 8),
                     },
                 )
+            )
+        else:
+            raise NotImplementedError(
+                f"Dual-input instructions not implemented for {self.vm} and {self.prim_type}"
             )
 
         return instructions
@@ -954,6 +962,7 @@ class BitonicSuperVectorizer:
             depth_limit is not None and stage_idx >= depth_limit
         ):
             # No more stages or reached depth limit, return empty dict
+            print(f"Reached depth limit {stage_idx}")
             return {}
 
         stage_pairs = self.bitonic_sorter.stages[stage_idx]
