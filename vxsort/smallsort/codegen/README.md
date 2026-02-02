@@ -29,7 +29,8 @@ The `BitonicSuperVectorizer` class is the main entry point for the super-optimiz
 ### Usage
 
 ```python
-from bitonic_compiler import generate_bitonic_sorter, primitive_type, vector_machine
+from bitonic_compiler import generate_bitonic_sorter
+from utils import vector_machine, primitive_type
 
 # Generate optimized solutions for 2 AVX2 vectors of i32
 solutions = generate_bitonic_sorter(2, primitive_type.i32, vector_machine.AVX2)

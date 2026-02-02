@@ -1,6 +1,15 @@
-import sys
-from typing import Any
-from z3.z3 import SeqRef, BitVecNumRef, BitVecRef, BitVec, BitVecVal, Solver, Extract, Concat, If, LShR, ZeroExt, simplify
+from z3.z3 import (
+    SeqRef,
+    BitVecNumRef,
+    BitVecRef,
+    BitVec,
+    BitVecVal,
+    Solver,
+    Extract,
+    Concat,
+    If,
+    simplify,
+)
 
 zero = 0
 
@@ -13,9 +22,13 @@ def zmm_reg(name: str):
     return BitVec(name, 64 * 8)
 
 
-def reg_with_values(name: str, s: Solver, raw_values, element_bits: int, total_bits: int):
+def reg_with_values(
+    name: str, s: Solver, raw_values, element_bits: int, total_bits: int
+):
     lanes = total_bits // element_bits
-    assert len(raw_values) == lanes, f"Expected {lanes} values for {element_bits}-bit elements in {total_bits}-bit register, got {len(raw_values)}"
+    assert len(raw_values) == lanes, (
+        f"Expected {lanes} values for {element_bits}-bit elements in {total_bits}-bit register, got {len(raw_values)}"
+    )
 
     # Create BitVec elements for each lane
     bv_elements = [BitVec(f"{name}_l_{i:02}", element_bits) for i in range(lanes)]
@@ -47,7 +60,9 @@ def _reg_with_unique_values(name: str, s: Solver, lanes: int, bits: int):
     """
     Create a register with given number of lanes and element width, ensuring each lane is unique.
     """
-    assert lanes * bits == 256 or lanes * bits == 512, "Total register size can only be 256 or 512 bits"
+    assert lanes * bits == 256 or lanes * bits == 512, (
+        "Total register size can only be 256 or 512 bits"
+    )
 
     # Create a new register
     if lanes * bits == 256:
@@ -112,14 +127,20 @@ def zmm_reg_pair_with_unique_values(name_prefix: str, s: Solver, bits: int):
 ElementSpecs = list[tuple[BitVecRef, int]]
 
 
-def construct_reg_from_elements(bits: int, element_specs: ElementSpecs, total_bits: int):
+def construct_reg_from_elements(
+    bits: int, element_specs: ElementSpecs, total_bits: int
+):
     lanes = total_bits // bits
-    assert len(element_specs) == lanes, f"Expected {lanes} element specs for {bits}-bit elements in {total_bits}-bit register, got {len(element_specs)}"
+    assert len(element_specs) == lanes, (
+        f"Expected {lanes} element specs for {bits}-bit elements in {total_bits}-bit register, got {len(element_specs)}"
+    )
 
     # Extract each specified element
     elements: list[BitVecRef | SeqRef] = []
     for reg, elem_idx in element_specs:
-        assert 0 <= elem_idx < lanes, f"Element index {elem_idx} out of range for {bits}-bit elements (0-{lanes - 1})"
+        assert 0 <= elem_idx < lanes, (
+            f"Element index {elem_idx} out of range for {bits}-bit elements (0-{lanes - 1})"
+        )
         start_bit = elem_idx * bits
         end_bit = start_bit + bits - 1
         elements.append(Extract(end_bit, start_bit, reg))
@@ -137,7 +158,9 @@ def construct_zmm_reg_from_elements(bits: int, element_specs: ElementSpecs):
 
 
 def _reg_reversed(name: str, s: Solver, original_reg, lanes: int, bits: int):
-    assert lanes * bits == 256 or lanes * bits == 512, "Total register size can only be 256 or 512 bits"
+    assert lanes * bits == 256 or lanes * bits == 512, (
+        "Total register size can only be 256 or 512 bits"
+    )
 
     # Create a new register
     if lanes * bits == 256:
@@ -146,8 +169,12 @@ def _reg_reversed(name: str, s: Solver, original_reg, lanes: int, bits: int):
         reversed_reg = zmm_reg(name)
 
     # Extract elements from both registers
-    orig_elems = [Extract(bits * (i + 1) - 1, bits * i, original_reg) for i in range(lanes)]
-    rev_elems = [Extract(bits * (i + 1) - 1, bits * i, reversed_reg) for i in range(lanes)]
+    orig_elems = [
+        Extract(bits * (i + 1) - 1, bits * i, original_reg) for i in range(lanes)
+    ]
+    rev_elems = [
+        Extract(bits * (i + 1) - 1, bits * i, reversed_reg) for i in range(lanes)
+    ]
 
     # Add constraints that reversed register elements equal original register elements in reverse order
     for i in range(lanes):
@@ -231,7 +258,9 @@ def _create_if_tree(idx_bits: BitVecRef, elements: list[BitVecRef | SeqRef]):
 #       (see other groups in this file to find it)
 
 
-def _create_element_selector(source_reg: BitVecRef, idx_bits: BitVecRef, num_elements: int, element_bits: int) -> BitVecRef:
+def _create_element_selector(
+    source_reg: BitVecRef, idx_bits: BitVecRef, num_elements: int, element_bits: int
+) -> BitVecRef:
     """
     Create a balanced tree of If statements for element selection.
 
@@ -255,7 +284,14 @@ def _create_element_selector(source_reg: BitVecRef, idx_bits: BitVecRef, num_ele
     return _create_if_tree(idx_bits, elements)
 
 
-def _generic_permutexvar(a: BitVecRef, op_idx: BitVecRef, total_width: int, element_width: int, src: BitVecRef | None = None, mask: BitVecRef | None = None):
+def _generic_permutexvar(
+    a: BitVecRef,
+    op_idx: BitVecRef,
+    total_width: int,
+    element_width: int,
+    src: BitVecRef | None = None,
+    mask: BitVecRef | None = None,
+):
     """
     Generic implementation for permutexvar instructions that shuffle elements across lanes.
 
@@ -319,7 +355,9 @@ def _generic_permutexvar(a: BitVecRef, op_idx: BitVecRef, total_width: int, elem
         # Extract index bits: idx[i+idx_bits_needed-1:i]
         idx_bits = Extract(i + idx_bits_needed - 1, i, op_idx)
         # Use the generic element selector to get the permuted element
-        permuted_elem = _create_element_selector(a, idx_bits, num_elements, element_width)
+        permuted_elem = _create_element_selector(
+            a, idx_bits, num_elements, element_width
+        )
 
         # Apply mask if provided
         if mask is not None and src is not None:
@@ -371,7 +409,9 @@ def _mm512_permutexvar_epi64(a: BitVecRef, op_idx: BitVecRef):
     return _generic_permutexvar(a, op_idx, 512, 64)
 
 
-def _mm512_mask_permutexvar_epi32(src: BitVecRef, mask: BitVecRef, op_idx: BitVecRef, a: BitVecRef):
+def _mm512_mask_permutexvar_epi32(
+    src: BitVecRef, mask: BitVecRef, op_idx: BitVecRef, a: BitVecRef
+):
     """
     Shuffle 32-bit integers across lanes in a 512-bit vector using writemask.
     Implements __m512i _mm512_mask_permutexvar_epi32 (__m512i src, __mmask16 k, __m512i idx, __m512i a)
@@ -381,7 +421,9 @@ def _mm512_mask_permutexvar_epi32(src: BitVecRef, mask: BitVecRef, op_idx: BitVe
     return _generic_permutexvar(a, op_idx, 512, 32, src=src, mask=mask)
 
 
-def _mm512_mask_permutexvar_epi64(src: BitVecRef, mask: BitVecRef, op_idx: BitVecRef, a: BitVecRef):
+def _mm512_mask_permutexvar_epi64(
+    src: BitVecRef, mask: BitVecRef, op_idx: BitVecRef, a: BitVecRef
+):
     """
     Shuffle 64-bit integers across lanes in a 512-bit vector using writemask.
     Implements __m512i _mm512_mask_permutexvar_epi64 (__m512i src, __mmask8 k, __m512i idx, __m512i a)
@@ -398,7 +440,14 @@ def _mm512_mask_permutexvar_epi64(src: BitVecRef, mask: BitVecRef, op_idx: BitVe
 #   -  _mm512_[mask]permutex2var_{epi32,epi64}
 
 
-def _create_two_source_element_selector(a: BitVecRef, b: BitVecRef, offset_bits: BitVecRef, source_selector: BitVecRef, num_elements: int, element_bits: int) -> BitVecRef:
+def _create_two_source_element_selector(
+    a: BitVecRef,
+    b: BitVecRef,
+    offset_bits: BitVecRef,
+    source_selector: BitVecRef,
+    num_elements: int,
+    element_bits: int,
+) -> BitVecRef:
     """
     Create element selector for two-source permutation (permutex2var).
 
@@ -417,10 +466,19 @@ def _create_two_source_element_selector(a: BitVecRef, b: BitVecRef, offset_bits:
     selected_source = If(source_selector == 0, a, b)
 
     # Then select element from the chosen source based on offset
-    return _create_element_selector(selected_source, offset_bits, num_elements, element_bits)
+    return _create_element_selector(
+        selected_source, offset_bits, num_elements, element_bits
+    )
 
 
-def _generic_permutex2var(a: BitVecRef, op_idx: BitVecRef, b: BitVecRef, element_width: int, src: BitVecRef | None = None, mask: BitVecRef | None = None):
+def _generic_permutex2var(
+    a: BitVecRef,
+    op_idx: BitVecRef,
+    b: BitVecRef,
+    element_width: int,
+    src: BitVecRef | None = None,
+    mask: BitVecRef | None = None,
+):
     """
     Generic implementation for permutex2var instructions that shuffle elements from two source vectors.
 
@@ -494,10 +552,14 @@ def _generic_permutex2var(a: BitVecRef, op_idx: BitVecRef, b: BitVecRef, element
         offset_bits = Extract(i + offset_bits_count - 1, i, op_idx)
 
         # Extract source selector: idx[i+source_selector_bit]
-        source_selector = Extract(i + source_selector_bit, i + source_selector_bit, op_idx)
+        source_selector = Extract(
+            i + source_selector_bit, i + source_selector_bit, op_idx
+        )
 
         # Get the permuted element using the two-source selector
-        permuted_elem = _create_two_source_element_selector(a, b, offset_bits, source_selector, num_elements, element_width)
+        permuted_elem = _create_two_source_element_selector(
+            a, b, offset_bits, source_selector, num_elements, element_width
+        )
 
         # Apply mask if provided
         if mask is not None and src is not None:
@@ -531,7 +593,9 @@ def _mm512_permutex2var_epi64(a: BitVecRef, op_idx: BitVecRef, b: BitVecRef):
     return _generic_permutex2var(a, op_idx, b, 64)
 
 
-def _mm512_mask_permutex2var_epi32(a: BitVecRef, k: BitVecRef, op_idx: BitVecRef, b: BitVecRef):
+def _mm512_mask_permutex2var_epi32(
+    a: BitVecRef, k: BitVecRef, op_idx: BitVecRef, b: BitVecRef
+):
     """
     Shuffle 32-bit integer elements in a and b across lanes using writemask.
     Implements __m512i _mm512_mask_permutex2var_epi32 (__m512i a, __mmask16 k, __m512i idx, __m512i b)
@@ -541,7 +605,9 @@ def _mm512_mask_permutex2var_epi32(a: BitVecRef, k: BitVecRef, op_idx: BitVecRef
     return _generic_permutex2var(a, op_idx, b, 32, src=a, mask=k)
 
 
-def _mm512_mask_permutex2var_epi64(a: BitVecRef, k: BitVecRef, op_idx: BitVecRef, b: BitVecRef):
+def _mm512_mask_permutex2var_epi64(
+    a: BitVecRef, k: BitVecRef, op_idx: BitVecRef, b: BitVecRef
+):
     """
     Shuffle 64-bit integer elements in a and b across lanes using writemask.
     Implements __m512i _mm512_mask_permutex2var_epi64 (__m512i a, __mmask8 k, __m512i idx, __m512i b)
@@ -627,7 +693,14 @@ def extract_128b_lane(input: BitVecRef, lane_idx: int):
 # - vpermilps,vpermilpd:
 #   -  _mm256_permute_p{s,d}
 #   -  _mm512_[mask_]permute_p{s,d}
-def vpermilps_lane(lane_idx: int, a: BitVecRef, ctrl01: BitVecRef, ctrl23: BitVecRef, ctrl45: BitVecRef, ctrl67: BitVecRef):
+def vpermilps_lane(
+    lane_idx: int,
+    a: BitVecRef,
+    ctrl01: BitVecRef,
+    ctrl23: BitVecRef,
+    ctrl45: BitVecRef,
+    ctrl67: BitVecRef,
+):
     src_lane = extract_128b_lane(a, lane_idx)
 
     chunks: list[BitVecRef | None] = [None] * 4
@@ -647,7 +720,13 @@ def vpermilpd_lane(lane_idx: int, a: BitVecRef, ctrl0: BitVecRef, ctrl1: BitVecR
     return chunks
 
 
-def _permute_ps_generic(a: BitVecRef, imm8: BitVecRef | int, num_lanes: int, k: BitVecRef | None = None, src: BitVecRef | None = None):
+def _permute_ps_generic(
+    a: BitVecRef,
+    imm8: BitVecRef | int,
+    num_lanes: int,
+    k: BitVecRef | None = None,
+    src: BitVecRef | None = None,
+):
     """
     Generic permute_ps implementation for any number of 128-bit lanes.
     Permutes 32-bit elements within each 128-bit lane using control bits in imm8.
@@ -676,7 +755,10 @@ def _permute_ps_generic(a: BitVecRef, imm8: BitVecRef | int, num_lanes: int, k: 
     a = a
     imm = imm8 if isinstance(imm8, BitVecRef) else BitVecVal(imm8, 8)
     ctrl01, ctrl23, ctrl45, ctrl67 = _extract_ctl4(imm)
-    chunks_128b = [vpermilps_lane(lane_idx, a, ctrl01, ctrl23, ctrl45, ctrl67) for lane_idx in range(num_lanes)]
+    chunks_128b = [
+        vpermilps_lane(lane_idx, a, ctrl01, ctrl23, ctrl45, ctrl67)
+        for lane_idx in range(num_lanes)
+    ]
     flat_chunks = [e for sublist in chunks_128b for e in sublist]
     result = simplify(Concat(flat_chunks[::-1]))
 
@@ -705,7 +787,9 @@ def _mm512_permute_ps(a: BitVecRef, imm8: BitVecRef | int):
     return _permute_ps_generic(a, imm8, 4)
 
 
-def _mm512_mask_permute_ps(src: BitVecRef, k: BitVecRef, a: BitVecRef, imm8: BitVecRef | int):
+def _mm512_mask_permute_ps(
+    src: BitVecRef, k: BitVecRef, a: BitVecRef, imm8: BitVecRef | int
+):
     """
     Shuffle single-precision (32-bit) floating-point elements in a within 128-bit lanes using the control in imm8,
     and store the results in dst using writemask k (elements are copied from src when the corresponding mask bit is not set).
@@ -714,7 +798,13 @@ def _mm512_mask_permute_ps(src: BitVecRef, k: BitVecRef, a: BitVecRef, imm8: Bit
     return _permute_ps_generic(a, imm8, 4, k=k, src=src)
 
 
-def _permute_pd_generic(a: BitVecRef, imm8: BitVecRef | int, num_lanes: int, k: BitVecRef | None = None, src: BitVecRef | None = None):
+def _permute_pd_generic(
+    a: BitVecRef,
+    imm8: BitVecRef | int,
+    num_lanes: int,
+    k: BitVecRef | None = None,
+    src: BitVecRef | None = None,
+):
     """
     Generic permute_pd implementation for any number of 128-bit lanes.
     Permutes 64-bit elements within each 128-bit lane using control bits in imm8.
@@ -739,7 +829,9 @@ def _permute_pd_generic(a: BitVecRef, imm8: BitVecRef | int, num_lanes: int, k: 
     a = a
     imm = imm8 if isinstance(imm8, BitVecRef) else BitVecVal(imm8, 8)
     ctrl0, ctrl1 = _extract_ctl2(imm)
-    chunks_128b = [vpermilpd_lane(lane_idx, a, ctrl0, ctrl1) for lane_idx in range(num_lanes)]
+    chunks_128b = [
+        vpermilpd_lane(lane_idx, a, ctrl0, ctrl1) for lane_idx in range(num_lanes)
+    ]
     flat_chunks = [e for sublist in chunks_128b for e in sublist]
     result = simplify(Concat(flat_chunks[::-1]))
 
@@ -768,7 +860,9 @@ def _mm512_permute_pd(a: BitVecRef, imm8: BitVecRef | int):
     return _permute_pd_generic(a, imm8, 4)
 
 
-def _mm512_mask_permute_pd(src: BitVecRef, k: BitVecRef, a: BitVecRef, imm8: BitVecRef | int):
+def _mm512_mask_permute_pd(
+    src: BitVecRef, k: BitVecRef, a: BitVecRef, imm8: BitVecRef | int
+):
     """
     Shuffle double-precision (64-bit) floating-point elements in a within 128-bit lanes using the control in imm8,
     and store the results in dst using writemask k (elements are copied from src when the corresponding mask bit is not set).
@@ -829,7 +923,15 @@ def _mm256_permute4x64_epi64(a: BitVecRef, imm8: BitVecRef | int):
 #   -  _mm512_[mask_]shuffle_p{s,d}
 
 
-def vshufps_lane(lane_idx: int, a: BitVecRef, b: BitVecRef, ctrl01: BitVecRef, ctrl23: BitVecRef, ctrl45: BitVecRef, ctrl67: BitVecRef) -> None:
+def vshufps_lane(
+    lane_idx: int,
+    a: BitVecRef,
+    b: BitVecRef,
+    ctrl01: BitVecRef,
+    ctrl23: BitVecRef,
+    ctrl45: BitVecRef,
+    ctrl67: BitVecRef,
+) -> None:
     a_lane = extract_128b_lane(a, lane_idx)
     b_lane = extract_128b_lane(b, lane_idx)
 
@@ -841,7 +943,14 @@ def vshufps_lane(lane_idx: int, a: BitVecRef, b: BitVecRef, ctrl01: BitVecRef, c
     return chunks
 
 
-def _shuffle_ps_generic(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int, num_lanes: int, k: BitVecRef | None = None, src: BitVecRef | None = None):
+def _shuffle_ps_generic(
+    a: BitVecRef,
+    b: BitVecRef,
+    imm8: BitVecRef | int,
+    num_lanes: int,
+    k: BitVecRef | None = None,
+    src: BitVecRef | None = None,
+):
     """
     Generic shuffle_ps implementation for any number of 128-bit lanes.
     Shuffles 32-bit elements within 128-bit lanes using control in imm8.
@@ -869,7 +978,10 @@ def _shuffle_ps_generic(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int, num_l
     """
     imm = imm8 if isinstance(imm8, BitVecRef) else BitVecVal(imm8, 8)
     ctrl01, ctrl23, ctrl45, ctrl67 = _extract_ctl4(imm)
-    chunks_128b = [vshufps_lane(lane_idx, a, b, ctrl01, ctrl23, ctrl45, ctrl67) for lane_idx in range(num_lanes)]
+    chunks_128b = [
+        vshufps_lane(lane_idx, a, b, ctrl01, ctrl23, ctrl45, ctrl67)
+        for lane_idx in range(num_lanes)
+    ]
     flat_chunks = [e for sublist in chunks_128b for e in sublist]
     result = simplify(Concat(flat_chunks[::-1]))
 
@@ -898,7 +1010,9 @@ def _mm512_shuffle_ps(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
     return _shuffle_ps_generic(a, b, imm8, 4)
 
 
-def _mm512_mask_shuffle_ps(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
+def _mm512_mask_shuffle_ps(
+    src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int
+):
     """
     Shuffle single-precision (32-bit) floating-point elements in a within 128-bit lanes using the control in imm8,
     and store the results in dst using writemask k (elements are copied from src when the corresponding mask bit is not set).
@@ -913,7 +1027,9 @@ def vshufpd_lane(lane_idx: int, a: BitVecRef, b: BitVecRef, imm: BitVecRef):
 
     # Each lane uses 2 control bits: lane i uses imm[2*i] and imm[2*i+1]
     ctrl0 = Extract(2 * lane_idx, 2 * lane_idx, imm)  # Controls selection from a
-    ctrl1 = Extract(2 * lane_idx + 1, 2 * lane_idx + 1, imm)  # Controls selection from b
+    ctrl1 = Extract(
+        2 * lane_idx + 1, 2 * lane_idx + 1, imm
+    )  # Controls selection from b
 
     chunks: list[BitVecRef | None] = [None] * 2
     chunks[0] = _select2_pd(a_lane, ctrl0)
@@ -921,7 +1037,14 @@ def vshufpd_lane(lane_idx: int, a: BitVecRef, b: BitVecRef, imm: BitVecRef):
     return chunks
 
 
-def _shuffle_pd_generic(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int, num_lanes: int, k: BitVecRef | None = None, src: BitVecRef | None = None):
+def _shuffle_pd_generic(
+    a: BitVecRef,
+    b: BitVecRef,
+    imm8: BitVecRef | int,
+    num_lanes: int,
+    k: BitVecRef | None = None,
+    src: BitVecRef | None = None,
+):
     """
     Generic shuffle_pd implementation for any number of 128-bit lanes.
     Shuffles 64-bit elements within 128-bit lanes using control in imm8.
@@ -966,7 +1089,9 @@ def _mm512_shuffle_pd(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
     return _shuffle_pd_generic(a, b, imm8, 4)
 
 
-def _mm512_mask_shuffle_pd(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
+def _mm512_mask_shuffle_pd(
+    src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int
+):
     """
     Shuffle double-precision (64-bit) floating-point elements within 128-bit lanes using the control in imm8,
     and store the results in dst using writemask k (elements are copied from src when the corresponding mask bit is not set).
@@ -982,7 +1107,14 @@ def _mm512_mask_shuffle_pd(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVec
 #   -  _mm512_[mask_]permutevar_p{s,d}
 
 
-def _generic_permutevar(a: BitVecRef, b: BitVecRef, total_width: int, element_width: int, k: BitVecRef | None = None, src: BitVecRef | None = None):
+def _generic_permutevar(
+    a: BitVecRef,
+    b: BitVecRef,
+    total_width: int,
+    element_width: int,
+    k: BitVecRef | None = None,
+    src: BitVecRef | None = None,
+):
     """
     Generic implementation for permutevar instructions that shuffle elements within 128-bit lanes.
 
@@ -1147,7 +1279,9 @@ def _mm512_mask_permutevar_pd(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: Bit
 # into two separate functions: _mm512_shuffle_i32x4 and _mm512_mask_shuffle_i32x4
 
 
-def _select4_128b(src1: BitVecRef, src2: BitVecRef, control: BitVecRef | BitVecNumRef) -> BitVecRef:
+def _select4_128b(
+    src1: BitVecRef, src2: BitVecRef, control: BitVecRef | BitVecNumRef
+) -> BitVecRef:
     """
     Selects a 128-bit lane based on 4-bit control according to vperm2i128 semantics.
 
@@ -1313,7 +1447,14 @@ def _mm512_shuffle_i32x4(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
 #   -  _mm512_[mask_]unpackhi_epi32
 
 
-def _unpack_epi32_generic(a: BitVecRef, b: BitVecRef, high: bool, total_bits: int, src: BitVecRef = None, k: BitVecRef = None):
+def _unpack_epi32_generic(
+    a: BitVecRef,
+    b: BitVecRef,
+    high: bool,
+    total_bits: int,
+    src: BitVecRef = None,
+    k: BitVecRef = None,
+):
     """
     Generic unpack implementation for 32-bit integers with optional masking.
 
@@ -1422,7 +1563,9 @@ def _mm512_unpackhi_epi32(a: BitVecRef, b: BitVecRef):
     return _unpack_epi32_generic(a, b, high=True, total_bits=512)
 
 
-def _mm512_mask_unpacklo_epi32(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef):
+def _mm512_mask_unpacklo_epi32(
+    src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef
+):
     """
     Unpack and interleave 32-bit integers from the low half of each 128-bit lane in "a" and "b", and store the results in "dst"
     using writemask "k" (elements are copied from "src" when the corresponding mask bit is not set).
@@ -1431,7 +1574,9 @@ def _mm512_mask_unpacklo_epi32(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: Bi
     return _unpack_epi32_generic(a, b, high=False, total_bits=512, src=src, k=k)
 
 
-def _mm512_mask_unpackhi_epi32(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef):
+def _mm512_mask_unpackhi_epi32(
+    src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef
+):
     """
     Unpack and interleave 32-bit integers from the high half of each 128-bit lane in "a" and "b", and store the results in "dst"
     using writemask "k" (elements are copied from "src" when the corresponding mask bit is not set).
@@ -1452,7 +1597,13 @@ def _mm512_mask_unpackhi_epi32(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: Bi
 #   -  _mm256_blendv_ps
 
 
-def _generic_blend(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int, total_width: int, element_width: int):
+def _generic_blend(
+    a: BitVecRef,
+    b: BitVecRef,
+    imm8: BitVecRef | int,
+    total_width: int,
+    element_width: int,
+):
     """
     Generic implementation for immediate blend instructions that select elements from two source vectors.
 
@@ -1504,7 +1655,9 @@ def _generic_blend(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int, total_widt
     return simplify(Concat(elements[::-1]))
 
 
-def _generic_blendv(a: BitVecRef, b: BitVecRef, mask: BitVecRef, total_width: int, element_width: int):
+def _generic_blendv(
+    a: BitVecRef, b: BitVecRef, mask: BitVecRef, total_width: int, element_width: int
+):
     """
     Generic implementation for variable blend instructions that select elements from two source vectors.
 
@@ -1603,7 +1756,15 @@ def _mm256_blendv_ps(a: BitVecRef, b: BitVecRef, mask: BitVecRef):
 #   -  _mm512_mask_alignr_epi64
 
 
-def _generic_alignr(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int, total_width: int, element_width: int, src: BitVecRef | None = None, k: BitVecRef | None = None):
+def _generic_alignr(
+    a: BitVecRef,
+    b: BitVecRef,
+    imm8: BitVecRef | int,
+    total_width: int,
+    element_width: int,
+    src: BitVecRef | None = None,
+    k: BitVecRef | None = None,
+):
     """
     Generic implementation for alignr instructions that concatenate two vectors and shift right.
 
@@ -1668,8 +1829,14 @@ def _generic_alignr(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int, total_wid
 
     # Extract all elements from both vectors to form the concatenated temp
     # temp = [a_elements | b_elements] (a is high, b is low)
-    a_elements = [Extract(element_width * (i + 1) - 1, element_width * i, a) for i in range(num_elements)]
-    b_elements = [Extract(element_width * (i + 1) - 1, element_width * i, b) for i in range(num_elements)]
+    a_elements = [
+        Extract(element_width * (i + 1) - 1, element_width * i, a)
+        for i in range(num_elements)
+    ]
+    b_elements = [
+        Extract(element_width * (i + 1) - 1, element_width * i, b)
+        for i in range(num_elements)
+    ]
 
     # Concatenate: b elements first (indices 0..N-1), then a elements (indices N..2N-1)
     all_elements = b_elements + a_elements
@@ -1681,12 +1848,16 @@ def _generic_alignr(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int, total_wid
     for j in range(num_elements):
         # For each output position, we need to select from all_elements[shift_amount + j]
         # Use nested If statements to handle all possible shift amounts
-        selected = all_elements[-1]  # Default to last element (shouldn't happen if shift is in range)
+        selected = all_elements[
+            -1
+        ]  # Default to last element (shouldn't happen if shift is in range)
 
         # Build the selection tree from the end
         for shift_val in range(2 * num_elements - 1, -1, -1):
             if shift_val + j < 2 * num_elements:
-                selected = If(shift_amount == shift_val, all_elements[shift_val + j], selected)
+                selected = If(
+                    shift_amount == shift_val, all_elements[shift_val + j], selected
+                )
 
         result_elements[j] = selected
 
@@ -1697,7 +1868,9 @@ def _generic_alignr(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int, total_wid
             i = j * element_width
             mask_bit = Extract(j, j, k)
             src_elem = Extract(i + element_width - 1, i, src)
-            masked_elements[j] = simplify(If(mask_bit == 1, result_elements[j], src_elem))
+            masked_elements[j] = simplify(
+                If(mask_bit == 1, result_elements[j], src_elem)
+            )
         result_elements = masked_elements
 
     return simplify(Concat(result_elements[::-1]))
@@ -1723,7 +1896,9 @@ def _mm512_alignr_epi32(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
     return _generic_alignr(a, b, imm8, 512, 32)
 
 
-def _mm512_mask_alignr_epi32(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
+def _mm512_mask_alignr_epi32(
+    src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int
+):
     """
     Concatenate a and b into a 128-byte result, shift right by imm8 32-bit elements,
     and store the low 64 bytes (16 elements) in dst using writemask k.
@@ -1754,7 +1929,9 @@ def _mm512_alignr_epi64(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
     return _generic_alignr(a, b, imm8, 512, 64)
 
 
-def _mm512_mask_alignr_epi64(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
+def _mm512_mask_alignr_epi64(
+    src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int
+):
     """
     Concatenate a and b into a 128-byte result, shift right by imm8 64-bit elements,
     and store the low 64 bytes (8 elements) in dst using writemask k.

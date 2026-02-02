@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from enum import Enum
+
 native_size_map = {
     "i16": 2,
     "u16": 2,
@@ -19,3 +23,27 @@ def next_power_of_2(v):
     v |= v >> 16
     v = v + 1
     return int(v)
+
+
+class top_bottom_ind(Enum):
+    Top = (0,)
+    Bottom = (1,)
+
+
+class vector_machine(Enum):
+    AVX2 = (1,)
+    AVX512 = (2,)
+
+
+class primitive_type(Enum):
+    i16 = (2,)
+    i32 = (4,)
+    i64 = (8,)
+    f32 = (4,)
+    f64 = 8
+
+
+width_dict = {
+    vector_machine.AVX2: 32,
+    vector_machine.AVX512: 64,
+}

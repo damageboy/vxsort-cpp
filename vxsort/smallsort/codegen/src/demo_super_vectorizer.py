@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Demonstration of the BitonicSuperVectorizer system."""
 
-from bitonic_compiler import BitonicSuperVectorizer, primitive_type, vector_machine, generate_bitonic_sorter
+from utils import vector_machine, primitive_type
+from bitonic_super_optimizer import BitonicSuperVectorizer
 
 
 def demo_simple():
@@ -29,7 +30,7 @@ def demo_simple():
 
     # Show initial state
     initial_state = super_opt._create_initial_state()
-    print(f"Initial state:")
+    print("Initial state:")
     print(f"  Top vector:    {initial_state.top}")
     print(f"  Bottom vector: {initial_state.bottom}")
     print()
@@ -40,14 +41,16 @@ def demo_simple():
     print(f"  Target pairs: {stage_0_pairs}")
 
     # Check if input already matches target
-    matches = super_opt.synthesizer._check_input_matches_target(initial_state, stage_0_pairs)
+    matches = super_opt.synthesizer._check_input_matches_target(
+        initial_state, stage_0_pairs
+    )
     if matches:
-        print(f"  ✓ Input already matches target! No permutation needed.")
+        print("  ✓ Input already matches target! No permutation needed.")
         print()
         print("This means the first stage requires ZERO instructions!")
         print("The elements are already aligned for the first min-max exchange.")
     else:
-        print(f"  Input does not match target, gadget synthesis would be needed.")
+        print("  Input does not match target, gadget synthesis would be needed.")
 
     print()
     print("=" * 70)
@@ -64,7 +67,7 @@ def demo_instruction_catalogue():
     print("=" * 70)
     print()
 
-    from bitonic_compiler import GadgetSynthesizer
+    from bitonic_super_optimizer import GadgetSynthesizer
 
     synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i32)
 
@@ -101,4 +104,3 @@ if __name__ == "__main__":
     print("To run full synthesis (may take time):")
     print("  python bitonic_compiler.py")
     print()
-

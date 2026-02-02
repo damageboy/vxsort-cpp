@@ -2,7 +2,9 @@
 """Test the new symbolic immediate synthesis."""
 
 import sys
-from bitonic_compiler import GadgetSynthesizer, VectorState, InstructionSpec, primitive_type, vector_machine
+
+from utils import vector_machine, primitive_type
+from bitonic_super_optimizer import GadgetSynthesizer, VectorState, InstructionSpec
 from z3 import BitVec
 
 
@@ -14,16 +16,29 @@ def test_symbolic_synthesis():
 
     # Test case 1: Identity - input already matches target
     # This should find a 0-instruction gadget
-    input_state = VectorState(top=[0, 1, 2, 3, 4, 5, 6, 7], bottom=[8, 9, 10, 11, 12, 13, 14, 15])
+    input_state = VectorState(
+        top=[0, 1, 2, 3, 4, 5, 6, 7], bottom=[8, 9, 10, 11, 12, 13, 14, 15]
+    )
 
-    target_pairs = [(0, 8), (1, 9), (2, 10), (3, 11), (4, 12), (5, 13), (6, 14), (7, 15)]
+    target_pairs = [
+        (0, 8),
+        (1, 9),
+        (2, 10),
+        (3, 11),
+        (4, 12),
+        (5, 13),
+        (6, 14),
+        (7, 15),
+    ]
 
-    print(f"Test 1: Identity case (should find 0-instruction gadget)")
+    print("Test 1: Identity case (should find 0-instruction gadget)")
     print(f"Input state: {input_state}")
     print(f"Target pairs: {target_pairs}")
 
     # Try with no instructions (should succeed)
-    gadgets = synthesizer.synthesize_gadget_with_symbolic([], [], input_state, target_pairs)
+    gadgets = synthesizer.synthesize_gadget_with_symbolic(
+        [], [], input_state, target_pairs
+    )
 
     print(f"Found {len(gadgets)} gadget(s)")
     if gadgets and gadgets[0].instruction_count() == 0:
@@ -35,18 +50,34 @@ def test_symbolic_synthesis():
     # Test case 2: Simple permutation using _mm256_permute2x128_si256
     # Swap the two 128-bit lanes
     print("Test 2: Lane swap using _mm256_permute2x128_si256")
-    input_state2 = VectorState(top=[0, 1, 2, 3, 4, 5, 6, 7], bottom=[8, 9, 10, 11, 12, 13, 14, 15])
+    input_state2 = VectorState(
+        top=[0, 1, 2, 3, 4, 5, 6, 7], bottom=[8, 9, 10, 11, 12, 13, 14, 15]
+    )
 
     # After swapping lanes: top becomes [4,5,6,7,0,1,2,3]
     # To align with bottom, we need pairs where bottom stays same
-    target_pairs2 = [(4, 8), (5, 9), (6, 10), (7, 11), (0, 12), (1, 13), (2, 14), (3, 15)]
+    target_pairs2 = [
+        (4, 8),
+        (5, 9),
+        (6, 10),
+        (7, 11),
+        (0, 12),
+        (1, 13),
+        (2, 14),
+        (3, 15),
+    ]
 
-    inst_template = InstructionSpec("_mm256_permute2x128_si256", {"a": "top", "b": "top", "imm8": BitVec("test_imm8_perm2x128", 8)})
+    inst_template = InstructionSpec(
+        "_mm256_permute2x128_si256",
+        {"a": "top", "b": "top", "imm8": BitVec("test_imm8_perm2x128", 8)},
+    )
 
     print(f"Target pairs: {target_pairs2}")
     print(f"Instruction template: {inst_template.intrinsic_name}")
 
-    gadgets2 = synthesizer.synthesize_gadget_with_symbolic([inst_template], [], input_state2, target_pairs2)
+    gadgets2 = synthesizer.synthesize_gadget_with_symbolic(
+        [inst_template], [], input_state2, target_pairs2
+    )
 
     print(f"Found {len(gadgets2)} gadget(s)")
 
@@ -95,9 +126,18 @@ def test_enumerate_instruction_count():
 
     print("\n✓ Instruction enumeration test passed!")
     print(f"\nTotal templates: {len(single_insts) + len(dual_insts)}")
-    print(f"Previous implementation would have generated ~62 candidates with sampled immediates")
-    print(f"New implementation generates only {len(single_insts) + len(dual_insts)} templates!")
-    print(f"Improvement: {62 / (len(single_insts) + len(dual_insts)):.1f}x reduction in candidates to try")
+    print(
+        f"New implementation generates only {
+            len(single_insts) + len(dual_insts)
+        } templates!"
+    )
+    print(
+        f"Improvement: {
+            62
+            / (
+                len(single_insts) + len(dual_insts)
+            ):.1f}x reduction in candidates to try"
+    )
 
 
 if __name__ == "__main__":

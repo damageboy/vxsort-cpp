@@ -2,9 +2,17 @@
 """Tests for the BitonicSuperVectorizer."""
 
 import sys
+
+from utils import vector_machine, primitive_type
+from bitonic_sorter import BitonicSorter
+from bitonic_super_optimizer import (
+    GadgetSynthesizer,
+    BitonicSuperVectorizer,
+    PermutationGadget,
+    VectorState,
+)
 from functional import seq
-from bitonic_compiler import BitonicSuperVectorizer, BitonicSorter, VectorState, PermutationGadget, InstructionSpec, primitive_type, vector_machine, GadgetSynthesizer
-from z3 import Solver, Int, And, Not, If, unsat
+from z3 import And, If, Int, Not, Solver, unsat
 
 
 def test_bitonic_sorter():
@@ -18,7 +26,7 @@ def test_bitonic_sorter():
         """z3 symbolic implementation of compare-and-swap (min, max)."""
         return If(x < y, x, y), If(x < y, y, x), x < y
 
-    def verify_network(pairs_to_compare, N):
+    def verify_network(pairs_to_compare, N: int):
         """Verify that a given sorting network (list of pairs) correctly sorts N elements."""
         s = Solver()
 
@@ -41,16 +49,22 @@ def test_bitonic_sorter():
     N = 16
     sorter = BitonicSorter(N)
 
-    all_pairs = seq(sorted(sorter.stages)).flat_map(lambda sid: sorter.stages[sid]).to_list()
+    flat_pairs = list(
+        seq(sorted(sorter.stages)).flat_map(lambda sid: sorter.stages[sid])
+    )
 
-    assert verify_network(all_pairs, N), f"Bitonic sorting network for N={N} failed verification!"
+    assert verify_network(flat_pairs, N), (
+        f"Bitonic sorting network for N={N} failed verification!"
+    )
 
 
 def test_vector_state():
     """Test VectorState creation and manipulation."""
     print("Testing VectorState...")
 
-    state = VectorState(top=[0, 1, 2, 3, 4, 5, 6, 7], bottom=[8, 9, 10, 11, 12, 13, 14, 15])
+    state = VectorState(
+        top=[0, 1, 2, 3, 4, 5, 6, 7], bottom=[8, 9, 10, 11, 12, 13, 14, 15]
+    )
 
     print(f"  Initial state: {state}")
 
@@ -74,7 +88,9 @@ def test_gadget_synthesizer_init():
     for name in sorted(synthesizer.available_intrinsics.keys()):
         print(f"    - {name}")
 
-    assert synthesizer.elements_per_vector == 8, "AVX2 i32 should have 8 elements per vector"
+    assert synthesizer.elements_per_vector == 8, (
+        "AVX2 i32 should have 8 elements per vector"
+    )
     assert len(synthesizer.available_intrinsics) > 0, "Should have available intrinsics"
 
     print("✓ GadgetSynthesizer initialization test passed\n")
@@ -86,15 +102,28 @@ def test_pair_id_mapping():
 
     synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i32)
 
-    target_pairs = [(0, 8), (1, 9), (2, 10), (3, 11), (4, 12), (5, 13), (6, 14), (7, 15)]
+    target_pairs = [
+        (0, 8),
+        (1, 9),
+        (2, 10),
+        (3, 11),
+        (4, 12),
+        (5, 13),
+        (6, 14),
+        (7, 15),
+    ]
     pair_id_map = synthesizer._create_pair_id_mapping(target_pairs)
 
     print(f"  Pair ID map: {pair_id_map}")
 
     # Check that both elements in each pair have the same pair_id
     for pair_id, (elem1, elem2) in enumerate(target_pairs, start=1):
-        assert pair_id_map[elem1] == pair_id_map[elem2], f"Elements {elem1} and {elem2} should have the same pair_id"
-        assert pair_id_map[elem1] == pair_id, f"Pair ({elem1}, {elem2}) should have pair_id {pair_id}"
+        assert pair_id_map[elem1] == pair_id_map[elem2], (
+            f"Elements {elem1} and {elem2} should have the same pair_id"
+        )
+        assert pair_id_map[elem1] == pair_id, (
+            f"Pair ({elem1}, {elem2}) should have pair_id {pair_id}"
+        )
 
     print("✓ Pair ID mapping test passed\n")
 
@@ -106,16 +135,38 @@ def test_check_input_matches_target():
     synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i32)
 
     # Test case 1: Input matches target perfectly
-    input_state1 = VectorState(top=[0, 1, 2, 3, 4, 5, 6, 7], bottom=[8, 9, 10, 11, 12, 13, 14, 15])
-    target_pairs1 = [(0, 8), (1, 9), (2, 10), (3, 11), (4, 12), (5, 13), (6, 14), (7, 15)]
+    input_state1 = VectorState(
+        top=[0, 1, 2, 3, 4, 5, 6, 7], bottom=[8, 9, 10, 11, 12, 13, 14, 15]
+    )
+    target_pairs1 = [
+        (0, 8),
+        (1, 9),
+        (2, 10),
+        (3, 11),
+        (4, 12),
+        (5, 13),
+        (6, 14),
+        (7, 15),
+    ]
 
     matches1 = synthesizer._check_input_matches_target(input_state1, target_pairs1)
     print(f"  Perfect match: {matches1}")
     assert matches1, "Should match when input is perfectly aligned"
 
     # Test case 2: Input doesn't match target
-    input_state2 = VectorState(top=[0, 2, 4, 6, 8, 10, 12, 14], bottom=[1, 3, 5, 7, 9, 11, 13, 15])
-    target_pairs2 = [(0, 8), (1, 9), (2, 10), (3, 11), (4, 12), (5, 13), (6, 14), (7, 15)]
+    input_state2 = VectorState(
+        top=[0, 2, 4, 6, 8, 10, 12, 14], bottom=[1, 3, 5, 7, 9, 11, 13, 15]
+    )
+    target_pairs2 = [
+        (0, 8),
+        (1, 9),
+        (2, 10),
+        (3, 11),
+        (4, 12),
+        (5, 13),
+        (6, 14),
+        (7, 15),
+    ]
 
     matches2 = synthesizer._check_input_matches_target(input_state2, target_pairs2)
     print(f"  No match: {matches2}")
@@ -177,11 +228,15 @@ def test_output_state_computation():
     synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i32)
 
     # Test case: identity gadget (no instructions) should preserve state
-    input_state = VectorState(top=[0, 1, 2, 3, 4, 5, 6, 7], bottom=[8, 9, 10, 11, 12, 13, 14, 15])
-    identity_gadget = PermutationGadget(top_instructions=[], bottom_instructions=[], validated=True)
+    input_state = VectorState(
+        top=[0, 1, 2, 3, 4, 5, 6, 7], bottom=[8, 9, 10, 11, 12, 13, 14, 15]
+    )
+    identity_gadget = PermutationGadget(
+        top_instructions=[], bottom_instructions=[], validated=True
+    )
 
     output_state = synthesizer.compute_output_state(input_state, identity_gadget)
-    print(f"  Identity gadget:")
+    print("  Identity gadget:")
     print(f"    Input:  {input_state}")
     print(f"    Output: {output_state}")
 
@@ -206,25 +261,30 @@ def test_first_stage_requires_no_permutation():
 
     # Verify that initial state matches first stage pairs
     for i, (a, b) in enumerate(first_stage_pairs):
-        assert initial_state.top[i] == a, f"Top element at index {i} should be {a}, got {initial_state.top[i]}"
-        assert initial_state.bottom[i] == b, f"Bottom element at index {i} should be {b}, got {initial_state.bottom[i]}"
+        assert initial_state.top[i] == a, f"Top element at index {i} should be {
+            a
+        }, got {initial_state.top[i]}"
+        assert initial_state.bottom[i] == b, f"Bottom element at index {i} should be {
+            b
+        }, got {initial_state.bottom[i]}"
 
-    # Synthesize gadgets for first stage
-    gadgets, combinations_tried = super_opt.synthesize_stage(initial_state, first_stage_pairs)
+    # Build solution tree for just the first stage
+    solutions = super_opt.build_solution_tree(depth_limit=1)
 
-    print(f"  Found {len(gadgets)} valid gadget(s)")
-    if combinations_tried > 0:
-        percent = 100.0 * len(gadgets) / combinations_tried
-        print(f"  Search coverage: {combinations_tried} combinations tried; {percent:.2f}% valid")
-    else:
-        print("  Search coverage: 0 combinations tried; 100.00% valid by construction")
+    print(f"  Found {len(solutions)} valid solution tree root(s)")
 
     # Verify that the first gadget is a null (0-instruction) gadget
-    assert len(gadgets) > 0, "Should find at least one valid gadget"
-    null_gadgets = [g for g in gadgets if g.instruction_count() == 0]
-    assert len(null_gadgets) > 0, "Should find at least one null (0-instruction) gadget for first stage"
+    assert len(solutions) > 0, "Should find at least one valid solution"
+    null_solutions = [s for s in solutions if s.gadget.instruction_count() == 0]
+    assert len(null_solutions) > 0, (
+        "Should find at least one solution with null (0-instruction) gadget for first stage"
+    )
 
-    print(f"  ✓ First gadget requires {gadgets[0].instruction_count()} instructions (as expected)")
+    print(
+        f"  ✓ First gadget requires {
+            solutions[0].gadget.instruction_count()
+        } instructions (as expected)"
+    )
     print("✓ First stage null permutation test passed\n")
 
 

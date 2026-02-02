@@ -11,10 +11,16 @@ from rich.text import Text
 
 console = Console()
 
+
 class DualBarColumn(BarColumn):
     """A BarColumn that overlays a 'success' layer (green) over the attempted layer (yellow)."""
 
-    def __init__(self, bar_width: int | None = None, attempt_style: str = "yellow", success_style: str = "green"):
+    def __init__(
+        self,
+        bar_width: int | None = None,
+        attempt_style: str = "yellow",
+        success_style: str = "green",
+    ):
         super().__init__(bar_width=bar_width, complete_style=attempt_style)
         self.attempt_style = attempt_style
         self.success_style = success_style
@@ -27,7 +33,9 @@ class DualBarColumn(BarColumn):
         total = task.total or 1  # avoid division by zero
         attempted_fraction = min(max(task.completed / total, 0.0), 1.0)
         success_fraction = float(task.fields.get("success_ratio", 0.0))
-        success_fraction = min(max(success_fraction, 0.0), attempted_fraction)  # success <= attempted
+        success_fraction = min(
+            max(success_fraction, 0.0), attempted_fraction
+        )  # success <= attempted
 
         # Compute segment widths
         success_width = int(total_width * success_fraction)
@@ -45,6 +53,7 @@ class DualBarColumn(BarColumn):
             pieces.append(" " * remainder_width)  # unfilled area
 
         return pieces
+
 
 # Demo usage
 def demo():
@@ -70,6 +79,7 @@ def demo():
 
             # update custom success_ratio field (relative to total)
             progress.update(task_id, success_ratio=success / total)
+
 
 if __name__ == "__main__":
     demo()
