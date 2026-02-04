@@ -54,9 +54,9 @@ def test_bitonic_sorter():
         seq(sorted(sorter.stages)).flat_map(lambda sid: sorter.stages[sid])
     )
 
-    assert verify_network(flat_pairs, N), (
-        f"Bitonic sorting network for N={N} failed verification!"
-    )
+    assert verify_network(
+        flat_pairs, N
+    ), f"Bitonic sorting network for N={N} failed verification!"
 
 
 def test_vector_state():
@@ -89,9 +89,9 @@ def test_gadget_synthesizer_init():
     for name in sorted(synthesizer.available_intrinsics.keys()):
         print(f"    - {name}")
 
-    assert synthesizer.elements_per_vector == 8, (
-        "AVX2 i32 should have 8 elements per vector"
-    )
+    assert (
+        synthesizer.elements_per_vector == 8
+    ), "AVX2 i32 should have 8 elements per vector"
     assert len(synthesizer.available_intrinsics) > 0, "Should have available intrinsics"
 
     print("✓ GadgetSynthesizer initialization test passed\n")
@@ -113,18 +113,25 @@ def test_pair_id_mapping():
         (6, 14),
         (7, 15),
     ]
-    pair_id_map = synthesizer._create_pair_id_mapping(target_pairs)
+    pair_id_map, pair_id_reverse_map = synthesizer._create_pair_id_mapping(target_pairs)
 
     print(f"  Pair ID map: {pair_id_map}")
+    print(f"  Pair ID reverse map: {pair_id_reverse_map}")
 
     # Check that both elements in each pair have the same pair_id
     for pair_id, (elem1, elem2) in enumerate(target_pairs, start=1):
-        assert pair_id_map[elem1] == pair_id_map[elem2], (
-            f"Elements {elem1} and {elem2} should have the same pair_id"
-        )
-        assert pair_id_map[elem1] == pair_id, (
-            f"Pair ({elem1}, {elem2}) should have pair_id {pair_id}"
-        )
+        assert (
+            pair_id_map[elem1] == pair_id_map[elem2]
+        ), f"Elements {elem1} and {elem2} should have the same pair_id"
+        assert (
+            pair_id_map[elem1] == pair_id
+        ), f"Pair ({elem1}, {elem2}) should have pair_id {pair_id}"
+        # Check reverse map has canonical ordering (low, high)
+        low, high = pair_id_reverse_map[pair_id]
+        assert low == min(elem1, elem2), f"Low element should be min({elem1}, {elem2})"
+        assert high == max(
+            elem1, elem2
+        ), f"High element should be max({elem1}, {elem2})"
 
     print("✓ Pair ID mapping test passed\n")
 
@@ -249,8 +256,8 @@ def test_output_state_computation():
 
 @pytest.mark.parametrize("vm", [vector_machine.AVX2])
 @pytest.mark.parametrize("dt", [primitive_type.i32])
-#@pytest.mark.parametrize("vm", [vector_machine.AVX2, vector_machine.AVX512])
-#@pytest.mark.parametrize("dt", [primitive_type.i16, primitive_type.i32, primitive_type.i64])
+# @pytest.mark.parametrize("vm", [vector_machine.AVX2, vector_machine.AVX512])
+# @pytest.mark.parametrize("dt", [primitive_type.i16, primitive_type.i32, primitive_type.i64])
 def test_first_stage_requires_no_permutation(vm, dt):
     """Test that the initial state is constructed to make first stage a null operation."""
     print(f"Testing first stage requires no permutation for {vm.name}, {dt.name}...")
@@ -266,8 +273,12 @@ def test_first_stage_requires_no_permutation(vm, dt):
 
     # Verify that initial state matches first stage pairs
     for i, (a, b) in enumerate(first_stage_pairs):
-        assert initial_state.top[i] == a, f"Top element at index {i} should be {a}, got {initial_state.top[i]}"
-        assert initial_state.bottom[i] == b, f"Bottom element at index {i} should be {b}, got {initial_state.bottom[i]}"
+        assert (
+            initial_state.top[i] == a
+        ), f"Top element at index {i} should be {a}, got {initial_state.top[i]}"
+        assert (
+            initial_state.bottom[i] == b
+        ), f"Bottom element at index {i} should be {b}, got {initial_state.bottom[i]}"
 
     # Build solution tree for just the first stage
     solutions = super_opt.build_solution_tree(depth_limit=1)
@@ -276,12 +287,14 @@ def test_first_stage_requires_no_permutation(vm, dt):
 
     # Verify that the first gadget is a null (0-instruction) gadget
     assert len(solutions) > 0, "Should find at least one valid solution"
-    null_solutions = [s for s in solutions if s.gadget.instruction_count() == 0]
-    assert len(null_solutions) > 0, (
-        "Should find at least one solution with null (0-instruction) gadget for first stage"
-    )
+    null_solutions = [s for s in solutions if s.best_gadget().instruction_count() == 0]
+    assert (
+        len(null_solutions) > 0
+    ), "Should find at least one solution with null (0-instruction) gadget for first stage"
 
-    print(f"  ✓ First gadget requires {solutions[0].gadget.instruction_count()} instructions (as expected)")
+    print(
+        f"  ✓ First gadget requires {solutions[0].best_gadget().instruction_count()} instructions (as expected)"
+    )
     print("✓ First stage null permutation test passed\n")
 
 

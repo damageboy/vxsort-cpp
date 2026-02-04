@@ -122,8 +122,13 @@ class CostModel:
         return total_cost
 
     def calculate_path_cost(self, solution_path: list) -> float:
-        """Calculate total cost for a complete solution path."""
-        return sum(self.calculate_gadget_cost(node.gadget) for node in solution_path)
+        """Calculate total cost for a complete solution path.
+
+        Uses the best (lowest instruction count) gadget from each node.
+        """
+        return sum(
+            self.calculate_gadget_cost(node.best_gadget()) for node in solution_path
+        )
 
 
 def load_costs_from_uops_info(cpu_model: str) -> Dict[str, InstructionCost]:

@@ -36,15 +36,22 @@ def test_symbolic_synthesis():
     print(f"Target pairs: {target_pairs}")
 
     # Try with no instructions (should succeed)
-    gadgets = synthesizer.synthesize_gadget_with_symbolic(
+    # Returns list of (gadget, output_state) tuples
+    results = synthesizer.synthesize_gadget_with_symbolic(
         [], [], input_state, target_pairs
     )
 
-    print(f"Found {len(gadgets)} gadget(s)")
-    if gadgets and gadgets[0].instruction_count() == 0:
-        print("✓ Identity test passed!\n")
+    print(f"Found {len(results)} gadget(s)")
+    if results:
+        gadget, output_state = results[0]
+        if gadget.instruction_count() == 0:
+            print(f"Output state: {output_state}")
+            print("✓ Identity test passed!\n")
+        else:
+            print("✗ Identity test failed!\n")
+            assert False, "Identity test failed!"
     else:
-        print("✗ Identity test failed!\n")
+        print("✗ Identity test failed - no results!\n")
         assert False, "Identity test failed!"
 
     # Test case 2: Simple permutation using _mm256_permute2x128_si256
@@ -75,15 +82,17 @@ def test_symbolic_synthesis():
     print(f"Target pairs: {target_pairs2}")
     print(f"Instruction template: {inst_template.intrinsic_name}")
 
-    gadgets2 = synthesizer.synthesize_gadget_with_symbolic(
+    # Returns list of (gadget, output_state) tuples
+    results2 = synthesizer.synthesize_gadget_with_symbolic(
         [inst_template], [], input_state2, target_pairs2
     )
 
-    print(f"Found {len(gadgets2)} gadget(s)")
+    print(f"Found {len(results2)} gadget(s)")
 
-    if gadgets2:
-        gadget = gadgets2[0]
+    if results2:
+        gadget, output_state = results2[0]
         print(f"Top instructions: {gadget.top_instructions}")
+        print(f"Output state: {output_state}")
 
         if gadget.top_instructions:
             inst = gadget.top_instructions[0]

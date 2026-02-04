@@ -49,6 +49,10 @@ class VectorState:
     def copy(self):
         return VectorState(top=self.top.copy(), bottom=self.bottom.copy())
 
+    def as_tuple(self) -> tuple[tuple[int, ...], tuple[int, ...]]:
+        """Return a hashable tuple representation for grouping/deduplication."""
+        return (tuple(self.top), tuple(self.bottom))
+
 
 @dataclass
 class SymbolicPlaceholder:
@@ -87,17 +91,26 @@ class PermutationGadget:
 
 @dataclass
 class SolutionNode:
-    """Tree node for one stage's solutions."""
+    """Tree node for one stage's solutions.
+
+    Each node represents a unique (input_state, output_state) transition.
+    Multiple gadgets that achieve the same transition are stored together,
+    allowing pruning of semantically equivalent paths.
+    """
 
     stage: int
     input_state: VectorState
     output_state: VectorState
-    gadget: PermutationGadget
+    gadgets: list[PermutationGadget]  # All gadgets that produce this transition
     children: list["SolutionNode"]
     cost: float = 0.0
 
     def __repr__(self):
-        return f"SolutionNode(stage={self.stage}, cost={self.cost}, children={len(self.children)})"
+        return f"SolutionNode(stage={self.stage}, gadgets={len(self.gadgets)}, cost={self.cost}, children={len(self.children)})"
+
+    def best_gadget(self) -> PermutationGadget:
+        """Return the gadget with fewest instructions."""
+        return min(self.gadgets, key=lambda g: g.instruction_count())
 
 
 class GadgetSynthesizer:
@@ -107,6 +120,7 @@ class GadgetSynthesizer:
         self.vm = vm
         self.prim_type = prim_type
         self.elements_per_vector = width_dict[vm] // int(prim_type.value[0])
+        self.lane_width = int(prim_type.value[0]) * 8  # 16, 32, or 64 bits per element
         self.available_intrinsics = self._get_available_intrinsics()
 
     def _get_available_intrinsics(self) -> dict[str, callable]:
@@ -140,16 +154,22 @@ class GadgetSynthesizer:
 
     def _create_pair_id_mapping(
         self, target_pairs: list[tuple[int, int]]
-    ) -> dict[int, int]:
+    ) -> tuple[dict[int, int], dict[int, tuple[int, int]]]:
         """
-        Create mapping from element indices to pair IDs.
-        Each pair gets a unique ID, and both elements in the pair map to that ID.
+        Create mappings for pair IDs.
+
+        Returns:
+            pair_id_map: element index -> pair_id (both elements in a pair map to same ID)
+            pair_id_reverse_map: pair_id -> (low_elem, high_elem) in canonical order
         """
         pair_id_map = {}
+        pair_id_reverse_map = {}
         for pair_id, (elem1, elem2) in enumerate(target_pairs, start=1):
             pair_id_map[elem1] = pair_id
             pair_id_map[elem2] = pair_id
-        return pair_id_map
+            # Canonical ordering: lower index in top, higher in bottom
+            pair_id_reverse_map[pair_id] = (min(elem1, elem2), max(elem1, elem2))
+        return pair_id_map, pair_id_reverse_map
 
     def _create_input_registers_with_pair_ids(
         self, solver: Solver, input_state: VectorState, pair_id_map: dict[int, int]
@@ -162,9 +182,13 @@ class GadgetSynthesizer:
         if self.vm == vector_machine.AVX2:
             top_reg = z3_avx.ymm_reg("top_input")
             bottom_reg = z3_avx.ymm_reg("bottom_input")
-        else:
+        elif self.vm == vector_machine.AVX512:
             top_reg = z3_avx.zmm_reg("top_input")
             bottom_reg = z3_avx.zmm_reg("bottom_input")
+        else:
+            raise NotImplementedError(
+                f"Register creation not implemented for VM: {self.vm}"
+            )
 
         # Set up constraints: each lane should have the pair_id of the element at that position
         for lane_idx in range(self.elements_per_vector):
@@ -175,59 +199,16 @@ class GadgetSynthesizer:
             bottom_pair_id = pair_id_map.get(bottom_elem, 0)
 
             # Extract the lane from the register and constrain it to the pair_id
-            lane_start = lane_idx * 32  # 32 bits per i32 element
-            lane_end = lane_start + 31
+            lane_start = lane_idx * self.lane_width
+            lane_end = lane_start + self.lane_width - 1
 
             top_lane = Extract(lane_end, lane_start, top_reg)
             bottom_lane = Extract(lane_end, lane_start, bottom_reg)
 
-            solver.add(top_lane == BitVecVal(top_pair_id, 32))
-            solver.add(bottom_lane == BitVecVal(bottom_pair_id, 32))
+            solver.add(top_lane == BitVecVal(top_pair_id, self.lane_width))
+            solver.add(bottom_lane == BitVecVal(bottom_pair_id, self.lane_width))
 
         return top_reg, bottom_reg
-
-    def validate_gadget(
-        self,
-        gadget: PermutationGadget,
-        input_state: VectorState,
-        target_pairs: list[tuple[int, int]],
-    ) -> bool:
-        """
-        Validate that the gadget correctly aligns target pairs using Z3.
-
-        Returns True if the gadget places all pairs on the same lanes.
-        """
-        solver = Solver()
-
-        # Create pair_id mapping
-        pair_id_map = self._create_pair_id_mapping(target_pairs)
-
-        # Create input registers with pair IDs
-        top_reg, bottom_reg = self._create_input_registers_with_pair_ids(
-            solver, input_state, pair_id_map
-        )
-
-        # Apply gadget instructions to get output registers
-        top_output = self._apply_instructions(
-            top_reg, bottom_reg, gadget.top_instructions, is_top=True, solver=solver
-        )
-        bottom_output = self._apply_instructions(
-            top_reg, bottom_reg, gadget.bottom_instructions, is_top=False, solver=solver
-        )
-
-        # Add constraints: for each lane, top_output[lane] == bottom_output[lane] (same pair_id)
-        for lane_idx in range(self.elements_per_vector):
-            lane_start = lane_idx * 32
-            lane_end = lane_start + 31
-
-            top_lane = Extract(lane_end, lane_start, top_output)
-            bottom_lane = Extract(lane_end, lane_start, bottom_output)
-
-            solver.add(top_lane == bottom_lane)
-
-        # Check if constraints are satisfiable
-        result = solver.check()
-        return result == sat
 
     def synthesize_gadget_with_symbolic(
         self,
@@ -235,19 +216,28 @@ class GadgetSynthesizer:
         bottom_instructions_template: list[InstructionSpec],
         input_state: VectorState,
         target_pairs: list[tuple[int, int]],
-    ) -> list[PermutationGadget]:
+    ) -> list[tuple[PermutationGadget, VectorState]]:
         """
         Synthesize gadgets using symbolic immediates in Z3.
 
         Takes instruction templates with symbolic values (e.g., BitVec("imm8", 8))
         and lets Z3 find concrete immediate values that satisfy constraints.
 
-        Returns list of valid gadgets with concrete immediate values extracted from Z3 model.
+        The symbolic values are represented using SymbolicPlaceholder for pickling.
+        The pickling is required for multiprocessing.
+
+        Returns list of (gadget, output_state) tuples. The output state is computed
+        directly from the satisfying model, avoiding a redundant Z3 solve. The output
+        state is in canonical form: for each pair, the lower element index goes to
+        the top vector and the higher index goes to bottom, reflecting the
+        compare-and-exchange operation.
         """
         solver = Solver()
 
-        # Create pair_id mapping
-        pair_id_map = self._create_pair_id_mapping(target_pairs)
+        # Create pair_id mappings:
+        # - pair_id_map: element index -> pair_id
+        # - pair_id_reverse_map: pair_id -> (low_elem, high_elem) in canonical order
+        pair_id_map, pair_id_reverse_map = self._create_pair_id_mapping(target_pairs)
 
         # Create input registers with pair IDs
         top_reg, bottom_reg = self._create_input_registers_with_pair_ids(
@@ -307,8 +297,8 @@ class GadgetSynthesizer:
 
         # Add constraints: for each lane, top_output[lane] == bottom_output[lane] (same pair_id)
         for lane_idx in range(self.elements_per_vector):
-            lane_start = lane_idx * 32
-            lane_end = lane_start + 31
+            lane_start = lane_idx * self.lane_width
+            lane_end = lane_start + self.lane_width - 1
 
             top_lane = Extract(lane_end, lane_start, top_output)
             bottom_lane = Extract(lane_end, lane_start, bottom_output)
@@ -322,6 +312,36 @@ class GadgetSynthesizer:
 
         # Extract concrete values from model
         model = solver.model()
+
+        # Extract pair ordering from output registers to build canonical output state
+        # Using pair_id_reverse_map to convert pair_id -> (low_elem, high_elem)
+        output_top = []
+        output_bottom = []
+        for lane_idx in range(self.elements_per_vector):
+            lane_start = lane_idx * self.lane_width
+            lane_end = lane_start + self.lane_width - 1
+
+            # Extract the pair_id from the output
+            # top and bottom should have same pair_id since the solver was satified,
+            # so we extract from the top only
+            top_lane = Extract(lane_end, lane_start, top_output)
+            pair_id_val = model.evaluate(top_lane, model_completion=True)
+            pair_id = (
+                pair_id_val.as_long()
+                if hasattr(pair_id_val, "as_long")
+                else pair_id_val
+            )
+
+            # Get the element indices for this pair in canonical order
+            if pair_id not in pair_id_reverse_map:
+                raise ValueError(
+                    f"Invalid pair_id {pair_id} at lane {lane_idx} not found in reverse map"
+                )
+            low_elem, high_elem = pair_id_reverse_map[pair_id]
+            output_top.append(low_elem)
+            output_bottom.append(high_elem)
+
+        output_state = VectorState(top=output_top, bottom=output_bottom)
 
         # Create concrete instructions by substituting symbolic values
         def concretize_instructions(
@@ -382,7 +402,7 @@ class GadgetSynthesizer:
             validated=True,
         )
 
-        return [gadget]
+        return [(gadget, output_state)]
 
     def compute_output_state(
         self, input_state: VectorState, gadget: PermutationGadget
@@ -405,23 +425,27 @@ class GadgetSynthesizer:
         if self.vm == vector_machine.AVX2:
             top_reg = z3_avx.ymm_reg("top_input")
             bottom_reg = z3_avx.ymm_reg("bottom_input")
-        else:
+        elif self.vm == vector_machine.AVX512:
             top_reg = z3_avx.zmm_reg("top_input")
             bottom_reg = z3_avx.zmm_reg("bottom_input")
+        else:
+            raise NotImplementedError(
+                f"Register creation not implemented for VM: {self.vm}"
+            )
 
         # Constrain input registers to contain element indices
         for lane_idx in range(self.elements_per_vector):
             top_elem = input_state.top[lane_idx]
             bottom_elem = input_state.bottom[lane_idx]
 
-            lane_start = lane_idx * 32
-            lane_end = lane_start + 31
+            lane_start = lane_idx * self.lane_width
+            lane_end = lane_start + self.lane_width - 1
 
             top_lane = Extract(lane_end, lane_start, top_reg)
             bottom_lane = Extract(lane_end, lane_start, bottom_reg)
 
-            solver.add(top_lane == BitVecVal(top_elem, 32))
-            solver.add(bottom_lane == BitVecVal(bottom_elem, 32))
+            solver.add(top_lane == BitVecVal(top_elem, self.lane_width))
+            solver.add(bottom_lane == BitVecVal(bottom_elem, self.lane_width))
 
         # Apply gadget instructions
         top_output = self._apply_instructions(
@@ -444,8 +468,8 @@ class GadgetSynthesizer:
         output_bottom = []
 
         for lane_idx in range(self.elements_per_vector):
-            lane_start = lane_idx * 32
-            lane_end = lane_start + 31
+            lane_start = lane_idx * self.lane_width
+            lane_end = lane_start + self.lane_width - 1
 
             top_lane = Extract(lane_end, lane_start, top_output)
             bottom_lane = Extract(lane_end, lane_start, bottom_output)
@@ -486,11 +510,7 @@ class GadgetSynthesizer:
             # This is a Z3 expression
             if symbolic_vars is not None:
                 # Try to extract the variable name
-                try:
-                    var_name = str(arg)
-                    symbolic_vars[id(arg)] = arg
-                except:
-                    pass
+                symbolic_vars[id(arg)] = arg
             return arg
 
         if isinstance(arg, int):
@@ -671,9 +691,13 @@ class GadgetSynthesizer:
         self,
         jobs: list[tuple],
         show_progress: bool = True,
-    ) -> list[tuple[PermutationGadget, VectorState, list[tuple[int, int]], dict]]:
+    ) -> list[tuple[PermutationGadget, VectorState, VectorState, dict]]:
         """
         Validate candidate gadgets using synthesis in parallel.
+
+        Returns list of (gadget, input_state, output_state, metadata) tuples.
+        The output_state is computed directly during validation, avoiding
+        a redundant Z3 solve.
         """
         validated_gadgets = []
 
@@ -695,15 +719,14 @@ class GadgetSynthesizer:
             with Pool() as pool:
                 # Use imap_unordered for streaming results and progress updates
                 for (
-                    gadgets,
+                    gadget_results,
                     job_input_state,
-                    job_target_pairs,
                     job_metadata,
                 ) in pool.imap_unordered(_validate_gadget_worker, jobs):
                     success_inc = 0
-                    for gadget in gadgets:
+                    for gadget, output_state in gadget_results:
                         validated_gadgets.append(
-                            (gadget, job_input_state, job_target_pairs, job_metadata)
+                            (gadget, job_input_state, output_state, job_metadata)
                         )
                         success_inc = 1
 
@@ -913,12 +936,12 @@ class BitonicSuperVectorizer:
             bottom.append(pair[1])
 
         # Verify we have the expected number of elements
-        assert len(top) == self.elements_per_vector, (
-            f"Expected {self.elements_per_vector} elements in top, got {len(top)}"
-        )
-        assert len(bottom) == self.elements_per_vector, (
-            f"Expected {self.elements_per_vector} elements in bottom, got {len(bottom)}"
-        )
+        assert (
+            len(top) == self.elements_per_vector
+        ), f"Expected {self.elements_per_vector} elements in top, got {len(top)}"
+        assert (
+            len(bottom) == self.elements_per_vector
+        ), f"Expected {self.elements_per_vector} elements in bottom, got {len(bottom)}"
 
         return VectorState(top=top, bottom=bottom)
 
@@ -1031,26 +1054,76 @@ class BitonicSuperVectorizer:
             f"Stage {stage_idx}: Validated {len(validated_gadgets)}/{len(all_jobs)} gadgets"
         )
 
-        # Phase 3: Build nodes and collect next stage input states
-        # Group validated gadgets by parent path
-        nodes_by_parent = {}
-        next_stage_inputs = []
+        # Early bailout: Check if next stage would exceed depth limit or total stages
+        # No point building nodes if there are no more stages to process
+        next_stage_idx = stage_idx + 1
+        has_next_stage = next_stage_idx < len(self.bitonic_sorter.stages) and (
+            depth_limit is None or next_stage_idx < depth_limit
+        )
 
-        # Process validated gadgets with their preserved metadata
-        for gadget, input_state, _, metadata in validated_gadgets:
+        # Phase 3: Group gadgets by (parent_path, input_state, output_state)
+        # This prunes semantically equivalent gadgets - we only need one path per unique state transition
+        # Key: (parent_path, input_state_tuple, output_state_tuple) -> list of gadgets
+        gadgets_by_transition: dict[tuple, list[PermutationGadget]] = {}
+
+        # Collect all validated gadgets
+        for gadget, input_state, output_state, metadata in validated_gadgets:
             parent_path = metadata["parent_path"]
+            key = (parent_path, input_state.as_tuple(), output_state.as_tuple())
+            if key not in gadgets_by_transition:
+                gadgets_by_transition[key] = []
+            gadgets_by_transition[key].append(gadget)
 
-            # Compute output state
-            next_input_state = self._compute_output_state(
-                input_state, gadget, stage_pairs
+        # Handle special case gadgets (0,0 depth)
+        # For these, input already matches target pairs, so output state is just
+        # the canonical form: lower index in top, higher in bottom for each pair
+        for special_case in special_case_gadgets:
+            gadget = special_case["gadget"]
+            input_state = special_case["input_state"]
+            parent_path = special_case["parent_path"]
+
+            # Compute canonical output state directly from input_state and stage_pairs
+            output_top = []
+            output_bottom = []
+            for lane_idx in range(self.elements_per_vector):
+                top_elem = input_state.top[lane_idx]
+                bottom_elem = input_state.bottom[lane_idx]
+                output_top.append(min(top_elem, bottom_elem))
+                output_bottom.append(max(top_elem, bottom_elem))
+            output_state = VectorState(top=output_top, bottom=output_bottom)
+
+            key = (parent_path, input_state.as_tuple(), output_state.as_tuple())
+            if key not in gadgets_by_transition:
+                gadgets_by_transition[key] = []
+            gadgets_by_transition[key].append(gadget)
+
+        print(
+            f"Stage {stage_idx}: Pruned to {len(gadgets_by_transition)} unique state transitions"
+        )
+
+        # Phase 4: Create nodes from grouped gadgets
+        nodes_by_parent: dict[tuple, list[SolutionNode]] = {}
+        next_stage_inputs = [] if has_next_stage else None
+
+        for (
+            parent_path,
+            input_tuple,
+            output_tuple,
+        ), gadgets in gadgets_by_transition.items():
+            # Reconstruct VectorState from tuples
+            input_state = VectorState(
+                top=list(input_tuple[0]), bottom=list(input_tuple[1])
+            )
+            output_state = VectorState(
+                top=list(output_tuple[0]), bottom=list(output_tuple[1])
             )
 
-            # Create node (children will be added later)
+            # Create node with all equivalent gadgets
             node = SolutionNode(
                 stage=stage_idx,
                 input_state=input_state,
-                output_state=next_input_state,
-                gadget=gadget,
+                output_state=output_state,
+                gadgets=gadgets,
                 children=[],
             )
 
@@ -1059,37 +1132,14 @@ class BitonicSuperVectorizer:
                 nodes_by_parent[parent_path] = []
             nodes_by_parent[parent_path].append(node)
 
-            # Prepare for next stage
-            new_path = parent_path + (id(node),)
-            next_stage_inputs.append((next_input_state, new_path))
-
-        # Handle special case gadgets (0,0 depth)
-        for special_case in special_case_gadgets:
-            gadget = special_case["gadget"]
-            input_state = special_case["input_state"]
-            parent_path = special_case["parent_path"]
-
-            next_input_state = self._compute_output_state(
-                input_state, gadget, stage_pairs
-            )
-
-            node = SolutionNode(
-                stage=stage_idx,
-                input_state=input_state,
-                output_state=next_input_state,
-                gadget=gadget,
-                children=[],
-            )
-
-            if parent_path not in nodes_by_parent:
-                nodes_by_parent[parent_path] = []
-            nodes_by_parent[parent_path].append(node)
-
-            new_path = parent_path + (id(node),)
-            next_stage_inputs.append((next_input_state, new_path))
+            # Prepare for next stage (only if there is one)
+            # Only one entry per unique output_state per parent_path
+            if has_next_stage:
+                new_path = parent_path + (id(node),)
+                next_stage_inputs.append((output_state, new_path))
 
         # Phase 4: Recursively process next stage
-        if next_stage_inputs:
+        if has_next_stage and next_stage_inputs:
             children_by_path = self._build_tree_recursive(
                 next_stage_inputs, stage_idx + 1, depth_limit
             )
@@ -1103,21 +1153,9 @@ class BitonicSuperVectorizer:
 
         return nodes_by_parent
 
-    def _compute_output_state(
-        self,
-        input_state: VectorState,
-        gadget: PermutationGadget,
-        stage_pairs: list[tuple[int, int]],
-    ) -> VectorState:
-        """
-        Compute output state after applying gadget.
-
-        Uses Z3 to symbolically execute the gadget and determine where each element ends up.
-        """
-        # Use the synthesizer to compute the output state
-        return self.synthesizer.compute_output_state(input_state, gadget)
-
-    def synthesize_all_stages(self, depth_limit: int | None = None) -> list[SolutionNode]:
+    def synthesize_all_stages(
+        self, depth_limit: int | None = None
+    ) -> list[SolutionNode]:
         """Entry point: builds solution tree for all stages.
 
         Args:
@@ -1131,8 +1169,11 @@ class BitonicSuperVectorizer:
             self._compute_costs_recursive(root, cost_model)
 
     def _compute_costs_recursive(self, node: SolutionNode, cost_model):
-        """Recursively compute costs for node and its children."""
-        node.cost = cost_model.calculate_gadget_cost(node.gadget)
+        """Recursively compute costs for node and its children.
+
+        Uses the best (lowest instruction count) gadget for cost calculation.
+        """
+        node.cost = cost_model.calculate_gadget_cost(node.best_gadget())
         for child in node.children:
             self._compute_costs_recursive(child, cost_model)
             # Add parent cost to child for cumulative cost
@@ -1142,7 +1183,21 @@ class BitonicSuperVectorizer:
         """Generate JSON with all solutions and costs."""
         import json
 
+        def gadget_to_dict(gadget: PermutationGadget) -> dict:
+            return {
+                "top_instructions": [
+                    {"name": inst.intrinsic_name, "args": inst.args}
+                    for inst in gadget.top_instructions
+                ],
+                "bottom_instructions": [
+                    {"name": inst.intrinsic_name, "args": inst.args}
+                    for inst in gadget.bottom_instructions
+                ],
+                "instruction_count": gadget.instruction_count(),
+            }
+
         def node_to_dict(node: SolutionNode) -> dict:
+            best = node.best_gadget()
             return {
                 "stage": node.stage,
                 "input_state": {
@@ -1153,17 +1208,13 @@ class BitonicSuperVectorizer:
                     "top": node.output_state.top,
                     "bottom": node.output_state.bottom,
                 },
-                "gadget": {
-                    "top_instructions": [
-                        {"name": inst.intrinsic_name, "args": inst.args}
-                        for inst in node.gadget.top_instructions
-                    ],
-                    "bottom_instructions": [
-                        {"name": inst.intrinsic_name, "args": inst.args}
-                        for inst in node.gadget.bottom_instructions
-                    ],
-                    "instruction_count": node.gadget.instruction_count(),
-                },
+                "gadget": gadget_to_dict(
+                    best
+                ),  # Best gadget for backward compatibility
+                "gadgets": [
+                    gadget_to_dict(g) for g in node.gadgets
+                ],  # All equivalent gadgets
+                "gadget_count": len(node.gadgets),
                 "cost": node.cost,
                 "children": [node_to_dict(child) for child in node.children],
             }
@@ -1177,7 +1228,12 @@ class BitonicSuperVectorizer:
 
 
 def _validate_gadget_worker(job):
-    """Worker function for parallel gadget validation."""
+    """Worker function for parallel gadget validation.
+
+    Returns (gadget_results, input_state, metadata) where gadget_results is
+    a list of (gadget, output_state) tuples. The output_state is computed
+    directly during validation.
+    """
     top_seq, bottom_seq, input_state, target_pairs, vm, prim_type, metadata = job
 
     # Create clones of sequences to avoid modifying the ones in the main process
@@ -1186,8 +1242,8 @@ def _validate_gadget_worker(job):
 
     # Create a local synthesizer and synthesis in its own Z3 context
     synthesizer = GadgetSynthesizer(vm, prim_type)
-    gadgets = synthesizer.synthesize_gadget_with_symbolic(
+    gadget_results = synthesizer.synthesize_gadget_with_symbolic(
         top_seq_clone, bottom_seq_clone, input_state, target_pairs
     )
 
-    return gadgets, input_state, target_pairs, metadata
+    return gadget_results, input_state, metadata
