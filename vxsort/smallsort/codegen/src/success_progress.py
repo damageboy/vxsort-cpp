@@ -97,20 +97,25 @@ class TqdmColumn(ProgressColumn):
             self.format_time(remaining) if remaining is not None else "--:--"
         )
 
+        # Use fixed-width formatting to prevent dancing
+        # Speed: pad to 7 chars (e.g., "  0.00", "999.99")
+        speed_str = f"{speed:7.2f}"
+
         return Text(
-            f"[{elapsed_str}<{remaining_str}, {speed:.2f}/s]",
+            f"[{elapsed_str}<{remaining_str}, {speed_str}/s]",
             style="progress.data.speed",
         )
 
     @staticmethod
     def format_time(seconds: float | None) -> str:
         if seconds is None:
-            return "--:--"
+            return "  --:--"
         minutes, seconds = divmod(int(seconds), 60)
         hours, minutes = divmod(minutes, 60)
         if hours > 0:
             return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-        return f"{minutes:02d}:{seconds:02d}"
+        # Pad to match HH:MM:SS width (8 chars) for consistency
+        return f"  {minutes:02d}:{seconds:02d}"
 
 
 class SuccessProgress(Progress):
