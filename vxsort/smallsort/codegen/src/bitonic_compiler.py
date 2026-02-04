@@ -14,7 +14,16 @@ except ImportError:
     from utils import vector_machine, primitive_type, width_dict
 
 
-def generate_bitonic_sorter(num_vecs: int, type: primitive_type, vm: vector_machine):
+def _get_min_leaf_cost(node) -> float:
+    """Get the minimum cost among all leaf nodes in the tree."""
+    if not node.children:
+        # This is a leaf node
+        return node.cost
+    # Return minimum cost among all children
+    return min(_get_min_leaf_cost(child) for child in node.children)
+
+
+def generate_bitonic_sorter(num_vecs: int, type: primitive_type, vm: vector_machine, depth_limit: int | None = None, top_k: int | None = None):
     """
     Generate bitonic sorter with super-optimized permutation sequences.
 
@@ -22,6 +31,8 @@ def generate_bitonic_sorter(num_vecs: int, type: primitive_type, vm: vector_mach
         num_vecs: Number of SIMD vectors to sort
         type: Primitive type (i32, f32, i64, f64)
         vm: Vector machine (AVX2, AVX512)
+        depth_limit: Maximum stage depth to explore (inclusive). If None, all stages are explored.
+        top_k: Number of best solutions to keep. If None, all solutions are kept.
 
     Returns:
         List of SolutionNode trees representing different optimized solutions
@@ -37,7 +48,7 @@ def generate_bitonic_sorter(num_vecs: int, type: primitive_type, vm: vector_mach
 
     # Synthesize all stages to build solution tree
     print("Synthesizing permutation gadgets...")
-    solutions = super_opt.synthesize_all_stages()
+    solutions = super_opt.synthesize_all_stages(depth_limit=depth_limit)
 
     print(f"Found {len(solutions)} root solutions")
 
@@ -46,9 +57,17 @@ def generate_bitonic_sorter(num_vecs: int, type: primitive_type, vm: vector_mach
     cost_model = CostModel("generic")
     super_opt.compute_costs(solutions, cost_model)
 
+    # Filter to top K solutions if requested
+    if top_k is not None and len(solutions) > top_k:
+        print(f"Filtering to top {top_k} solutions (out of {len(solutions)})...")
+        # Sort by minimum leaf cost (best complete path)
+        solutions = sorted(solutions, key=_get_min_leaf_cost)[:top_k]
+        print(f"Kept {len(solutions)} best solutions")
+
     # Export solutions to JSON
     output_path = f"bitonic_solutions_{num_vecs}x{vm.name}_{type.name}.json"
-    super_opt.export_solutions(solutions, output_path)
+    super_opt.export_solutions_to_json(solutions, output_path)
+
 
     return solutions
 
@@ -64,14 +83,26 @@ if __name__ == "__main__":
         type=str,
         required=True,
         choices=list(vector_machine.__members__.keys()),
-        help="Vector architecture (AVX2, AVX512)",
+        help=f"Vector architecture ({', '.join(vector_machine.__members__.keys())}",
     )
     parser.add_argument(
         "--datatype",
         type=str,
         required=True,
         choices=list(primitive_type.__members__.keys()),
-        help="Primitive data type (i16, u16, i32, u32, i64, u64, f32, f64)",
+        help=f"Primitive data type ({', '.join(primitive_type.__members__.keys())})",
+    )
+    parser.add_argument(
+        "--depth-limit",
+        type=int,
+        default=None,
+        help="Maximum stage depth to explore (inclusive). If not specified, all stages are explored.",
+    )
+    parser.add_argument(
+        "--top-k",
+        type=int,
+        default=None,
+        help="Number of best solutions to keep in output. If not specified, all solutions are kept.",
     )
 
     args = parser.parse_args()
@@ -80,4 +111,4 @@ if __name__ == "__main__":
     vm = vector_machine[args.vector_machine]
     dtype = primitive_type[args.datatype]
 
-    generate_bitonic_sorter(args.num_vecs, dtype, vm)
+    generate_bitonic_sorter(args.num_vecs, dtype, vm, depth_limit=args.depth_limit, top_k=args.top_k)

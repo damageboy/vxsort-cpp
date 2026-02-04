@@ -1117,9 +1117,13 @@ class BitonicSuperVectorizer:
         # Use the synthesizer to compute the output state
         return self.synthesizer.compute_output_state(input_state, gadget)
 
-    def synthesize_all_stages(self) -> list[SolutionNode]:
-        """Entry point: builds solution tree for all stages."""
-        return self.build_solution_tree()
+    def synthesize_all_stages(self, depth_limit: int | None = None) -> list[SolutionNode]:
+        """Entry point: builds solution tree for all stages.
+
+        Args:
+            depth_limit: Maximum stage depth to explore (inclusive). If None, all stages are explored.
+        """
+        return self.build_solution_tree(depth_limit=depth_limit)
 
     def compute_costs(self, roots: list[SolutionNode], cost_model):
         """Traverse tree and compute cumulative costs for each path."""
@@ -1134,7 +1138,7 @@ class BitonicSuperVectorizer:
             # Add parent cost to child for cumulative cost
             child.cost += node.cost
 
-    def export_solutions(self, roots: list[SolutionNode], output_path: str):
+    def export_solutions_to_json(self, roots: list[SolutionNode], output_path: str):
         """Generate JSON with all solutions and costs."""
         import json
 
