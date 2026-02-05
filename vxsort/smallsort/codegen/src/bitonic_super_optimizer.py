@@ -611,25 +611,6 @@ class GadgetSynthesizer:
 
         return current_reg
 
-    def _check_input_matches_target(
-        self, input_state: VectorState, target_pairs: list[tuple[int, int]]
-    ) -> bool:
-        """Check if input state already matches target pairs (all pairs aligned on same lanes)."""
-        for i in range(len(input_state.top)):
-            top_elem = input_state.top[i]
-            bottom_elem = input_state.bottom[i]
-            # Check if this forms a valid pair
-            pair_found = False
-            for pair in target_pairs:
-                if (top_elem == pair[0] and bottom_elem == pair[1]) or (
-                    top_elem == pair[1] and bottom_elem == pair[0]
-                ):
-                    pair_found = True
-                    break
-            if not pair_found:
-                return False
-        return True
-
     def _generate_candidate_gadgets(
         self, top_depth: int, bottom_depth: int
     ) -> list[tuple[list[InstructionSpec], list[InstructionSpec]]]:
@@ -701,8 +682,6 @@ class GadgetSynthesizer:
         all_candidates = []
         for top_depth in range(gadget_depth):
             for bottom_depth in range(gadget_depth):
-                if top_depth == 0 and bottom_depth == 0:
-                    continue
                 candidates = self._generate_candidate_gadgets(top_depth, bottom_depth)
                 all_candidates.extend(candidates)
         return all_candidates
@@ -997,20 +976,8 @@ class BitonicSuperVectorizer:
 
         # Phase 1: Collect all candidate gadgets for entire stage
         all_jobs = []
-        special_case_gadgets = []  # Track (0,0) depth gadgets that don't need validation
 
         for input_state, parent_path in input_states_with_context:
-            # Handle (0,0) depth special case: no instructions needed if input already matches
-            if self.synthesizer._check_input_matches_target(input_state, stage_pairs):
-                gadget = PermutationGadget([], [], validated=True)
-                special_case_gadgets.append(
-                    {
-                        "gadget": gadget,
-                        "input_state": input_state,
-                        "parent_path": parent_path,
-                    }
-                )
-
             metadata = {
                 "input_state": input_state,
                 "parent_path": parent_path,
@@ -1056,29 +1023,6 @@ class BitonicSuperVectorizer:
         # Collect all validated gadgets
         for gadget, input_state, output_state, metadata in validated_gadgets:
             parent_path = metadata["parent_path"]
-            key = (parent_path, input_state.as_tuple(), output_state.as_tuple())
-            if key not in gadgets_by_transition:
-                gadgets_by_transition[key] = []
-            gadgets_by_transition[key].append(gadget)
-
-        # Handle special case gadgets (0,0 depth)
-        # For these, input already matches target pairs, so output state is just
-        # the canonical form: lower index in top, higher in bottom for each pair
-        for special_case in special_case_gadgets:
-            gadget = special_case["gadget"]
-            input_state = special_case["input_state"]
-            parent_path = special_case["parent_path"]
-
-            # Compute canonical output state directly from input_state and stage_pairs
-            output_top = []
-            output_bottom = []
-            for lane_idx in range(self.elements_per_vector):
-                top_elem = input_state.top[lane_idx]
-                bottom_elem = input_state.bottom[lane_idx]
-                output_top.append(min(top_elem, bottom_elem))
-                output_bottom.append(max(top_elem, bottom_elem))
-            output_state = VectorState(top=output_top, bottom=output_bottom)
-
             key = (parent_path, input_state.as_tuple(), output_state.as_tuple())
             if key not in gadgets_by_transition:
                 gadgets_by_transition[key] = []

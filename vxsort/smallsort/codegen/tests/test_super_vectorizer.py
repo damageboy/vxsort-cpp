@@ -136,53 +136,6 @@ def test_pair_id_mapping():
     print("✓ Pair ID mapping test passed\n")
 
 
-def test_check_input_matches_target():
-    """Test checking if input already matches target."""
-    print("Testing input match check...")
-
-    synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i32)
-
-    # Test case 1: Input matches target perfectly
-    input_state1 = VectorState(
-        top=[0, 1, 2, 3, 4, 5, 6, 7], bottom=[8, 9, 10, 11, 12, 13, 14, 15]
-    )
-    target_pairs1 = [
-        (0, 8),
-        (1, 9),
-        (2, 10),
-        (3, 11),
-        (4, 12),
-        (5, 13),
-        (6, 14),
-        (7, 15),
-    ]
-
-    matches1 = synthesizer._check_input_matches_target(input_state1, target_pairs1)
-    print(f"  Perfect match: {matches1}")
-    assert matches1, "Should match when input is perfectly aligned"
-
-    # Test case 2: Input doesn't match target
-    input_state2 = VectorState(
-        top=[0, 2, 4, 6, 8, 10, 12, 14], bottom=[1, 3, 5, 7, 9, 11, 13, 15]
-    )
-    target_pairs2 = [
-        (0, 8),
-        (1, 9),
-        (2, 10),
-        (3, 11),
-        (4, 12),
-        (5, 13),
-        (6, 14),
-        (7, 15),
-    ]
-
-    matches2 = synthesizer._check_input_matches_target(input_state2, target_pairs2)
-    print(f"  No match: {matches2}")
-    assert not matches2, "Should not match when input is not aligned"
-
-    print("✓ Input match check test passed\n")
-
-
 def test_bitonicsupervectorizer_init():
     """Test BitonicSuperVectorizer initialization."""
     print("Testing BitonicSuperVectorizer initialization...")
@@ -309,7 +262,6 @@ def run_all_tests():
         test_vector_state()
         test_gadget_synthesizer_init()
         test_pair_id_mapping()
-        test_check_input_matches_target()
         test_bitonicsupervectorizer_init()
         test_instruction_enumeration()
         test_output_state_computation()
