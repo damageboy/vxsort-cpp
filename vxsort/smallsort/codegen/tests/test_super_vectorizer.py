@@ -34,11 +34,11 @@ def test_bitonic_sorter():
         # Initial array of symbolic variables
         a = [Int(f"x_{i}") for i in range(N)]
 
-        # Apply all comparison stages
+        # Apply all comparison stages (pairs are 1-based, so subtract 1 for 0-based array access)
         for i, j in pairs_to_compare:
-            x1, y1, _ = compare_and_swap_z3(a[i], a[j])
-            a[i] = x1
-            a[j] = y1
+            x1, y1, _ = compare_and_swap_z3(a[i - 1], a[j - 1])
+            a[i - 1] = x1
+            a[j - 1] = y1
 
         # We want to prove that for all inputs, the result is sorted.
         # So we look for a counter-example: an input where the result is NOT sorted.

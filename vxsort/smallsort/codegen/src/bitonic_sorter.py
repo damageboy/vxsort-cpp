@@ -42,10 +42,14 @@ class BitonicSorter:
 
         if initial_merge:
             stage_pairs = (
-                seq.range(i, i + k).zip(seq.range(i + k, i + n).reverse()).to_list()
+                seq.range(i + 1, i + k + 1)
+                .zip(seq.range(i + k + 1, i + n + 1).reverse())
+                .to_list()
             )
         else:
-            stage_pairs = seq.range(i, i + k).map(lambda x: (x, x + k)).to_list()
+            stage_pairs = (
+                seq.range(i + 1, i + k + 1).map(lambda x: (x, x + k)).to_list()
+            )
 
         self.add_ops(BitonicStage(stage, stage_pairs))
 

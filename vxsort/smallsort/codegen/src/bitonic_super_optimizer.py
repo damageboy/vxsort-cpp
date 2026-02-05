@@ -10,7 +10,7 @@ try:
 except ImportError:
     from success_progress import SuccessProgress
 from multiprocessing import Pool
-from z3 import Solver, Extract, BitVecVal, sat, BitVec
+from z3 import Solver, Extract, BitVecVal, sat, BitVec, Distinct
 
 try:
     from . import z3_avx
@@ -121,6 +121,16 @@ class GadgetSynthesizer:
         self.elements_per_vector = width_dict[vm] // int(prim_type.value[0])
         self.lane_width = int(prim_type.value[0]) * 8  # 16, 32, or 64 bits per element
         self.available_intrinsics = self._get_available_intrinsics()
+
+        # Memoize instruction templates - these are reused across all gadget generation
+        self.single_insts_top = self._enumerate_single_input_instructions("top")
+        self.single_insts_bottom = self._enumerate_single_input_instructions("bottom")
+        self.dual_insts_top_bottom = self._enumerate_dual_input_instructions(
+            "top", "bottom"
+        )
+        self.dual_insts_bottom_top = self._enumerate_dual_input_instructions(
+            "bottom", "top"
+        )
 
     def _get_available_intrinsics(self) -> dict[str, callable]:
         """Get available intrinsics for the current VM and primitive type."""
@@ -295,6 +305,7 @@ class GadgetSynthesizer:
         )
 
         # Add constraints: for each lane, top_output[lane] == bottom_output[lane] (same pair_id)
+        output_lanes = []
         for lane_idx in range(self.elements_per_vector):
             lane_start = lane_idx * self.lane_width
             lane_end = lane_start + self.lane_width - 1
@@ -303,6 +314,12 @@ class GadgetSynthesizer:
             bottom_lane = Extract(lane_end, lane_start, bottom_output)
 
             solver.add(top_lane == bottom_lane)
+            output_lanes.append(top_lane)
+
+        # Add constraint: all lanes must have distinct pair_ids (no duplicate pairs)
+        # Without this, the solver could find degenerate solutions where multiple lanes
+        # have the same pair_id, losing elements in the process.
+        solver.add(Distinct(*output_lanes))
 
         # Check if constraints are satisfiable
         result = solver.check()
@@ -620,36 +637,25 @@ class GadgetSynthesizer:
         Generate candidate instruction sequences without validation.
         Returns list of (top_sequence, bottom_sequence) tuples.
         """
-        max_combinations_to_try = (
-            50  # Reduced since symbolic synthesis is more powerful
-        )
-
-        # Get instruction template pools (now with symbolic immediates)
-        single_insts_top = self._enumerate_single_input_instructions("top")
-        single_insts_bottom = self._enumerate_single_input_instructions("bottom")
-        dual_insts_top_bottom = self._enumerate_dual_input_instructions("top", "bottom")
-        dual_insts_bottom_top = self._enumerate_dual_input_instructions("bottom", "top")
-
         # Build instruction sequences for top
         top_sequences = []
         if top_depth > 0:
             if top_depth == 1:
-                # Try single instructions
-                top_sequences = [[inst] for inst in single_insts_top[:3]]
-                top_sequences.extend([[inst] for inst in dual_insts_top_bottom[:2]])
+                top_sequences = [[inst] for inst in self.single_insts_top]
+                top_sequences.extend([[inst] for inst in self.dual_insts_top_bottom])
             elif top_depth == 2:
                 # Try pairs: (single, single) and (dual, single)
-                for inst1 in single_insts_top[:2]:  # Try first 2 of each type
-                    for inst2 in single_insts_top[:2]:
+                for inst1 in self.single_insts_top:
+                    for inst2 in self.single_insts_top:
                         top_sequences.append([inst1, inst2])
-                for inst1 in dual_insts_top_bottom[:2]:
-                    for inst2 in single_insts_top[:2]:
+                for inst1 in self.dual_insts_top_bottom:
+                    for inst2 in self.single_insts_top:
                         top_sequences.append([inst1, inst2])
             elif top_depth == 3:
                 # Try triples: (single, single, single)
-                for inst1 in single_insts_top[:2]:
-                    for inst2 in single_insts_top[:2]:
-                        for inst3 in single_insts_top[:2]:
+                for inst1 in self.single_insts_top:
+                    for inst2 in self.single_insts_top:
+                        for inst3 in self.single_insts_top:
                             top_sequences.append([inst1, inst2, inst3])
         else:
             top_sequences = [[]]  # Empty sequence for depth 0
@@ -658,33 +664,48 @@ class GadgetSynthesizer:
         bottom_sequences = []
         if bottom_depth > 0:
             if bottom_depth == 1:
-                bottom_sequences = [[inst] for inst in single_insts_bottom[:3]]
-                bottom_sequences.extend([[inst] for inst in dual_insts_bottom_top[:2]])
+                bottom_sequences = [[inst] for inst in self.single_insts_bottom]
+                bottom_sequences.extend([[inst] for inst in self.dual_insts_top_bottom])
             elif bottom_depth == 2:
-                for inst1 in single_insts_bottom[:2]:
-                    for inst2 in single_insts_bottom[:2]:
+                for inst1 in self.single_insts_bottom:
+                    for inst2 in self.single_insts_bottom:
+                        bottom_sequences.append([inst1, inst2])
+                for inst1 in self.dual_insts_top_bottom:
+                    for inst2 in self.single_insts_bottom:
                         bottom_sequences.append([inst1, inst2])
             elif bottom_depth == 3:
-                for inst1 in single_insts_bottom[:2]:
-                    for inst2 in single_insts_bottom[:2]:
-                        for inst3 in single_insts_bottom[:2]:
+                for inst1 in self.single_insts_bottom:
+                    for inst2 in self.single_insts_bottom:
+                        for inst3 in self.single_insts_bottom:
                             bottom_sequences.append([inst1, inst2, inst3])
         else:
             bottom_sequences = [[]]  # Empty sequence for depth 0
 
-        # Generate all combinations (limited)
+        # Generate all combinations
         candidates = []
-        combinations_generated = 0
         for top_seq in top_sequences:
-            if combinations_generated >= max_combinations_to_try:
-                break
             for bottom_seq in bottom_sequences:
-                if combinations_generated >= max_combinations_to_try:
-                    break
                 candidates.append((top_seq, bottom_seq))
-                combinations_generated += 1
 
         return candidates
+
+    def precompute_all_candidates(
+        self, gadget_depth: int
+    ) -> list[tuple[list[InstructionSpec], list[InstructionSpec]]]:
+        """Pre-compute all candidate instruction sequences for all depth combinations.
+
+        The candidates depend only on gadget_depth and the available intrinsics,
+        not on input state or stage pairs. This allows computing them once and
+        reusing across all stages and input states.
+        """
+        all_candidates = []
+        for top_depth in range(gadget_depth):
+            for bottom_depth in range(gadget_depth):
+                if top_depth == 0 and bottom_depth == 0:
+                    continue
+                candidates = self._generate_candidate_gadgets(top_depth, bottom_depth)
+                all_candidates.extend(candidates)
+        return all_candidates
 
     def _validate_gadgets(
         self,
@@ -747,70 +768,51 @@ class GadgetSynthesizer:
         Single-input means: operates on ONE of our vectors (top OR bottom),
         even if it takes additional operands like control vectors.
         """
-        instructions = []
-
         if self.vm == vector_machine.AVX2 and self.prim_type == primitive_type.i32:
             input_reg = reg_name
             unique_id = id(input_reg)
 
-            # Create instruction templates with symbolic immediates/controls
-            # Z3 will find the concrete values that satisfy the constraints
-
-            # Instructions with symbolic immediates
-            # _mm256_permute_ps: permute within 128-bit lanes
-            instructions.append(
-                InstructionSpec(
-                    "_mm256_permute_ps",
-                    {
-                        "a": input_reg,
-                        "imm8": SymbolicPlaceholder(f"imm8_permute_ps_{unique_id}", 8),
-                    },
-                )
+            # Permute within 128-bit lanes using immediate
+            permute_ps = InstructionSpec(
+                "_mm256_permute_ps",
+                {
+                    "a": input_reg,
+                    "imm8": SymbolicPlaceholder(f"imm8_permute_ps_{unique_id}", 8),
+                },
             )
 
-            # _mm256_permute4x64_epi64: permute 64-bit chunks (affects i32 grouping)
-            instructions.append(
-                InstructionSpec(
-                    "_mm256_permute4x64_epi64",
-                    {
-                        "a": input_reg,
-                        "imm8": SymbolicPlaceholder(f"imm8_permute4x64_{unique_id}", 8),
-                    },
-                )
+            # Permute 64-bit chunks across full register
+            permute4x64 = InstructionSpec(
+                "_mm256_permute4x64_epi64",
+                {
+                    "a": input_reg,
+                    "imm8": SymbolicPlaceholder(f"imm8_permute4x64_{unique_id}", 8),
+                },
             )
 
-            # Instructions with symbolic control vectors
-            # _mm256_permutexvar_epi32: variable permute across all lanes (most powerful!)
-            instructions.append(
-                InstructionSpec(
-                    "_mm256_permutexvar_epi32",
-                    {
-                        "a": input_reg,
-                        "op_idx": SymbolicPlaceholder(
-                            f"ctrl_permutexvar_{unique_id}", 256
-                        ),
-                    },
-                )
+            # Variable permute across all lanes (most powerful)
+            permutexvar = InstructionSpec(
+                "_mm256_permutexvar_epi32",
+                {
+                    "a": input_reg,
+                    "op_idx": SymbolicPlaceholder(f"ctrl_permutexvar_{unique_id}", 256),
+                },
             )
 
-            # _mm256_permutevar_ps: variable permute within 128-bit lanes
-            instructions.append(
-                InstructionSpec(
-                    "_mm256_permutevar_ps",
-                    {
-                        "a": input_reg,
-                        "b": SymbolicPlaceholder(
-                            f"ctrl_permutevar_ps_{unique_id}", 256
-                        ),
-                    },
-                )
-            )
-        else:
-            raise NotImplementedError(
-                f"Single-input instructions not implemented for {self.vm} and {self.prim_type}"
+            # Variable permute within 128-bit lanes
+            permutevar_ps = InstructionSpec(
+                "_mm256_permutevar_ps",
+                {
+                    "a": input_reg,
+                    "b": SymbolicPlaceholder(f"ctrl_permutevar_ps_{unique_id}", 256),
+                },
             )
 
-        return instructions
+            return [permute_ps, permute4x64, permutexvar, permutevar_ps]
+
+        raise NotImplementedError(
+            f"Single-input instructions not implemented for {self.vm} and {self.prim_type}"
+        )
 
     def _enumerate_dual_input_instructions(
         self, reg1_name: str = "top", reg2_name: str = "bottom"
@@ -819,76 +821,68 @@ class GadgetSynthesizer:
         Generate dual-input instruction templates with symbolic immediates.
         Z3 will solve for the concrete immediate values.
         """
-        instructions = []
-
         if self.vm == vector_machine.AVX2 and self.prim_type == primitive_type.i32:
             reg1 = reg1_name
             reg2 = reg2_name
-
-            # Generate unique IDs for symbolic variables
             unique_id = f"{id(reg1)}_{id(reg2)}"
 
-            # Shuffle instructions with symbolic immediate
-            instructions.append(
-                InstructionSpec(
-                    "_mm256_shuffle_ps",
-                    {
-                        "a": reg1,
-                        "b": reg2,
-                        "imm8": SymbolicPlaceholder(f"imm8_shuffle_{unique_id}", 8),
-                    },
-                )
+            # Shuffle: select elements from both inputs within 128-bit lanes
+            shuffle_ps = InstructionSpec(
+                "_mm256_shuffle_ps",
+                {
+                    "a": reg1,
+                    "b": reg2,
+                    "imm8": SymbolicPlaceholder(f"imm8_shuffle_{unique_id}", 8),
+                },
             )
 
-            # Unpack instructions (no immediates needed)
-            instructions.append(
-                InstructionSpec("_mm256_unpacklo_epi32", {"a": reg1, "b": reg2})
-            )
-            instructions.append(
-                InstructionSpec("_mm256_unpackhi_epi32", {"a": reg1, "b": reg2})
+            # Unpack low: interleave low elements from both inputs
+            unpacklo = InstructionSpec(
+                "_mm256_unpacklo_epi32",
+                {"a": reg1, "b": reg2},
             )
 
-            # Permute2x128 with symbolic immediate
-            instructions.append(
-                InstructionSpec(
-                    "_mm256_permute2x128_si256",
-                    {
-                        "a": reg1,
-                        "b": reg2,
-                        "imm8": SymbolicPlaceholder(f"imm8_perm2x128_{unique_id}", 8),
-                    },
-                )
+            # Unpack high: interleave high elements from both inputs
+            unpackhi = InstructionSpec(
+                "_mm256_unpackhi_epi32",
+                {"a": reg1, "b": reg2},
             )
 
-            # Blend instructions with symbolic immediate
-            instructions.append(
-                InstructionSpec(
-                    "_mm256_blend_ps",
-                    {
-                        "a": reg1,
-                        "b": reg2,
-                        "imm8": SymbolicPlaceholder(f"imm8_blend_{unique_id}", 8),
-                    },
-                )
+            # Permute 128-bit lanes between two registers
+            permute2x128 = InstructionSpec(
+                "_mm256_permute2x128_si256",
+                {
+                    "a": reg1,
+                    "b": reg2,
+                    "imm8": SymbolicPlaceholder(f"imm8_perm2x128_{unique_id}", 8),
+                },
             )
 
-            # Alignr with symbolic immediate
-            instructions.append(
-                InstructionSpec(
-                    "_mm256_alignr_epi32",
-                    {
-                        "a": reg1,
-                        "b": reg2,
-                        "imm8": SymbolicPlaceholder(f"imm8_alignr_{unique_id}", 8),
-                    },
-                )
-            )
-        else:
-            raise NotImplementedError(
-                f"Dual-input instructions not implemented for {self.vm} and {self.prim_type}"
+            # Blend: select elements from either input based on mask
+            blend_ps = InstructionSpec(
+                "_mm256_blend_ps",
+                {
+                    "a": reg1,
+                    "b": reg2,
+                    "imm8": SymbolicPlaceholder(f"imm8_blend_{unique_id}", 8),
+                },
             )
 
-        return instructions
+            # Align right: concatenate and shift
+            alignr = InstructionSpec(
+                "_mm256_alignr_epi32",
+                {
+                    "a": reg1,
+                    "b": reg2,
+                    "imm8": SymbolicPlaceholder(f"imm8_alignr_{unique_id}", 8),
+                },
+            )
+
+            return [shuffle_ps, unpacklo, unpackhi, permute2x128, blend_ps, alignr]
+
+        raise NotImplementedError(
+            f"Dual-input instructions not implemented for {self.vm} and {self.prim_type}"
+        )
 
 
 class BitonicSuperVectorizer:
@@ -944,19 +938,24 @@ class BitonicSuperVectorizer:
 
         return VectorState(top=top, bottom=bottom)
 
-    def build_solution_tree(self, depth_limit: int | None = None) -> list[SolutionNode]:
+    def build_solution_tree(
+        self, depth_limit: int | None = None, gadget_depth: int = 3
+    ) -> list[SolutionNode]:
         """
         Recursively explore all stage transitions to build solution tree.
         Returns root nodes (first stage solutions).
 
         Args:
             depth_limit: Maximum stage depth to explore (inclusive). If None, all stages are explored.
+            gadget_depth: Maximum instruction depth per gadget (1-3, default 3).
         """
         initial_state = self._create_initial_state()
+        # Pre-compute all candidates once - they're independent of stage/input state
+        all_candidates = self.synthesizer.precompute_all_candidates(gadget_depth)
         # Start with empty parent path for the root
         input_states_with_context = [(initial_state, ())]
         nodes_by_path = self._build_tree_recursive(
-            input_states_with_context, 0, depth_limit
+            input_states_with_context, 0, depth_limit, all_candidates
         )
 
         # Return root nodes (those with empty parent path)
@@ -967,6 +966,7 @@ class BitonicSuperVectorizer:
         input_states_with_context: list[tuple[VectorState, list]],
         stage_idx: int,
         depth_limit: int | None = None,
+        all_candidates: list[tuple] | None = None,
     ) -> dict[tuple, list[SolutionNode]]:
         """
         Build solution tree collecting all candidates for entire stage before validation.
@@ -976,6 +976,8 @@ class BitonicSuperVectorizer:
                                       tracks the chain of previous gadgets leading to this state
             stage_idx: Current stage index
             depth_limit: Maximum stage depth to explore
+            all_candidates: Pre-computed list of (top_seq, bottom_seq) instruction templates,
+                           independent of stage/input state
 
         Returns:
             Dictionary mapping parent_path to list of SolutionNodes for that path
@@ -998,49 +1000,35 @@ class BitonicSuperVectorizer:
         special_case_gadgets = []  # Track (0,0) depth gadgets that don't need validation
 
         for input_state, parent_path in input_states_with_context:
-            # Try all depth combinations
-            for top_depth in range(4):  # 0 to 3
-                for bottom_depth in range(4):
-                    # Skip (0, 0) unless input matches target
-                    if top_depth == 0 and bottom_depth == 0:
-                        if self.synthesizer._check_input_matches_target(
-                            input_state, stage_pairs
-                        ):
-                            # Special case: create gadget with no instructions
-                            gadget = PermutationGadget([], [], validated=True)
-                            special_case_gadgets.append(
-                                {
-                                    "gadget": gadget,
-                                    "input_state": input_state,
-                                    "parent_path": parent_path,
-                                }
-                            )
-                        continue
+            # Handle (0,0) depth special case: no instructions needed if input already matches
+            if self.synthesizer._check_input_matches_target(input_state, stage_pairs):
+                gadget = PermutationGadget([], [], validated=True)
+                special_case_gadgets.append(
+                    {
+                        "gadget": gadget,
+                        "input_state": input_state,
+                        "parent_path": parent_path,
+                    }
+                )
 
-                    # Generate candidate instruction sequences
-                    candidates = self.synthesizer._generate_candidate_gadgets(
-                        top_depth, bottom_depth
+            metadata = {
+                "input_state": input_state,
+                "parent_path": parent_path,
+            }
+
+            # Enrich pre-computed candidates with per-state metadata
+            for top_seq, bottom_seq in all_candidates:
+                all_jobs.append(
+                    (
+                        top_seq,
+                        bottom_seq,
+                        input_state,
+                        stage_pairs,
+                        self.vm,
+                        self.prim_type,
+                        metadata,
                     )
-
-                    # Add context and metadata to each candidate and create job
-                    for top_seq, bottom_seq in candidates:
-                        metadata = {
-                            "input_state": input_state,
-                            "parent_path": parent_path,
-                            "top_depth": top_depth,
-                            "bottom_depth": bottom_depth,
-                        }
-                        all_jobs.append(
-                            (
-                                top_seq,
-                                bottom_seq,
-                                input_state,
-                                stage_pairs,
-                                self.vm,
-                                self.prim_type,
-                                metadata,
-                            )
-                        )
+                )
 
         print(f"Stage {stage_idx}: Generated {len(all_jobs)} candidates to validate")
 
@@ -1140,7 +1128,7 @@ class BitonicSuperVectorizer:
         # Phase 4: Recursively process next stage
         if has_next_stage and next_stage_inputs:
             children_by_path = self._build_tree_recursive(
-                next_stage_inputs, stage_idx + 1, depth_limit
+                next_stage_inputs, stage_idx + 1, depth_limit, all_candidates
             )
 
             # Attach children to their parent nodes
@@ -1153,14 +1141,17 @@ class BitonicSuperVectorizer:
         return nodes_by_parent
 
     def synthesize_all_stages(
-        self, depth_limit: int | None = None
+        self, depth_limit: int | None = None, gadget_depth: int = 3
     ) -> list[SolutionNode]:
         """Entry point: builds solution tree for all stages.
 
         Args:
             depth_limit: Maximum stage depth to explore (inclusive). If None, all stages are explored.
+            gadget_depth: Maximum instruction depth per gadget (1-3, default 3).
         """
-        return self.build_solution_tree(depth_limit=depth_limit)
+        return self.build_solution_tree(
+            depth_limit=depth_limit, gadget_depth=gadget_depth
+        )
 
     def compute_costs(self, roots: list[SolutionNode], cost_model):
         """Traverse tree and compute cumulative costs for each path."""

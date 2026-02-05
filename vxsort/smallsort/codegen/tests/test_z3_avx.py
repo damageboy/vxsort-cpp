@@ -1,7 +1,7 @@
 from z3 import Solver, unsat, sat, BitVec, BitVecVal, Concat, Extract
 
 # Assuming your z3s functions and registers are importable, e.g.:
-from z3_avx import _MM_SHUFFLE, _MM_SHUFFLE2
+from z3_avx import _MM_SHUFFLE, _MM_SHUFFLE2, decode_shuffle_mask, mm_shuffle_str
 from z3_avx import _mm256_permute_ps
 from z3_avx import _mm512_permute_ps
 from z3_avx import _mm256_permutexvar_epi32
@@ -1028,7 +1028,7 @@ class TestPermutex2varEpi64:
         )
 
 
-class Test_shuffle_ps:
+class TestShufflePs:
     """Tests for _mm256_shuffle_ps and _mm512_shuffle_ps"""
 
     def test_mm256_shuffle_ps_null_permute_works(self):
@@ -1265,8 +1265,128 @@ class Test_shuffle_ps:
             f"Z3 found unexpected null shuffle: got 0x{model_imm8:02x}, expected 0x{null_shuffle_ps_2vec_imm8:02x}"
         )
 
+    def test_mm256_shuffle_ps_bitonic_stage_masks(self):
+        """
+        Test finding shuffle masks for specific bitonic sorter vector states.
 
-class Test_shuffle_pd:
+        Input vector state:
+        Top:    [1,  2,  5,  6,  9,  10, 13, 14]
+        Bottom: [4,  3,  8,  7,  12, 11, 16, 15]
+
+        Find two shuffle masks:
+        1. Target output: [1, 5, 4, 8, 9, 13, 12, 16]
+        2. Target output: [2, 6, 3, 7, 10, 14, 11, 15]
+        """
+        # First target: [1, 5, 4, 8, 9, 13, 12, 16]
+        s1 = Solver()
+        op1, op2 = ymm_reg_pair_with_unique_values("vec", s1, bits=32)
+
+        imm8_1 = BitVec("imm8_1", 8)
+        out1 = _mm256_shuffle_ps(op1, op2, imm8_1)
+
+        exp1 = construct_ymm_reg_from_elements(
+            32,
+            [
+                (op1, 0),  # elem 1
+                (op1, 2),  # elem 5
+                (op2, 0),  # elem 4
+                (op2, 2),  # elem 8
+                (op1, 4),  # elem 9
+                (op1, 6),  # elem 13
+                (op2, 4),  # elem 12
+                (op2, 6),  # elem 16
+            ],
+        )
+
+        s1.add(out1 == exp1)
+        res1 = s1.check()
+
+        assert res1 == sat, "Z3 failed to find shuffle mask for first target"
+        model_imm8_1 = s1.model().evaluate(imm8_1).as_long()
+        print(
+            f"First shuffle mask found: 0x{model_imm8_1:02x} | 0b{model_imm8_1:08b} = {mm_shuffle_str(model_imm8_1)}"
+        )
+
+        # Second target: [2, 6, 3, 7, 10, 14, 11, 15]
+        s2 = Solver()
+        op1, op2 = ymm_reg_pair_with_unique_values("vec", s2, bits=32)
+
+        imm8_2 = BitVec("imm8_2", 8)
+        out2 = _mm256_shuffle_ps(op1, op2, imm8_2)
+
+        exp2 = construct_ymm_reg_from_elements(
+            32,
+            [
+                (op1, 1),  # elem 2
+                (op1, 3),  # elem 6
+                (op2, 1),  # elem 3
+                (op2, 3),  # elem 7
+                (op1, 5),  # elem 10
+                (op1, 7),  # elem 14
+                (op2, 5),  # elem 11
+                (op2, 7),  # elem 15
+            ],
+        )
+
+        s2.add(out2 == exp2)
+        res2 = s2.check()
+
+        assert res2 == sat, "Z3 failed to find shuffle mask for second target"
+        model_imm8_2 = s2.model().evaluate(imm8_2).as_long()
+        print(
+            f"Second shuffle mask found: 0x{model_imm8_2:02x} | 0b{model_imm8_2:08b} = {mm_shuffle_str(model_imm8_2)}"
+        )
+
+    def test_mm256_shuffle_ps_bitonic_stage_masks_literal(self):
+        """
+        Test finding shuffle masks using literal values for bitonic sorter vector states.
+
+        Input vector state:
+        Top:    [1,  2,  5,  6,  9,  10, 13, 14]
+        Bottom: [4,  3,  8,  7,  12, 11, 16, 15]
+
+        Find two shuffle masks:
+        1. Target output: [1, 5, 4, 8, 9, 13, 12, 16]
+        2. Target output: [2, 6, 3, 7, 10, 14, 11, 15]
+        """
+        # First target: [1, 5, 4, 8, 9, 13, 12, 16]
+        s1 = Solver()
+        op1 = ymm_reg_with_32b_values("op1", s1, [1, 2, 5, 6, 9, 10, 13, 14])
+        op2 = ymm_reg_with_32b_values("op2", s1, [4, 3, 8, 7, 12, 11, 16, 15])
+
+        imm8_1 = BitVec("imm8_1", 8)
+        out1 = _mm256_shuffle_ps(op1, op2, imm8_1)
+        exp1 = ymm_reg_with_32b_values("exp1", s1, [1, 5, 4, 8, 9, 13, 12, 16])
+
+        s1.add(out1 == exp1)
+        res1 = s1.check()
+
+        assert res1 == sat, "Z3 failed to find shuffle mask for first target"
+        model_imm8_1 = s1.model().evaluate(imm8_1).as_long()
+        print(
+            f"First shuffle mask found: 0x{model_imm8_1:02x} = 0b{model_imm8_1:08b} = {mm_shuffle_str(model_imm8_1)}"
+        )
+
+        # Second target: [2, 6, 3, 7, 10, 14, 11, 15]
+        s2 = Solver()
+        op1 = ymm_reg_with_32b_values("op1", s2, [1, 2, 5, 6, 9, 10, 13, 14])
+        op2 = ymm_reg_with_32b_values("op2", s2, [4, 3, 8, 7, 12, 11, 16, 15])
+
+        imm8_2 = BitVec("imm8_2", 8)
+        out2 = _mm256_shuffle_ps(op1, op2, imm8_2)
+        exp2 = ymm_reg_with_32b_values("exp2", s2, [2, 6, 3, 7, 10, 14, 11, 15])
+
+        s2.add(out2 == exp2)
+        res2 = s2.check()
+
+        assert res2 == sat, "Z3 failed to find shuffle mask for second target"
+        model_imm8_2 = s2.model().evaluate(imm8_2).as_long()
+        print(
+            f"Second shuffle mask found: 0x{model_imm8_2:02x} = 0b{model_imm8_2:08b} = {mm_shuffle_str(model_imm8_2)}"
+        )
+
+
+class TestShufflePd:
     """Tests for _mm256_shuffle_pd and _mm512_shuffle_pd"""
 
     def test_mm256_shuffle_pd_null_permute_works(self):
@@ -4943,3 +5063,64 @@ class TestMaskAlignrEpi64:
         model_imm8 = s.model().evaluate(imm8).as_long()
         assert model_imm8 == 5
         assert model_k == 0x07  # 0b00000111
+
+
+class TestShuffleMaskDecode:
+    """Tests for decode_shuffle_mask function"""
+
+    def test_decode_shuffle_mask_round_trip_all_values(self):
+        for imm8 in range(256):
+            z, y, x, w = decode_shuffle_mask(imm8)
+            assert 0 <= w <= 3, f"w={w} out of range for imm8=0x{imm8:02x}"
+            assert 0 <= x <= 3, f"x={x} out of range for imm8=0x{imm8:02x}"
+            assert 0 <= y <= 3, f"y={y} out of range for imm8=0x{imm8:02x}"
+            assert 0 <= z <= 3, f"z={z} out of range for imm8=0x{imm8:02x}"
+
+            assert _MM_SHUFFLE(z, y, x, w) == imm8, (
+                f"Round-trip failed for 0x{imm8:02x}: "
+                f"decoded to ({z}, {y}, {x}, {w}), "
+                f"re-encoded to 0x{_MM_SHUFFLE(z, y, x, w):02x}"
+            )
+
+    def test_mm_shuffle_str_identity(self):
+        """Test string representation of identity shuffle"""
+        result = mm_shuffle_str(0xE4)
+        assert result == "_MM_SHUFFLE(3, 2, 1, 0)"
+
+    def test_mm_shuffle_str_0x88(self):
+        """Test string representation of 0x88 mask from bitonic sorter"""
+        result = mm_shuffle_str(0x88)
+        assert result == "_MM_SHUFFLE(2, 0, 2, 0)"
+
+    def test_mm_shuffle_str_0xdd(self):
+        """Test string representation of 0xdd mask from bitonic sorter"""
+        result = mm_shuffle_str(0xDD)
+        assert result == "_MM_SHUFFLE(3, 1, 3, 1)"
+
+    def test_mm_shuffle_str_all_zeros(self):
+        """Test string representation of all zeros"""
+        result = mm_shuffle_str(0x00)
+        assert result == "_MM_SHUFFLE(0, 0, 0, 0)"
+
+    def test_mm_shuffle_str_all_ones(self):
+        """Test string representation of all ones"""
+        result = mm_shuffle_str(0xFF)
+        assert result == "_MM_SHUFFLE(3, 3, 3, 3)"
+
+    def test_mm_shuffle_str_reverse(self):
+        """Test string representation of reverse shuffle"""
+        result = mm_shuffle_str(0x1B)
+        assert result == "_MM_SHUFFLE(0, 1, 2, 3)"
+
+    def test_mm_shuffle_str_format(self):
+        """Test that all strings have correct format"""
+        for imm8 in [0x00, 0x88, 0xDD, 0xE4, 0xFF, 0x1B, 0x4E, 0xB1]:
+            result = mm_shuffle_str(imm8)
+            # Check it starts with _MM_SHUFFLE(
+            assert result.startswith("_MM_SHUFFLE("), (
+                f"Bad format for 0x{imm8:02x}: {result}"
+            )
+            # Check it ends with )
+            assert result.endswith(")"), f"Bad format for 0x{imm8:02x}: {result}"
+            # Check it contains the right number of commas
+            assert result.count(",") == 3, f"Bad format for 0x{imm8:02x}: {result}"

@@ -223,6 +223,53 @@ def _MM_SHUFFLE(z: int, y: int, x: int, w: int) -> int:
     return (z << 6) | (y << 4) | (x << 2) | w
 
 
+def decode_shuffle_mask(imm8: int) -> tuple[int, int, int, int]:
+    """
+    Decodes an 8-bit shuffle mask into _MM_SHUFFLE parameters.
+
+    Args:
+        imm8: 8-bit shuffle mask immediate value
+
+    Returns:
+        Tuple (z, y, x, w) where:
+        - w = bits [1:0]
+        - x = bits [3:2]
+        - y = bits [5:4]
+        - z = bits [7:6]
+
+    Example:
+        >>> decode_shuffle_mask(0x88)
+        (2, 0, 2, 0)
+        >>> decode_shuffle_mask(0xdd)
+        (3, 1, 3, 1)
+    """
+    w = imm8 & 0b11
+    x = (imm8 >> 2) & 0b11
+    y = (imm8 >> 4) & 0b11
+    z = (imm8 >> 6) & 0b11
+    return (z, y, x, w)
+
+
+def mm_shuffle_str(imm8: int) -> str:
+    """
+    Returns a string representation of a shuffle mask in _MM_SHUFFLE format.
+
+    Args:
+        imm8: 8-bit shuffle mask immediate value
+
+    Returns:
+        String in format "_MM_SHUFFLE(z, y, x, w)"
+
+    Example:
+        >>> mm_shuffle_str(0x88)
+        '_MM_SHUFFLE(2, 0, 2, 0)'
+        >>> mm_shuffle_str(0xdd)
+        '_MM_SHUFFLE(3, 1, 3, 1)'
+    """
+    z, y, x, w = decode_shuffle_mask(imm8)
+    return f"_MM_SHUFFLE({z}, {y}, {x}, {w})"
+
+
 ##
 # Single vector variable permutes
 
