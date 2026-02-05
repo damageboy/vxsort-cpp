@@ -16,13 +16,52 @@ except ImportError:
     from asm_exporter import export_solutions_as_assembly
 
 
-def _get_min_leaf_cost(node) -> float:
-    """Get the minimum cost among all leaf nodes in the tree."""
+def _collect_leaf_paths(node, current_path=None):
+    """Yield all root-to-leaf paths as (leaf_cost, [node, ...]) tuples."""
+    if current_path is None:
+        current_path = []
+    current_path = current_path + [node]
+
     if not node.children:
-        # This is a leaf node
-        return node.cost
-    # Return minimum cost among all children
-    return min(_get_min_leaf_cost(child) for child in node.children)
+        yield (node.cost, current_path)
+    else:
+        for child in node.children:
+            yield from _collect_leaf_paths(child, current_path)
+
+
+def _prune_to_top_k_paths(solutions, top_k):
+    """Keep only the top K cheapest root-to-leaf paths, pruning the rest.
+
+    Modifies the tree in place by removing children not on any selected path.
+    Returns the filtered list of roots.
+    """
+    all_paths = []
+    for root in solutions:
+        all_paths.extend(_collect_leaf_paths(root))
+
+    all_paths.sort(key=lambda x: x[0])
+    selected_paths = all_paths[:top_k]
+
+    # Build set of kept edges (parent_id, child_id) and kept root ids
+    kept_edges = set()
+    kept_roots = set()
+    for _, path in selected_paths:
+        kept_roots.add(id(path[0]))
+        for i in range(len(path) - 1):
+            kept_edges.add((id(path[i]), id(path[i + 1])))
+
+    def prune_node(node):
+        node.children = [
+            child for child in node.children if (id(node), id(child)) in kept_edges
+        ]
+        for child in node.children:
+            prune_node(child)
+
+    solutions = [root for root in solutions if id(root) in kept_roots]
+    for root in solutions:
+        prune_node(root)
+
+    return solutions
 
 
 def generate_bitonic_sorter(
@@ -71,12 +110,15 @@ def generate_bitonic_sorter(
     cost_model = CostModel("generic")
     super_opt.compute_costs(solutions, cost_model)
 
-    # Filter to top K solutions if requested
-    if top_k is not None and len(solutions) > top_k:
-        print(f"Filtering to top {top_k} solutions (out of {len(solutions)})...")
-        # Sort by minimum leaf cost (best complete path)
-        solutions = sorted(solutions, key=_get_min_leaf_cost)[:top_k]
-        print(f"Kept {len(solutions)} best solutions")
+    # Filter to top K cheapest root-to-leaf paths if requested
+    if top_k is not None:
+        total_paths = sum(1 for root in solutions for _ in _collect_leaf_paths(root))
+        if total_paths > top_k:
+            print(
+                f"Filtering to top {top_k} cheapest paths (out of {total_paths} total)..."
+            )
+            solutions = _prune_to_top_k_paths(solutions, top_k)
+            print(f"Kept {len(solutions)} roots after pruning")
 
     # Export solutions in the requested format
     if output_format == "asm":

@@ -1,26 +1,93 @@
 from __future__ import annotations
-
 import copy
 from dataclasses import dataclass
-
 from tabulate import tabulate
-
-try:
-    from .success_progress import SuccessProgress
-except ImportError:
-    from success_progress import SuccessProgress
 from multiprocessing import Pool
 from z3 import Solver, Extract, BitVecVal, sat, BitVec, Distinct
 
 try:
+    from .success_progress import SuccessProgress
     from . import z3_avx
     from .bitonic_sorter import BitonicSorter
     from .utils import vector_machine, primitive_type, width_dict
-
 except ImportError:
+    from success_progress import SuccessProgress
     import z3_avx  # type: ignore
     from bitonic_sorter import BitonicSorter
     from utils import vector_machine, primitive_type, width_dict
+
+
+def _all_smt(s, terms, max_results=None):
+    """Enumerate all satisfying models over the given terms.
+
+    Uses the corrected all_smt algorithm from 'Programming Z3'
+    (Z3 issue #5765). Implemented iteratively with an explicit
+    work-stack to avoid hitting Python's recursion limit when a
+    variable has many valid assignments.
+
+    Args:
+        s: Z3 Solver instance.
+        terms: Sequence of Z3 terms to enumerate over.
+        max_results: Optional cap on the number of models returned.
+            When ``None`` (the default) all models are enumerated.
+    """
+    terms = list(terms)
+    count = 0
+
+    # Each stack frame mirrors one call to the recursive algorithm:
+    #   all_smt_rec(terms) would check sat, yield model, then iterate
+    #   over terms[i:] pushing/blocking/fixing.
+    # We represent the work as (terms_slice, model, next_i) where:
+    #   terms_slice: the terms list for this "call"
+    #   model: the model found at this level (None if not yet checked)
+    #   next_i: the next index in the for-loop to process
+    # A sentinel value of model=None means "need to check sat first".
+    stack = [(terms, None, 0)]
+
+    while stack:
+        if max_results is not None and count >= max_results:
+            # Unwind all pushed solver scopes
+            for _ in range(len(stack) - 1):
+                s.pop()
+            break
+
+        cur_terms, model, next_i = stack[-1]
+
+        # First visit to this frame: check satisfiability
+        if model is None:
+            if sat == s.check():
+                model = s.model()
+                count += 1
+                stack[-1] = (cur_terms, model, 0)
+                yield model
+                continue
+            else:
+                # Unsatisfiable — pop this frame
+                stack.pop()
+                if stack:
+                    s.pop()
+                continue
+
+        # Advance the for-loop over terms
+        if next_i >= len(cur_terms):
+            # Done with all sub-partitions at this level
+            stack.pop()
+            if stack:
+                s.pop()
+            continue
+
+        # Process partition i = next_i
+        i = next_i
+        stack[-1] = (cur_terms, model, next_i + 1)
+
+        # Push solver scope and add blocking/fixing constraints
+        s.push()
+        s.add(cur_terms[i] != model.eval(cur_terms[i], model_completion=True))
+        for j in range(i):
+            s.add(cur_terms[j] == model.eval(cur_terms[j], model_completion=True))
+
+        # "Recurse" into all_smt_rec(cur_terms[i:])
+        stack.append((cur_terms[i:], None, 0))
 
 
 @dataclass
@@ -225,6 +292,7 @@ class GadgetSynthesizer:
         bottom_instructions_template: list[InstructionSpec],
         input_state: VectorState,
         target_pairs: list[tuple[int, int]],
+        max_solutions: int | None = None,
     ) -> list[tuple[PermutationGadget, VectorState]]:
         """
         Synthesize gadgets using symbolic immediates in Z3.
@@ -240,6 +308,10 @@ class GadgetSynthesizer:
         state is in canonical form: for each pair, the lower element index goes to
         the top vector and the higher index goes to bottom, reflecting the
         compare-and-exchange operation.
+
+        Args:
+            max_solutions: Optional cap on the number of solutions returned.
+                When ``None`` (the default) all solutions are enumerated.
         """
         solver = Solver()
 
@@ -321,25 +393,64 @@ class GadgetSynthesizer:
         # have the same pair_id, losing elements in the process.
         solver.add(Distinct(*output_lanes))
 
-        # Check if constraints are satisfiable
-        result = solver.check()
-        if result != sat:
-            return []
+        # Collect symbolic variable terms for enumeration
+        terms = list(symbolic_vars.values())
 
-        # Extract concrete values from model
-        model = solver.model()
+        # If no symbolic variables, single check suffices
+        if not terms:
+            result = solver.check()
+            if result != sat:
+                return []
+            model = solver.model()
+            gadget, output_state = self._extract_solution_from_model(
+                model,
+                top_output,
+                bottom_output,
+                pair_id_reverse_map,
+                symbolic_vars,
+                top_instructions_template,
+                bottom_instructions_template,
+            )
+            return [(gadget, output_state)]
 
+        # Enumerate all solutions over symbolic variables
+        results = []
+        for model in _all_smt(solver, terms, max_results=max_solutions):
+            gadget, output_state = self._extract_solution_from_model(
+                model,
+                top_output,
+                bottom_output,
+                pair_id_reverse_map,
+                symbolic_vars,
+                top_instructions_template,
+                bottom_instructions_template,
+            )
+            results.append((gadget, output_state))
+        return results
+
+    def _extract_solution_from_model(
+        self,
+        model,
+        top_output,
+        bottom_output,
+        pair_id_reverse_map: dict[int, tuple[int, int]],
+        symbolic_vars: dict,
+        top_instructions_template: list[InstructionSpec],
+        bottom_instructions_template: list[InstructionSpec],
+    ) -> tuple[PermutationGadget, VectorState]:
+        """Extract a concrete gadget and output state from a Z3 model.
+
+        Reads pair IDs from the symbolic output registers, builds the
+        canonical output state, and concretizes all symbolic variables
+        in the instruction templates using the model's assignments.
+        """
         # Extract pair ordering from output registers to build canonical output state
-        # Using pair_id_reverse_map to convert pair_id -> (low_elem, high_elem)
         output_top = []
         output_bottom = []
         for lane_idx in range(self.elements_per_vector):
             lane_start = lane_idx * self.lane_width
             lane_end = lane_start + self.lane_width - 1
 
-            # Extract the pair_id from the output
-            # top and bottom should have same pair_id since the solver was satified,
-            # so we extract from the top only
             top_lane = Extract(lane_end, lane_start, top_output)
             pair_id_val = model.evaluate(top_lane, model_completion=True)
             pair_id = (
@@ -348,7 +459,6 @@ class GadgetSynthesizer:
                 else pair_id_val
             )
 
-            # Get the element indices for this pair in canonical order
             if pair_id not in pair_id_reverse_map:
                 raise ValueError(
                     f"Invalid pair_id {pair_id} at lane {lane_idx} not found in reverse map"
@@ -367,37 +477,31 @@ class GadgetSynthesizer:
             for inst in instructions:
                 concrete_args = {}
                 for key, value in inst.args.items():
-                    # Check if this is a symbolic variable (Z3 expression)
                     if id(value) in symbolic_vars:
-                        # Check if it's a control vector (256-bit register) or a scalar immediate
                         if hasattr(value, "size") and callable(
                             getattr(value, "size", None)
                         ):
                             bit_size = value.size()
-                            if bit_size == 256:  # Control vector (YMM register)
-                                # Extract the entire 256-bit value
+                            if bit_size == 256:
                                 concrete_bitvec = model.evaluate(
                                     value, model_completion=True
                                 )
-                                # Convert to plain Python long/int for pickling
                                 if hasattr(concrete_bitvec, "as_long"):
                                     concrete_value = concrete_bitvec.as_long()
                                 else:
                                     concrete_value = concrete_bitvec
                                 concrete_args[key] = concrete_value
-                            elif bit_size == 8:  # Immediate (imm8)
+                            elif bit_size == 8:
                                 concrete_value = model.evaluate(
                                     value, model_completion=True
                                 ).as_long()
                                 concrete_args[key] = concrete_value
                             else:
-                                # Unknown size, try to extract as scalar
                                 concrete_value = model.evaluate(
                                     value, model_completion=True
                                 ).as_long()
                                 concrete_args[key] = concrete_value
                         else:
-                            # Fallback: extract as scalar
                             concrete_value = model.evaluate(
                                 value, model_completion=True
                             ).as_long()
@@ -418,7 +522,7 @@ class GadgetSynthesizer:
             validated=True,
         )
 
-        return [(gadget, output_state)]
+        return gadget, output_state
 
     def compute_output_state(
         self, input_state: VectorState, gadget: PermutationGadget
@@ -918,7 +1022,10 @@ class BitonicSuperVectorizer:
         return VectorState(top=top, bottom=bottom)
 
     def build_solution_tree(
-        self, depth_limit: int | None = None, gadget_depth: int = 3
+        self,
+        depth_limit: int | None = None,
+        gadget_depth: int = 3,
+        max_solutions_per_gadget: int | None = None,
     ) -> list[SolutionNode]:
         """
         Recursively explore all stage transitions to build solution tree.
@@ -927,6 +1034,8 @@ class BitonicSuperVectorizer:
         Args:
             depth_limit: Maximum stage depth to explore (inclusive). If None, all stages are explored.
             gadget_depth: Maximum instruction depth per gadget (1-3, default 3).
+            max_solutions_per_gadget: Optional cap on solutions per gadget template.
+                When ``None`` all solutions are enumerated.
         """
         initial_state = self._create_initial_state()
         # Pre-compute all candidates once - they're independent of stage/input state
@@ -934,7 +1043,11 @@ class BitonicSuperVectorizer:
         # Start with empty parent path for the root
         input_states_with_context = [(initial_state, ())]
         nodes_by_path = self._build_tree_recursive(
-            input_states_with_context, 0, depth_limit, all_candidates
+            input_states_with_context,
+            0,
+            depth_limit,
+            all_candidates,
+            max_solutions_per_gadget=max_solutions_per_gadget,
         )
 
         # Return root nodes (those with empty parent path)
@@ -946,6 +1059,7 @@ class BitonicSuperVectorizer:
         stage_idx: int,
         depth_limit: int | None = None,
         all_candidates: list[tuple] | None = None,
+        max_solutions_per_gadget: int | None = None,
     ) -> dict[tuple, list[SolutionNode]]:
         """
         Build solution tree collecting all candidates for entire stage before validation.
@@ -957,6 +1071,7 @@ class BitonicSuperVectorizer:
             depth_limit: Maximum stage depth to explore
             all_candidates: Pre-computed list of (top_seq, bottom_seq) instruction templates,
                            independent of stage/input state
+            max_solutions_per_gadget: Optional cap forwarded to each worker.
 
         Returns:
             Dictionary mapping parent_path to list of SolutionNodes for that path
@@ -982,6 +1097,8 @@ class BitonicSuperVectorizer:
                 "input_state": input_state,
                 "parent_path": parent_path,
             }
+            if max_solutions_per_gadget is not None:
+                metadata["max_solutions"] = max_solutions_per_gadget
 
             # Enrich pre-computed candidates with per-state metadata
             for top_seq, bottom_seq in all_candidates:
@@ -1072,7 +1189,11 @@ class BitonicSuperVectorizer:
         # Phase 4: Recursively process next stage
         if has_next_stage and next_stage_inputs:
             children_by_path = self._build_tree_recursive(
-                next_stage_inputs, stage_idx + 1, depth_limit, all_candidates
+                next_stage_inputs,
+                stage_idx + 1,
+                depth_limit,
+                all_candidates,
+                max_solutions_per_gadget=max_solutions_per_gadget,
             )
 
             # Attach children to their parent nodes
@@ -1085,16 +1206,22 @@ class BitonicSuperVectorizer:
         return nodes_by_parent
 
     def synthesize_all_stages(
-        self, depth_limit: int | None = None, gadget_depth: int = 3
+        self,
+        depth_limit: int | None = None,
+        gadget_depth: int = 3,
+        max_solutions_per_gadget: int | None = None,
     ) -> list[SolutionNode]:
         """Entry point: builds solution tree for all stages.
 
         Args:
             depth_limit: Maximum stage depth to explore (inclusive). If None, all stages are explored.
             gadget_depth: Maximum instruction depth per gadget (1-3, default 3).
+            max_solutions_per_gadget: Optional cap on solutions per gadget template.
         """
         return self.build_solution_tree(
-            depth_limit=depth_limit, gadget_depth=gadget_depth
+            depth_limit=depth_limit,
+            gadget_depth=gadget_depth,
+            max_solutions_per_gadget=max_solutions_per_gadget,
         )
 
     def compute_costs(self, roots: list[SolutionNode], cost_model):
@@ -1176,8 +1303,15 @@ def _validate_gadget_worker(job):
 
     # Create a local synthesizer and synthesis in its own Z3 context
     synthesizer = GadgetSynthesizer(vm, prim_type)
+    # Default to 1 for backward compatibility; callers opt in to more via
+    # build_solution_tree(max_solutions_per_gadget=N).
+    max_solutions = metadata.get("max_solutions", 1)
     gadget_results = synthesizer.synthesize_gadget_with_symbolic(
-        top_seq_clone, bottom_seq_clone, input_state, target_pairs
+        top_seq_clone,
+        bottom_seq_clone,
+        input_state,
+        target_pairs,
+        max_solutions=max_solutions,
     )
 
     return gadget_results, input_state, metadata

@@ -160,24 +160,22 @@ def _format_instruction(
     return asm_line
 
 
-def _find_best_path_through_tree(node) -> list:
+def _collect_all_paths(node, current_path=None) -> list[list]:
     """
-    Find the best (lowest cost) complete path from this node to a leaf.
-    Returns a list of nodes representing the path.
+    Collect all root-to-leaf paths in the tree.
+    Returns a list of paths, where each path is a list of nodes.
     """
-    # Lazy import to avoid circular dependency
-    from bitonic_compiler import _get_min_leaf_cost
+    if current_path is None:
+        current_path = []
+    current_path = current_path + [node]
 
-    path = [node]
-    current = node
+    if not node.children:
+        return [current_path]
 
-    while current.children:
-        # Find the child with the minimum cost path to a leaf
-        best_child = min(current.children, key=_get_min_leaf_cost)
-        path.append(best_child)
-        current = best_child
-
-    return path
+    paths = []
+    for child in node.children:
+        paths.extend(_collect_all_paths(child, current_path))
+    return paths
 
 
 def _format_vector_state_as_comment(state, prefix: str = "") -> str:
@@ -247,7 +245,7 @@ def export_solutions_as_assembly(
         print("; Bitonic Sort Assembly Output")
         print(f"; Architecture: {vm.name}")
         print(f"; Number of vectors: {num_vecs}")
-        print(f"; Total solutions: {len(solutions)}")
+        print(f"; Root solutions: {len(solutions)}")
         print(";")
         print("; Registers:")
         reg_prefix = "ymm" if vm == vector_machine.AVX2 else "zmm"
@@ -258,25 +256,32 @@ def export_solutions_as_assembly(
         print("=" * 80)
         print()
 
-        for i, solution in enumerate(solutions):
-            # Extract the best path through this solution tree
-            best_path = _find_best_path_through_tree(solution)
-            total_cost = sum(node.cost for node in best_path)
+        # Collect all root-to-leaf paths across all roots, sorted by leaf cost
+        all_paths = []
+        for solution in solutions:
+            all_paths.extend(_collect_all_paths(solution))
+        all_paths.sort(key=lambda path: path[-1].cost)
 
-            print(f"; ========== SOLUTION {i + 1} of {len(solutions)} ==========")
-            print(f"; Total cost: {total_cost:.2f}")
+        print(f"; Total paths: {len(all_paths)}")
+        print()
+
+        for i, path in enumerate(all_paths):
+            leaf_cost = path[-1].cost
+
+            print(f"; ========== SOLUTION {i + 1} of {len(all_paths)} ==========")
+            print(f"; Total cost: {leaf_cost:.2f}")
             print()
 
             # Print initial input state (before first stage)
-            if best_path:
+            if path:
                 print("; Initial Input State:")
-                print(_format_vector_state_as_comment(best_path[0].input_state, ""))
+                print(_format_vector_state_as_comment(path[0].input_state, ""))
                 print()
 
             reg_allocator = RegisterAllocator(vm, num_vecs)
 
-            # Print each stage in the best path
-            for node in best_path:
+            # Print each stage in the path
+            for node in path:
                 _print_solution_as_assembly(node, reg_allocator)
 
             print("=" * 80)
