@@ -209,10 +209,6 @@ def _print_solution_as_assembly(
     print(f"{prefix}; Stage {solution_node.stage}")
     print(f"{prefix}; Cost: {solution_node.cost:.2f}")
 
-    # Print input state
-    print(f"{prefix}; Input State:")
-    print(_format_vector_state_as_comment(solution_node.input_state, prefix))
-
     # Get register names
     top_reg = reg_allocator.get_data_reg(0)
     bottom_reg = reg_allocator.get_data_reg(1) if reg_allocator.num_vecs > 1 else None
@@ -237,8 +233,8 @@ def _print_solution_as_assembly(
             asm_line = _format_instruction(inst, reg_allocator, bottom_reg, top_reg)
             print(f"{prefix}{asm_line}")
 
-    # Print output state (input for next stage)
-    print(f"{prefix}; Output State (Input for next stage):")
+    # Print output state
+    print(f"{prefix}; Output State:")
     print(_format_vector_state_as_comment(solution_node.output_state, prefix))
 
     print()
@@ -279,6 +275,12 @@ def export_solutions_as_assembly(
             print(f"; ========== SOLUTION {i + 1} of {len(solutions)} ==========")
             print(f"; Total cost: {total_cost:.2f}")
             print()
+
+            # Print initial input state (before first stage)
+            if best_path:
+                print("; Initial Input State:")
+                print(_format_vector_state_as_comment(best_path[0].input_state, ""))
+                print()
 
             reg_allocator = RegisterAllocator(vm, num_vecs)
 

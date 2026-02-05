@@ -43,8 +43,7 @@ class VectorState:
 
         # Headers are lane indices
         headers = [""] + list(range(max_len))
-        table_str = tabulate(table_data, headers=headers, tablefmt="rounded_outline")
-        return f"\nVectorState:\n{table_str}"
+        return tabulate(table_data, headers=headers, tablefmt="rounded_outline")
 
     def copy(self):
         return VectorState(top=self.top.copy(), bottom=self.bottom.copy())
@@ -936,12 +935,12 @@ class BitonicSuperVectorizer:
             bottom.append(pair[1])
 
         # Verify we have the expected number of elements
-        assert (
-            len(top) == self.elements_per_vector
-        ), f"Expected {self.elements_per_vector} elements in top, got {len(top)}"
-        assert (
-            len(bottom) == self.elements_per_vector
-        ), f"Expected {self.elements_per_vector} elements in bottom, got {len(bottom)}"
+        assert len(top) == self.elements_per_vector, (
+            f"Expected {self.elements_per_vector} elements in top, got {len(top)}"
+        )
+        assert len(bottom) == self.elements_per_vector, (
+            f"Expected {self.elements_per_vector} elements in bottom, got {len(bottom)}"
+        )
 
         return VectorState(top=top, bottom=bottom)
 
