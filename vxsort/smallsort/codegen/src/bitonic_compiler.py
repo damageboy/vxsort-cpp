@@ -29,8 +29,40 @@ def _collect_leaf_paths(node, current_path=None):
             yield from _collect_leaf_paths(child, current_path)
 
 
+def _count_control_vectors_in_path(path):
+    """Count instructions that use YMM/ZMM control vectors instead of immediates.
+
+    Control vector instructions (less preferred):
+    - Use 'op_idx' key (e.g., _mm256_permutexvar_epi32)
+    - Use 'mask' key for variable masks (e.g., _mm256_blendv_ps)
+    - Use 'b' as control in permutevar instructions
+
+    Immediate-based instructions (preferred):
+    - Use 'imm8' key (e.g., _mm256_permute_ps, _mm256_shuffle_ps)
+    """
+    count = 0
+    for node in path:
+        gadget = node.best_gadget()
+        for inst in gadget.top_instructions + gadget.bottom_instructions:
+            # Check if instruction uses a control vector
+            if "op_idx" in inst.args:
+                # permutexvar family - uses control vector
+                count += 1
+            elif "mask" in inst.args and inst.intrinsic_name.endswith("v_ps"):
+                # blendv_ps - uses variable mask (256-bit control)
+                count += 1
+            elif "b" in inst.args and "permutevar" in inst.intrinsic_name:
+                # permutevar_ps - 'b' is control vector
+                count += 1
+    return count
+
+
 def _prune_to_top_k_paths(solutions, top_k):
-    """Keep only the top K cheapest root-to-leaf paths, pruning the rest.
+    """Keep only the top K cheapest root-to-leaf paths, preferring immediate-based instructions.
+
+    Sorts by (cost, control_vector_count) where control_vector_count is the number
+    of instructions requiring YMM/ZMM control inputs. At equal cost, paths with
+    fewer control vector instructions are preferred (immediates are more efficient).
 
     Modifies the tree in place by removing children not on any selected path.
     Returns the filtered list of roots.
@@ -39,7 +71,8 @@ def _prune_to_top_k_paths(solutions, top_k):
     for root in solutions:
         all_paths.extend(_collect_leaf_paths(root))
 
-    all_paths.sort(key=lambda x: x[0])
+    # Sort by (cost, control_vector_count) - prefer fewer control vectors at same cost
+    all_paths.sort(key=lambda x: (x[0], _count_control_vectors_in_path(x[1])))
     selected_paths = all_paths[:top_k]
 
     # Build set of kept edges (parent_id, child_id) and kept root ids
@@ -123,7 +156,7 @@ def generate_bitonic_sorter(
     # Export solutions in the requested format
     if output_format == "asm":
         output_path = f"bitonic_solutions_{num_vecs}x{vm.name}_{type.name}.asm"
-        export_solutions_as_assembly(solutions, num_vecs, vm, output_path)
+        export_solutions_as_assembly(solutions, num_vecs, type, vm, output_path)
     else:  # json
         output_path = f"bitonic_solutions_{num_vecs}x{vm.name}_{type.name}.json"
         super_opt.export_solutions_to_json(solutions, output_path)

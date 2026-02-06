@@ -45,8 +45,8 @@ uv run pytest
 # Run demonstration
 uv run python src/demo_super_vectorizer.py
 
-# Run full synthesis (may take time)
-uv run python src/bitonic_compiler.py
+# Run full synthesis (limited to depth 3 for speed)
+uv run python src/bitonic_compiler.py --depth-limit=3
 ```
 
 ### Current Status

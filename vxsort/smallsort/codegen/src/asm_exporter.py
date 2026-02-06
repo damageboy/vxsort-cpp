@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from utils import vector_machine
+from utils import vector_machine, primitive_type
 from z3_avx import mm_shuffle_str
 
 
@@ -54,8 +54,9 @@ def _intrinsic_to_asm_mnemonic(intrinsic_name: str) -> str:
 class RegisterAllocator:
     """Manages register allocation for assembly output."""
 
-    def __init__(self, vm: vector_machine, num_vecs: int):
+    def __init__(self, vm: vector_machine, dtype: primitive_type, num_vecs: int):
         self.vm = vm
+        self.dtype = dtype
         self.num_vecs = num_vecs
         # Determine register prefix based on architecture
         if vm == vector_machine.AVX2:
@@ -86,6 +87,24 @@ class RegisterAllocator:
         self.temp_regs_allocated = []
 
 
+def _format_control_vector(val: int, vm: vector_machine, dtype: primitive_type) -> str:
+    """Format a 256/512-bit control vector as a list of elements."""
+    from utils import width_dict
+
+    total_bytes = width_dict[vm]
+    total_bits = total_bytes * 8
+    element_bytes = dtype.value[0]
+    element_bits = element_bytes * 8
+    num_lanes = total_bits // element_bits
+
+    elements = []
+    for i in range(num_lanes):
+        element = (val >> (i * element_bits)) & ((1 << element_bits) - 1)
+        elements.append(element)
+
+    return "[" + ", ".join(str(e) for e in elements) + "]"
+
+
 def _format_instruction(
     inst, reg_allocator: RegisterAllocator, dest_reg: str, other_reg: str
 ) -> str:
@@ -104,6 +123,8 @@ def _format_instruction(
     # Build operand list - Intel syntax: dest, src1, [src2], [imm]
     operands = [dest_reg]  # Destination is always first
 
+    ctrl_val = None
+
     # Handle different instruction patterns based on arguments
     if "a" in args and "b" in args:
         # Two-input instruction (shuffle, blend, unpack, etc.)
@@ -113,10 +134,10 @@ def _format_instruction(
         # Check if 'b' is a control vector (not a register name)
         if args["b"] not in ["top", "bottom"]:
             # It's a control vector - allocate a temp register for it
+            ctrl_val = args["b"]
             ctrl_reg = reg_allocator.allocate_temp()
             operands.append(src1)
             operands.append(ctrl_reg)
-            operands.append("; control vector")
         else:
             operands.append(src1)
             operands.append(src2)
@@ -127,10 +148,10 @@ def _format_instruction(
         # Check for control/index operand
         if "op_idx" in args:
             # Variable permute with control vector
+            ctrl_val = args["op_idx"]
             ctrl_reg = reg_allocator.allocate_temp()
             operands.append(ctrl_reg)
             operands.append(src)
-            operands.append("; control vector")
         else:
             operands.append(src)
     elif "input" in args:
@@ -139,12 +160,12 @@ def _format_instruction(
         operands.append(src)
 
     # Add immediate values at the end
-    imm8_comment = None
+    comment = None
     if "imm8" in args:
         imm_val = args["imm8"]
         if isinstance(imm_val, int):
             operands.append(f"0x{imm_val:02x}")
-            imm8_comment = mm_shuffle_str(imm_val)
+            comment = mm_shuffle_str(imm_val)
         else:
             operands.append(f"<{imm_val}>")  # Symbolic value
     elif "imm" in args:
@@ -153,10 +174,27 @@ def _format_instruction(
             operands.append(f"0x{imm_val:x}")
         else:
             operands.append(f"<{imm_val}>")  # Symbolic value
+    elif "mask" in args:
+        mask_val = args["mask"]
+        if isinstance(mask_val, int):
+            if mask_val > 0xFF:
+                # 256/512-bit mask for blendv
+                ctrl_val = mask_val
+                ctrl_reg = reg_allocator.allocate_temp()
+                operands.append(ctrl_reg)
+            else:
+                operands.append(f"0x{mask_val:02x}")
+        else:
+            operands.append(f"<{mask_val}>")
+
+    if ctrl_val is not None:
+        comment = _format_control_vector(
+            ctrl_val, reg_allocator.vm, reg_allocator.dtype
+        )
 
     asm_line = f"    {mnemonic:20s} {', '.join(operands)}"
-    if imm8_comment:
-        asm_line += f"  ; {imm8_comment}"
+    if comment:
+        asm_line += f"  ; {comment}"
     return asm_line
 
 
@@ -231,7 +269,11 @@ def _print_solution_as_assembly(
 
 
 def export_solutions_as_assembly(
-    solutions, num_vecs: int, vm: vector_machine, output_path: str
+    solutions,
+    num_vecs: int,
+    dtype: primitive_type,
+    vm: vector_machine,
+    output_path: str,
 ):
     """Export solutions as readable assembly code."""
     # Lazy import to avoid circular dependency
@@ -244,6 +286,7 @@ def export_solutions_as_assembly(
 
         print("; Bitonic Sort Assembly Output")
         print(f"; Architecture: {vm.name}")
+        print(f"; Data Type: {dtype.name}")
         print(f"; Number of vectors: {num_vecs}")
         print(f"; Root solutions: {len(solutions)}")
         print(";")
@@ -278,7 +321,7 @@ def export_solutions_as_assembly(
                 print(_format_vector_state_as_comment(path[0].input_state, ""))
                 print()
 
-            reg_allocator = RegisterAllocator(vm, num_vecs)
+            reg_allocator = RegisterAllocator(vm, dtype, num_vecs)
 
             # Print each stage in the path
             for node in path:
