@@ -5,6 +5,7 @@ from z3.z3 import (
     BitVec,
     BitVecVal,
     Solver,
+    Context,
     Extract,
     Concat,
     If,
@@ -14,16 +15,21 @@ from z3.z3 import (
 zero = 0
 
 
-def ymm_reg(name: str):
-    return BitVec(name, 32 * 8)
+def ymm_reg(name: str, ctx: Context):
+    return BitVec(name, 32 * 8, ctx=ctx)
 
 
-def zmm_reg(name: str):
-    return BitVec(name, 64 * 8)
+def zmm_reg(name: str, ctx: Context):
+    return BitVec(name, 64 * 8, ctx=ctx)
 
 
 def reg_with_values(
-    name: str, s: Solver, raw_values, element_bits: int, total_bits: int
+    name: str,
+    s: Solver,
+    raw_values,
+    element_bits: int,
+    total_bits: int,
+    ctx: Context,
 ):
     lanes = total_bits // element_bits
     assert len(raw_values) == lanes, (
@@ -31,32 +37,34 @@ def reg_with_values(
     )
 
     # Create BitVec elements for each lane
-    bv_elements = [BitVec(f"{name}_l_{i:02}", element_bits) for i in range(lanes)]
+    bv_elements = [
+        BitVec(f"{name}_l_{i:02}", element_bits, ctx=ctx) for i in range(lanes)
+    ]
 
     # Add constraints for each element
     for i, raw_value in enumerate(raw_values):
-        s.add(bv_elements[i] == BitVecVal(raw_value, element_bits))
+        s.add(bv_elements[i] == BitVecVal(raw_value, element_bits, ctx=ctx))
 
     return simplify(Concat(bv_elements[::-1]))
 
 
-def ymm_reg_with_32b_values(name: str, s: Solver, raw_values):
-    return reg_with_values(name, s, raw_values, 32, 256)
+def ymm_reg_with_32b_values(name: str, s: Solver, raw_values=None, *, ctx: Context):
+    return reg_with_values(name, s, raw_values, 32, 256, ctx=ctx)
 
 
-def zmm_reg_with_32b_values(name: str, s: Solver, raw_values):
-    return reg_with_values(name, s, raw_values, 32, 512)
+def zmm_reg_with_32b_values(name: str, s: Solver, raw_values=None, *, ctx: Context):
+    return reg_with_values(name, s, raw_values, 32, 512, ctx=ctx)
 
 
-def ymm_reg_with_64b_values(name: str, s: Solver, raw_values):
-    return reg_with_values(name, s, raw_values, 64, 256)
+def ymm_reg_with_64b_values(name: str, s: Solver, raw_values=None, *, ctx: Context):
+    return reg_with_values(name, s, raw_values, 64, 256, ctx=ctx)
 
 
-def zmm_reg_with_64b_values(name: str, s: Solver, raw_values):
-    return reg_with_values(name, s, raw_values, 64, 512)
+def zmm_reg_with_64b_values(name: str, s: Solver, raw_values=None, *, ctx: Context):
+    return reg_with_values(name, s, raw_values, 64, 512, ctx=ctx)
 
 
-def _reg_with_unique_values(name: str, s: Solver, lanes: int, bits: int):
+def _reg_with_unique_values(name: str, s: Solver, lanes: int, bits: int, ctx: Context):
     """
     Create a register with given number of lanes and element width, ensuring each lane is unique.
     """
@@ -66,9 +74,9 @@ def _reg_with_unique_values(name: str, s: Solver, lanes: int, bits: int):
 
     # Create a new register
     if lanes * bits == 256:
-        reg = ymm_reg(name)
+        reg = ymm_reg(name, ctx=ctx)
     else:
-        reg = zmm_reg(name)
+        reg = zmm_reg(name, ctx=ctx)
 
     elems = [Extract(bits * (i + 1) - 1, bits * i, reg) for i in range(lanes)]
     for i in range(lanes):
@@ -77,20 +85,26 @@ def _reg_with_unique_values(name: str, s: Solver, lanes: int, bits: int):
     return reg
 
 
-def ymm_reg_with_unique_values(name: str, s: Solver, bits: int):
+def ymm_reg_with_unique_values(name: str, s: Solver, bits: int = 32, *, ctx: Context):
     lanes = 256 // bits
-    return _reg_with_unique_values(name, s, lanes=lanes, bits=bits)
+    return _reg_with_unique_values(name, s, lanes=lanes, bits=bits, ctx=ctx)
 
 
-def zmm_reg_with_unique_values(name: str, s: Solver, bits: int):
+def zmm_reg_with_unique_values(name: str, s: Solver, bits: int = 32, *, ctx: Context):
     lanes = 512 // bits
-    return _reg_with_unique_values(name, s, lanes=lanes, bits=bits)
+    return _reg_with_unique_values(name, s, lanes=lanes, bits=bits, ctx=ctx)
 
 
-def ymm_reg_pair_with_unique_values(name_prefix: str, s: Solver, bits: int):
+def ymm_reg_pair_with_unique_values(
+    name_prefix: str,
+    s: Solver,
+    bits: int = 32,
+    *,
+    ctx: Context,
+):
     # Create two registers with internal uniqueness
-    reg1 = ymm_reg_with_unique_values(f"{name_prefix}1", s, bits)
-    reg2 = ymm_reg_with_unique_values(f"{name_prefix}2", s, bits)
+    reg1 = ymm_reg_with_unique_values(f"{name_prefix}1", s, bits, ctx=ctx)
+    reg2 = ymm_reg_with_unique_values(f"{name_prefix}2", s, bits, ctx=ctx)
 
     # Extract all elements from both registers
     lanes = 256 // bits
@@ -105,10 +119,16 @@ def ymm_reg_pair_with_unique_values(name_prefix: str, s: Solver, bits: int):
     return reg1, reg2
 
 
-def zmm_reg_pair_with_unique_values(name_prefix: str, s: Solver, bits: int):
+def zmm_reg_pair_with_unique_values(
+    name_prefix: str,
+    s: Solver,
+    bits: int = 32,
+    *,
+    ctx: Context,
+):
     # Create two registers with internal uniqueness
-    reg1 = zmm_reg_with_unique_values(f"{name_prefix}1", s, bits)
-    reg2 = zmm_reg_with_unique_values(f"{name_prefix}2", s, bits)
+    reg1 = zmm_reg_with_unique_values(f"{name_prefix}1", s, bits, ctx=ctx)
+    reg2 = zmm_reg_with_unique_values(f"{name_prefix}2", s, bits, ctx=ctx)
 
     # Extract all elements from both registers
     lanes = 512 // bits
@@ -157,16 +177,23 @@ def construct_zmm_reg_from_elements(bits: int, element_specs: ElementSpecs):
     return construct_reg_from_elements(bits, element_specs, 512)
 
 
-def _reg_reversed(name: str, s: Solver, original_reg, lanes: int, bits: int):
+def _reg_reversed(
+    name: str,
+    s: Solver,
+    original_reg,
+    lanes: int,
+    bits: int,
+    ctx: Context,
+):
     assert lanes * bits == 256 or lanes * bits == 512, (
         "Total register size can only be 256 or 512 bits"
     )
 
     # Create a new register
     if lanes * bits == 256:
-        reversed_reg = ymm_reg(name)
+        reversed_reg = ymm_reg(name, ctx=ctx)
     else:
-        reversed_reg = zmm_reg(name)
+        reversed_reg = zmm_reg(name, ctx=ctx)
 
     # Extract elements from both registers
     orig_elems = [
@@ -183,20 +210,16 @@ def _reg_reversed(name: str, s: Solver, original_reg, lanes: int, bits: int):
     return reversed_reg
 
 
-def ymm_reg_reversed(name, s, original_reg, bits):
+def ymm_reg_reversed(name, s, original_reg, bits, *, ctx):
     """Create a YMM register that is the reverse of the original register through constraints."""
     lanes = 256 // bits
-    return _reg_reversed(name, s, original_reg, lanes, bits)
+    return _reg_reversed(name, s, original_reg, lanes, bits, ctx=ctx)
 
 
-def zmm_reg_reversed(name, s, original_reg, bits):
+def zmm_reg_reversed(name, s, original_reg, bits, *, ctx):
     """Create a ZMM register that is the reverse of the original register through constraints."""
     lanes = 512 // bits
-    return _reg_reversed(name, s, original_reg, lanes, bits)
-
-
-ymm_regs = [ymm_reg(f"ymm{i}") for i in range(16)]
-zmm_regs = [zmm_reg(f"zmm{i}") for i in range(32)]
+    return _reg_reversed(name, s, original_reg, lanes, bits, ctx=ctx)
 
 
 def to_num(v):

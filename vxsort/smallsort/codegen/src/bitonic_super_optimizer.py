@@ -3,7 +3,7 @@ import copy
 from dataclasses import dataclass
 from tabulate import tabulate
 from multiprocessing import Pool
-from z3 import Solver, Extract, BitVecVal, sat, BitVec, Distinct
+from z3 import Solver, Context, main_ctx, Extract, BitVecVal, sat, BitVec, Distinct
 
 try:
     from .success_progress import SuccessProgress
@@ -248,7 +248,11 @@ class GadgetSynthesizer:
         return pair_id_map, pair_id_reverse_map
 
     def _create_input_registers_with_pair_ids(
-        self, solver: Solver, input_state: VectorState, pair_id_map: dict[int, int]
+        self,
+        solver: Solver,
+        ctx: Context,
+        input_state: VectorState,
+        pair_id_map: dict[int, int],
     ) -> tuple:
         """
         Create Z3 symbolic registers with pair IDs as values.
@@ -256,11 +260,11 @@ class GadgetSynthesizer:
         """
         # Create registers based on VM type
         if self.vm == vector_machine.AVX2:
-            top_reg = z3_avx.ymm_reg("top_input")
-            bottom_reg = z3_avx.ymm_reg("bottom_input")
+            top_reg = z3_avx.ymm_reg("top_input", ctx=ctx)
+            bottom_reg = z3_avx.ymm_reg("bottom_input", ctx=ctx)
         elif self.vm == vector_machine.AVX512:
-            top_reg = z3_avx.zmm_reg("top_input")
-            bottom_reg = z3_avx.zmm_reg("bottom_input")
+            top_reg = z3_avx.zmm_reg("top_input", ctx=ctx)
+            bottom_reg = z3_avx.zmm_reg("bottom_input", ctx=ctx)
         else:
             raise NotImplementedError(
                 f"Register creation not implemented for VM: {self.vm}"
@@ -281,8 +285,10 @@ class GadgetSynthesizer:
             top_lane = Extract(lane_end, lane_start, top_reg)
             bottom_lane = Extract(lane_end, lane_start, bottom_reg)
 
-            solver.add(top_lane == BitVecVal(top_pair_id, self.lane_width))
-            solver.add(bottom_lane == BitVecVal(bottom_pair_id, self.lane_width))
+            solver.add(top_lane == BitVecVal(top_pair_id, self.lane_width, ctx=ctx))
+            solver.add(
+                bottom_lane == BitVecVal(bottom_pair_id, self.lane_width, ctx=ctx)
+            )
 
         return top_reg, bottom_reg
 
@@ -313,7 +319,8 @@ class GadgetSynthesizer:
             max_solutions: Optional cap on the number of solutions returned.
                 When ``None`` (the default) all solutions are enumerated.
         """
-        solver = Solver()
+        ctx = main_ctx()
+        solver = Solver(ctx=ctx)
 
         # Create pair_id mappings:
         # - pair_id_map: element index -> pair_id
@@ -322,7 +329,7 @@ class GadgetSynthesizer:
 
         # Create input registers with pair IDs
         top_reg, bottom_reg = self._create_input_registers_with_pair_ids(
-            solver, input_state, pair_id_map
+            solver, ctx, input_state, pair_id_map
         )
 
         # Collect all symbolic variables from instruction templates and resolve them
@@ -339,13 +346,13 @@ class GadgetSynthesizer:
                 for key, value in inst.args.items():
                     if isinstance(value, SymbolicPlaceholder):
                         if value.size == 8:
-                            actual_val = BitVec(value.name, 8)
+                            actual_val = BitVec(value.name, 8, ctx=ctx)
                         elif value.size == 256:
-                            actual_val = z3_avx.ymm_reg(value.name)
+                            actual_val = z3_avx.ymm_reg(value.name, ctx=ctx)
                         elif value.size == 512:
-                            actual_val = z3_avx.zmm_reg(value.name)
+                            actual_val = z3_avx.zmm_reg(value.name, ctx=ctx)
                         else:
-                            actual_val = BitVec(value.name, value.size)
+                            actual_val = BitVec(value.name, value.size, ctx=ctx)
 
                         inst.args[key] = actual_val
                         symbolic_vars[id(actual_val)] = actual_val
@@ -539,15 +546,16 @@ class GadgetSynthesizer:
         Returns:
             Output state with new element positions
         """
-        solver = Solver()
+        ctx = main_ctx()
+        solver = Solver(ctx=ctx)
 
         # Create input registers where each lane contains the element index
         if self.vm == vector_machine.AVX2:
-            top_reg = z3_avx.ymm_reg("top_input")
-            bottom_reg = z3_avx.ymm_reg("bottom_input")
+            top_reg = z3_avx.ymm_reg("top_input", ctx=ctx)
+            bottom_reg = z3_avx.ymm_reg("bottom_input", ctx=ctx)
         elif self.vm == vector_machine.AVX512:
-            top_reg = z3_avx.zmm_reg("top_input")
-            bottom_reg = z3_avx.zmm_reg("bottom_input")
+            top_reg = z3_avx.zmm_reg("top_input", ctx=ctx)
+            bottom_reg = z3_avx.zmm_reg("bottom_input", ctx=ctx)
         else:
             raise NotImplementedError(
                 f"Register creation not implemented for VM: {self.vm}"
@@ -564,8 +572,8 @@ class GadgetSynthesizer:
             top_lane = Extract(lane_end, lane_start, top_reg)
             bottom_lane = Extract(lane_end, lane_start, bottom_reg)
 
-            solver.add(top_lane == BitVecVal(top_elem, self.lane_width))
-            solver.add(bottom_lane == BitVecVal(bottom_elem, self.lane_width))
+            solver.add(top_lane == BitVecVal(top_elem, self.lane_width, ctx=ctx))
+            solver.add(bottom_lane == BitVecVal(bottom_elem, self.lane_width, ctx=ctx))
 
         # Apply gadget instructions
         top_output = self._apply_instructions(

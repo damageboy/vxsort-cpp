@@ -1,4 +1,4 @@
-from z3 import Solver, unsat, sat, BitVec, BitVecVal, Concat, Extract
+from z3 import Solver, main_ctx, unsat, sat, BitVec, BitVecVal, Concat, Extract
 
 # Assuming your z3s functions and registers are importable, e.g.:
 from z3_avx import _MM_SHUFFLE, _MM_SHUFFLE2, decode_shuffle_mask, mm_shuffle_str
@@ -125,8 +125,9 @@ class TestPermutePs:
     """Tests for _mm256_permute_ps and _mm512_permute_ps (permute_epi32)"""
 
     def test_mm256_permute_epi32_null_permute_works(self):
-        s = Solver()
-        input = ymm_reg("ymm0")
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = ymm_reg("ymm0", ctx=ctx)
         output_vector = _mm256_permute_ps(input, null_permute_epi32_imm8)
 
         s.add(input != output_vector)
@@ -136,9 +137,10 @@ class TestPermutePs:
         )
 
     def test_mm256_permute_epi32_null_permute_found(self):
-        s = Solver()
-        input = ymm_reg_with_unique_values("ymm0", s, bits=32)
-        imm8 = BitVec("imm8", 8)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = ymm_reg_with_unique_values("ymm0", s, bits=32, ctx=ctx)
+        imm8 = BitVec("imm8", 8, ctx=ctx)
         output = _mm256_permute_ps(input, imm8)
 
         s.add(input == output)
@@ -151,9 +153,10 @@ class TestPermutePs:
         )
 
     def test_mm512_permute_epi32_null_permute(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        input = zmm_reg("zmm0")
+        input = zmm_reg("zmm0", ctx=ctx)
         output = _mm512_permute_ps(input, null_permute_epi32_imm8)
 
         s.add(input != output)
@@ -163,9 +166,10 @@ class TestPermutePs:
         )
 
     def test_mm512_permute_epi32_null_permute_found(self):
-        s = Solver()
-        input = zmm_reg_with_unique_values("zmm0", s, bits=32)
-        imm8 = BitVec("imm8", 8)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = zmm_reg_with_unique_values("zmm0", s, bits=32, ctx=ctx)
+        imm8 = BitVec("imm8", 8, ctx=ctx)
         output = _mm512_permute_ps(input, imm8)
 
         s.add(input == output)
@@ -182,8 +186,9 @@ class TestPermutePd:
     """Tests for _mm256_permute_pd and _mm512_permute_pd (permute_epi64)"""
 
     def test_mm256_permute_epi64_null_permute_works(self):
-        s = Solver()
-        input = ymm_reg("ymm0")
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = ymm_reg("ymm0", ctx=ctx)
         output = _mm256_permute_pd(input, null_permute_pd_imm8)
 
         s.add(input != output)
@@ -193,9 +198,10 @@ class TestPermutePd:
         )
 
     def test_mm256_permute_epi64_null_permute_found(self):
-        s = Solver()
-        input = ymm_reg_with_unique_values("ymm0", s, bits=64)
-        imm8 = BitVec("imm8", 8)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = ymm_reg_with_unique_values("ymm0", s, bits=64, ctx=ctx)
+        imm8 = BitVec("imm8", 8, ctx=ctx)
         output = _mm256_permute_pd(input, imm8)
 
         s.add(input == output)
@@ -208,9 +214,10 @@ class TestPermutePd:
         )
 
     def test_mm512_permute_epi64_null_permute_works(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        input = zmm_reg("zmm0")
+        input = zmm_reg("zmm0", ctx=ctx)
         output = _mm512_permute_pd(input, null_permute_pd_imm8)
 
         s.add(input != output)
@@ -220,9 +227,10 @@ class TestPermutePd:
         )
 
     def test_mm512_permute_epi64_null_permute_found(self):
-        s = Solver()
-        input = zmm_reg_with_unique_values("zmm0", s, bits=64)
-        imm8 = BitVec("imm8", 8)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = zmm_reg_with_unique_values("zmm0", s, bits=64, ctx=ctx)
+        imm8 = BitVec("imm8", 8, ctx=ctx)
         output = _mm512_permute_pd(input, imm8)
 
         s.add(input == output)
@@ -239,9 +247,12 @@ class TestPermutexvarEpi32:
     """Tests for _mm256_permutexvar_epi32 and _mm512_permutexvar_epi32"""
 
     def test_mm256_permutexvar_epi32_null_permute_works(self):
-        s = Solver()
-        input = ymm_reg("ymm0")
-        indices = ymm_reg_with_32b_values("indices", s, null_permute_vector_epi32_avx2)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = ymm_reg("ymm0", ctx=ctx)
+        indices = ymm_reg_with_32b_values(
+            "indices", s, null_permute_vector_epi32_avx2, ctx=ctx
+        )
         output = _mm256_permutexvar_epi32(input, indices)
 
         s.add(input != output)
@@ -252,9 +263,10 @@ class TestPermutexvarEpi32:
         )
 
     def test_mm256_permutexvar_epi32_null_permute_found(self):
-        s = Solver()
-        input = ymm_reg_with_unique_values("ymm0", s, bits=32)
-        indices = ymm_reg("indices")
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = ymm_reg_with_unique_values("ymm0", s, bits=32, ctx=ctx)
+        indices = ymm_reg("indices", ctx=ctx)
         output = _mm256_permutexvar_epi32(input, indices)
 
         s.add(input == output)
@@ -268,12 +280,13 @@ class TestPermutexvarEpi32:
         )
 
     def test_mm256_permutexvar_epi32_reverse_permute_found(self):
-        s = Solver()
-        input = ymm_reg_with_unique_values("ymm0", s, bits=32)
-        indices = ymm_reg("indices")
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = ymm_reg_with_unique_values("ymm0", s, bits=32, ctx=ctx)
+        indices = ymm_reg("indices", ctx=ctx)
         output = _mm256_permutexvar_epi32(input, indices)
 
-        reversed_input = ymm_reg_reversed("ymm_reversed", s, input, bits=32)
+        reversed_input = ymm_reg_reversed("ymm_reversed", s, input, bits=32, ctx=ctx)
 
         s.add(output == reversed_input)
         result = s.check()
@@ -286,10 +299,14 @@ class TestPermutexvarEpi32:
         )
 
     def test_mm512_permutexvar_epi32_null_permute_works(self):
-        s = Solver()
-        input = zmm_reg("zmm0")
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = zmm_reg("zmm0", ctx=ctx)
         indicew = zmm_reg_with_32b_values(
-            "indices", s, null_permute_vector_epi32_avx512
+            "indices",
+            s,
+            null_permute_vector_epi32_avx512,
+            ctx=ctx,
         )
         output = _mm512_permutexvar_epi32(input, indicew)
 
@@ -303,9 +320,10 @@ class TestPermutexvarEpi32:
         )
 
     def test_mm512_permutexvar_epi32_null_permute_found(self):
-        s = Solver()
-        input = zmm_reg_with_unique_values("zmm0", s, bits=32)
-        indices = zmm_reg("indices")
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = zmm_reg_with_unique_values("zmm0", s, bits=32, ctx=ctx)
+        indices = zmm_reg("indices", ctx=ctx)
         output = _mm512_permutexvar_epi32(input, indices)
 
         # Assert that the output equals the input (seeking identity permutation)
@@ -320,13 +338,14 @@ class TestPermutexvarEpi32:
         )
 
     def test_mm512_permutexvar_epi32_reverse_permute_found(self):
-        s = Solver()
-        input = zmm_reg_with_unique_values("zmm0", s, bits=32)
-        indices = zmm_reg("indices")
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = zmm_reg_with_unique_values("zmm0", s, bits=32, ctx=ctx)
+        indices = zmm_reg("indices", ctx=ctx)
         output = _mm512_permutexvar_epi32(input, indices)
 
         # Create reversed input using constraints
-        reversed_input = zmm_reg_reversed("zmm_reversed", s, input, bits=32)
+        reversed_input = zmm_reg_reversed("zmm_reversed", s, input, bits=32, ctx=ctx)
 
         # Assert that the output equals the reversed input (seeking reverse permutation)
         s.add(output == reversed_input)
@@ -344,9 +363,12 @@ class TestPermutexvarEpi64:
     """Tests for _mm256_permutexvar_epi64 and _mm512_permutexvar_epi64"""
 
     def test_mm256_permutexvar_epi64_null_permute_works(self):
-        s = Solver()
-        input = ymm_reg("ymm0")
-        indices = ymm_reg_with_64b_values("indices", s, null_permute_vector_epi64_avx2)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = ymm_reg("ymm0", ctx=ctx)
+        indices = ymm_reg_with_64b_values(
+            "indices", s, null_permute_vector_epi64_avx2, ctx=ctx
+        )
         output = _mm256_permutexvar_epi64(input, indices)
 
         s.add(input != output)
@@ -356,9 +378,10 @@ class TestPermutexvarEpi64:
         )
 
     def test_mm256_permutexvar_epi64_null_permute_found(self):
-        s = Solver()
-        input = ymm_reg_with_unique_values("ymm0", s, bits=64)
-        indices = ymm_reg("indices")
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = ymm_reg_with_unique_values("ymm0", s, bits=64, ctx=ctx)
+        indices = ymm_reg("indices", ctx=ctx)
         output = _mm256_permutexvar_epi64(input, indices)
 
         s.add(input == output)
@@ -372,12 +395,13 @@ class TestPermutexvarEpi64:
         )
 
     def test_mm256_permutexvar_epi64_reverse_permute_found(self):
-        s = Solver()
-        input = ymm_reg_with_unique_values("ymm0", s, bits=64)
-        indices = ymm_reg("indices")
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = ymm_reg_with_unique_values("ymm0", s, bits=64, ctx=ctx)
+        indices = ymm_reg("indices", ctx=ctx)
         output = _mm256_permutexvar_epi64(input, indices)
 
-        reversed_input = ymm_reg_reversed("ymm_reversed", s, input, bits=64)
+        reversed_input = ymm_reg_reversed("ymm_reversed", s, input, bits=64, ctx=ctx)
 
         s.add(output == reversed_input)
         result = s.check()
@@ -390,10 +414,14 @@ class TestPermutexvarEpi64:
         )
 
     def test_mm512_permutexvar_epi64_null_permute_works(self):
-        s = Solver()
-        input = zmm_reg("zmm0")
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = zmm_reg("zmm0", ctx=ctx)
         indices = zmm_reg_with_64b_values(
-            "indices", s, null_permute_vector_epi64_avx512
+            "indices",
+            s,
+            null_permute_vector_epi64_avx512,
+            ctx=ctx,
         )
         output = _mm512_permutexvar_epi64(input, indices)
 
@@ -404,9 +432,10 @@ class TestPermutexvarEpi64:
         )
 
     def test_mm512_permutexvar_epi64_null_permute_found(self):
-        s = Solver()
-        input = zmm_reg_with_64b_values("zmm0", s, [i + 1 for i in range(8)])
-        indices = zmm_reg("indices")
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = zmm_reg_with_64b_values("zmm0", s, [i + 1 for i in range(8)], ctx=ctx)
+        indices = zmm_reg("indices", ctx=ctx)
         output = _mm512_permutexvar_epi64(input, indices)
 
         s.add(input == output)
@@ -420,12 +449,13 @@ class TestPermutexvarEpi64:
         )
 
     def test_mm512_permutexvar_epi64_reverse_permute_found(self):
-        s = Solver()
-        input = zmm_reg_with_64b_values("zmm0", s, [i + 1 for i in range(8)])
-        indices = zmm_reg("indices")
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = zmm_reg_with_64b_values("zmm0", s, [i + 1 for i in range(8)], ctx=ctx)
+        indices = zmm_reg("indices", ctx=ctx)
         output = _mm512_permutexvar_epi64(input, indices)
 
-        reversed_input = zmm_reg_reversed("zmm_reversed", s, input, bits=64)
+        reversed_input = zmm_reg_reversed("zmm_reversed", s, input, bits=64, ctx=ctx)
 
         s.add(output == reversed_input)
         result = s.check()
@@ -443,14 +473,18 @@ class TestMaskPermutexvarEpi32:
 
     def test_mm512_mask_permutexvar_epi32_mask_all_zeros(self):
         """Test with mask all zeros (should preserve src)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=32)
-        a = zmm_reg_with_unique_values("a", s, bits=32)
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
         indices = zmm_reg_with_32b_values(
-            "indices", s, null_permute_vector_epi32_avx512
+            "indices",
+            s,
+            null_permute_vector_epi32_avx512,
+            ctx=ctx,
         )
-        mask = BitVecVal(0, 16)  # All mask bits are 0
+        mask = BitVecVal(0, 16, ctx=ctx)  # All mask bits are 0
 
         output = _mm512_mask_permutexvar_epi32(src, mask, indices, a)
 
@@ -462,14 +496,18 @@ class TestMaskPermutexvarEpi32:
 
     def test_mm512_mask_permutexvar_epi32_mask_all_ones(self):
         """Test with mask all ones (should equal unmasked operation)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=32)
-        a = zmm_reg_with_unique_values("a", s, bits=32)
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
         indices = zmm_reg_with_32b_values(
-            "indices", s, null_permute_vector_epi32_avx512
+            "indices",
+            s,
+            null_permute_vector_epi32_avx512,
+            ctx=ctx,
         )
-        mask = BitVecVal(0xFFFF, 16)  # All mask bits are 1
+        mask = BitVecVal(0xFFFF, 16, ctx=ctx)  # All mask bits are 1
 
         masked_output = _mm512_mask_permutexvar_epi32(src, mask, indices, a)
         unmasked_output = _mm512_permutexvar_epi32(a, indices)
@@ -482,14 +520,18 @@ class TestMaskPermutexvarEpi32:
 
     def test_mm512_mask_permutexvar_epi32_alternating_mask(self):
         """Test with alternating mask pattern"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=32)
-        a = zmm_reg_with_unique_values("a", s, bits=32)
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
         indices = zmm_reg_with_32b_values(
-            "indices", s, reverse_permute_vector_epi32_avx512
+            "indices",
+            s,
+            reverse_permute_vector_epi32_avx512,
+            ctx=ctx,
         )
-        mask = BitVecVal(0x5555, 16)  # Alternating: 0101010101010101
+        mask = BitVecVal(0x5555, 16, ctx=ctx)  # Alternating: 0101010101010101
 
         output = _mm512_mask_permutexvar_epi32(src, mask, indices, a)
         unmasked = _mm512_permutexvar_epi32(a, indices)
@@ -512,14 +554,18 @@ class TestMaskPermutexvarEpi32:
 
     def test_mm512_mask_permutexvar_epi32_single_bit_mask(self):
         """Test with only one bit set in mask"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=32)
-        a = zmm_reg_with_unique_values("a", s, bits=32)
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
         indices = zmm_reg_with_32b_values(
-            "indices", s, reverse_permute_vector_epi32_avx512
+            "indices",
+            s,
+            reverse_permute_vector_epi32_avx512,
+            ctx=ctx,
         )
-        mask = BitVecVal(1 << 7, 16)  # Only bit 7 is set
+        mask = BitVecVal(1 << 7, 16, ctx=ctx)  # Only bit 7 is set
 
         output = _mm512_mask_permutexvar_epi32(src, mask, indices, a)
         unmasked = _mm512_permutexvar_epi32(a, indices)
@@ -542,18 +588,22 @@ class TestMaskPermutexvarEpi32:
 
     def test_mm512_mask_permutexvar_epi32_partial_mask(self):
         """Test with lower half masked"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=32)
-        a = zmm_reg_with_unique_values("a", s, bits=32)
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
         indices = zmm_reg_with_32b_values(
-            "indices", s, reverse_permute_vector_epi32_avx512
+            "indices",
+            s,
+            reverse_permute_vector_epi32_avx512,
+            ctx=ctx,
         )
-        mask = BitVecVal(0x00FF, 16)  # Lower 8 bits set
+        mask = BitVecVal(0x00FF, 16, ctx=ctx)  # Lower 8 bits set
 
         output = _mm512_mask_permutexvar_epi32(src, mask, indices, a)
 
-        reversed_a = zmm_reg_reversed("a_reversed", s, a, bits=32)
+        reversed_a = zmm_reg_reversed("a_reversed", s, a, bits=32, ctx=ctx)
 
         # Expected: reversed a in positions 0-7, src in positions 8-15
         expected_specs = []
@@ -573,14 +623,18 @@ class TestMaskPermutexvarEpi32:
 
     def test_mm512_mask_permutexvar_epi32_find_mask_for_identity(self):
         """Test that Z3 can find mask to preserve src (mask all zeros)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=32)
-        a = zmm_reg_with_unique_values("a", s, bits=32)
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
         indices = zmm_reg_with_32b_values(
-            "indices", s, reverse_permute_vector_epi32_avx512
+            "indices",
+            s,
+            reverse_permute_vector_epi32_avx512,
+            ctx=ctx,
         )
-        mask = BitVec("mask", 16)
+        mask = BitVec("mask", 16, ctx=ctx)
 
         output = _mm512_mask_permutexvar_epi32(src, mask, indices, a)
 
@@ -595,14 +649,18 @@ class TestMaskPermutexvarEpi32:
 
     def test_mm512_mask_permutexvar_epi32_find_mask_for_full_permute(self):
         """Test that Z3 can find mask for full permutation (mask all ones)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=32)
-        a = zmm_reg_with_unique_values("a", s, bits=32)
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
         indices = zmm_reg_with_32b_values(
-            "indices", s, null_permute_vector_epi32_avx512
+            "indices",
+            s,
+            null_permute_vector_epi32_avx512,
+            ctx=ctx,
         )
-        mask = BitVec("mask", 16)
+        mask = BitVec("mask", 16, ctx=ctx)
 
         output = _mm512_mask_permutexvar_epi32(src, mask, indices, a)
 
@@ -621,14 +679,18 @@ class TestMaskPermutexvarEpi64:
 
     def test_mm512_mask_permutexvar_epi64_mask_all_zeros(self):
         """Test with mask all zeros (should preserve src)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=64)
-        a = zmm_reg_with_unique_values("a", s, bits=64)
+        src = zmm_reg_with_unique_values("src", s, bits=64, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=64, ctx=ctx)
         indices = zmm_reg_with_64b_values(
-            "indices", s, null_permute_vector_epi64_avx512
+            "indices",
+            s,
+            null_permute_vector_epi64_avx512,
+            ctx=ctx,
         )
-        mask = BitVecVal(0, 8)  # All mask bits are 0
+        mask = BitVecVal(0, 8, ctx=ctx)  # All mask bits are 0
 
         output = _mm512_mask_permutexvar_epi64(src, mask, indices, a)
 
@@ -640,14 +702,18 @@ class TestMaskPermutexvarEpi64:
 
     def test_mm512_mask_permutexvar_epi64_mask_all_ones(self):
         """Test with mask all ones (should equal unmasked operation)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=64)
-        a = zmm_reg_with_unique_values("a", s, bits=64)
+        src = zmm_reg_with_unique_values("src", s, bits=64, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=64, ctx=ctx)
         indices = zmm_reg_with_64b_values(
-            "indices", s, null_permute_vector_epi64_avx512
+            "indices",
+            s,
+            null_permute_vector_epi64_avx512,
+            ctx=ctx,
         )
-        mask = BitVecVal(0xFF, 8)  # All mask bits are 1
+        mask = BitVecVal(0xFF, 8, ctx=ctx)  # All mask bits are 1
 
         masked_output = _mm512_mask_permutexvar_epi64(src, mask, indices, a)
         unmasked_output = _mm512_permutexvar_epi64(a, indices)
@@ -660,14 +726,18 @@ class TestMaskPermutexvarEpi64:
 
     def test_mm512_mask_permutexvar_epi64_alternating_mask(self):
         """Test with alternating mask pattern"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=64)
-        a = zmm_reg_with_unique_values("a", s, bits=64)
+        src = zmm_reg_with_unique_values("src", s, bits=64, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=64, ctx=ctx)
         indices = zmm_reg_with_64b_values(
-            "indices", s, reverse_permute_vector_epi64_avx512
+            "indices",
+            s,
+            reverse_permute_vector_epi64_avx512,
+            ctx=ctx,
         )
-        mask = BitVecVal(0x55, 8)  # Alternating: 01010101
+        mask = BitVecVal(0x55, 8, ctx=ctx)  # Alternating: 01010101
 
         output = _mm512_mask_permutexvar_epi64(src, mask, indices, a)
         unmasked = _mm512_permutexvar_epi64(a, indices)
@@ -690,14 +760,18 @@ class TestMaskPermutexvarEpi64:
 
     def test_mm512_mask_permutexvar_epi64_single_bit_mask(self):
         """Test with only one bit set in mask"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=64)
-        a = zmm_reg_with_unique_values("a", s, bits=64)
+        src = zmm_reg_with_unique_values("src", s, bits=64, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=64, ctx=ctx)
         indices = zmm_reg_with_64b_values(
-            "indices", s, reverse_permute_vector_epi64_avx512
+            "indices",
+            s,
+            reverse_permute_vector_epi64_avx512,
+            ctx=ctx,
         )
-        mask = BitVecVal(1 << 3, 8)  # Only bit 3 is set
+        mask = BitVecVal(1 << 3, 8, ctx=ctx)  # Only bit 3 is set
 
         output = _mm512_mask_permutexvar_epi64(src, mask, indices, a)
         unmasked = _mm512_permutexvar_epi64(a, indices)
@@ -720,18 +794,22 @@ class TestMaskPermutexvarEpi64:
 
     def test_mm512_mask_permutexvar_epi64_partial_mask(self):
         """Test with lower half masked"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=64)
-        a = zmm_reg_with_unique_values("a", s, bits=64)
+        src = zmm_reg_with_unique_values("src", s, bits=64, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=64, ctx=ctx)
         indices = zmm_reg_with_64b_values(
-            "indices", s, reverse_permute_vector_epi64_avx512
+            "indices",
+            s,
+            reverse_permute_vector_epi64_avx512,
+            ctx=ctx,
         )
-        mask = BitVecVal(0x0F, 8)  # Lower 4 bits set
+        mask = BitVecVal(0x0F, 8, ctx=ctx)  # Lower 4 bits set
 
         output = _mm512_mask_permutexvar_epi64(src, mask, indices, a)
 
-        reversed_a = zmm_reg_reversed("a_reversed", s, a, bits=64)
+        reversed_a = zmm_reg_reversed("a_reversed", s, a, bits=64, ctx=ctx)
 
         # Expected: reversed a in positions 0-3, src in positions 4-7
         expected_specs = []
@@ -751,14 +829,18 @@ class TestMaskPermutexvarEpi64:
 
     def test_mm512_mask_permutexvar_epi64_find_mask_for_identity(self):
         """Test that Z3 can find mask to preserve src (mask all zeros)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=64)
-        a = zmm_reg_with_unique_values("a", s, bits=64)
+        src = zmm_reg_with_unique_values("src", s, bits=64, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=64, ctx=ctx)
         indices = zmm_reg_with_64b_values(
-            "indices", s, reverse_permute_vector_epi64_avx512
+            "indices",
+            s,
+            reverse_permute_vector_epi64_avx512,
+            ctx=ctx,
         )
-        mask = BitVec("mask", 8)
+        mask = BitVec("mask", 8, ctx=ctx)
 
         output = _mm512_mask_permutexvar_epi64(src, mask, indices, a)
 
@@ -773,14 +855,18 @@ class TestMaskPermutexvarEpi64:
 
     def test_mm512_mask_permutexvar_epi64_find_mask_for_full_permute(self):
         """Test that Z3 can find mask for full permutation (mask all ones)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=64)
-        a = zmm_reg_with_unique_values("a", s, bits=64)
+        src = zmm_reg_with_unique_values("src", s, bits=64, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=64, ctx=ctx)
         indices = zmm_reg_with_64b_values(
-            "indices", s, null_permute_vector_epi64_avx512
+            "indices",
+            s,
+            null_permute_vector_epi64_avx512,
+            ctx=ctx,
         )
-        mask = BitVec("mask", 8)
+        mask = BitVec("mask", 8, ctx=ctx)
 
         output = _mm512_mask_permutexvar_epi64(src, mask, indices, a)
 
@@ -795,16 +881,23 @@ class TestMaskPermutexvarEpi64:
 
     def test_mm512_mask_permutexvar_epi64_find_indices_and_mask(self):
         """Test that Z3 can find both indices and mask to achieve a specific pattern"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
         src = zmm_reg_with_64b_values(
-            "src", s, [0x100, 0x101, 0x102, 0x103, 0x104, 0x105, 0x106, 0x107]
+            "src",
+            s,
+            [0x100, 0x101, 0x102, 0x103, 0x104, 0x105, 0x106, 0x107],
+            ctx=ctx,
         )
         a = zmm_reg_with_64b_values(
-            "a", s, [0x200, 0x201, 0x202, 0x203, 0x204, 0x205, 0x206, 0x207]
+            "a",
+            s,
+            [0x200, 0x201, 0x202, 0x203, 0x204, 0x205, 0x206, 0x207],
+            ctx=ctx,
         )
-        indices = zmm_reg("indices")
-        mask = BitVec("mask", 8)
+        indices = zmm_reg("indices", ctx=ctx)
+        mask = BitVec("mask", 8, ctx=ctx)
 
         output = _mm512_mask_permutexvar_epi64(src, mask, indices, a)
 
@@ -830,11 +923,15 @@ class TestPermutex2varEpi32:
     """Tests for _mm512_permutex2var_epi32 (512-bit only)"""
 
     def test_mm512_permutex2var_epi32_null_permute_works(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
         indices = zmm_reg_with_32b_values(
-            "indices", s, null_permutex2var_vector_epi32_avx512
+            "indices",
+            s,
+            null_permutex2var_vector_epi32_avx512,
+            ctx=ctx,
         )
         output = _mm512_permutex2var_epi32(a, indices, b)
 
@@ -846,10 +943,11 @@ class TestPermutex2varEpi32:
         )
 
     def test_mm512_permutex2var_epi32_null_permute_found(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
-        indices = zmm_reg("indices")
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
+        indices = zmm_reg("indices", ctx=ctx)
         output = _mm512_permutex2var_epi32(a, indices, b)
         s.add(a == output)
         result = s.check()
@@ -862,12 +960,13 @@ class TestPermutex2varEpi32:
         )
 
     def test_mm512_permutex2var_epi32_select_from_b(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
 
         select_b_indices = [(1 << 4) | i for i in range(16)]
-        indices = zmm_reg_with_32b_values("indices", s, select_b_indices)
+        indices = zmm_reg_with_32b_values("indices", s, select_b_indices, ctx=ctx)
         output = _mm512_permutex2var_epi32(a, indices, b)
 
         s.add(b != output)
@@ -877,16 +976,17 @@ class TestPermutex2varEpi32:
         )
 
     def test_mm512_permutex2var_epi32_reverse_permute_from_a(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
         reverse_a_indices = [(0 << 4) | (15 - i) for i in range(16)]
-        indices = zmm_reg_with_32b_values("indices", s, reverse_a_indices)
+        indices = zmm_reg_with_32b_values("indices", s, reverse_a_indices, ctx=ctx)
 
         output = _mm512_permutex2var_epi32(a, indices, b)
 
         # Create reversed input using constraints
-        reversed_a = zmm_reg_reversed("a_reversed", s, a, bits=32)
+        reversed_a = zmm_reg_reversed("a_reversed", s, a, bits=32, ctx=ctx)
 
         # Assert that the output is NOT equal to the reversed source a
         # If this is unsatisfiable, it means the output MUST equal the reversed source a
@@ -897,9 +997,10 @@ class TestPermutex2varEpi32:
         )
 
     def test_mm512_permutex2var_epi32_mixed_sources(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
         mixed_indices = []
         for i in range(16):
             if i % 2 == 0:
@@ -909,7 +1010,7 @@ class TestPermutex2varEpi32:
                 # Odd position: select from source b
                 mixed_indices.append((1 << 4) | i)
 
-        indices = zmm_reg_with_32b_values("indices", s, mixed_indices)
+        indices = zmm_reg_with_32b_values("indices", s, mixed_indices, ctx=ctx)
         output = _mm512_permutex2var_epi32(a, indices, b)
 
         expected_specs = []
@@ -936,11 +1037,15 @@ class TestPermutex2varEpi64:
     """Tests for _mm512_permutex2var_epi64 (512-bit only)"""
 
     def test_mm512_permutex2var_epi64_null_permute_works(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
         indices = zmm_reg_with_64b_values(
-            "indices", s, null_permutex2var_vector_epi64_avx512
+            "indices",
+            s,
+            null_permutex2var_vector_epi64_avx512,
+            ctx=ctx,
         )
         output = _mm512_permutex2var_epi64(a, indices, b)
         s.add(a != output)
@@ -950,10 +1055,11 @@ class TestPermutex2varEpi64:
         )
 
     def test_mm512_permutex2var_epi64_null_permute_found(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
-        indices = zmm_reg("indices")
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
+        indices = zmm_reg("indices", ctx=ctx)
         output = _mm512_permutex2var_epi64(a, indices, b)
         s.add(a == output)
         result = s.check()
@@ -966,12 +1072,13 @@ class TestPermutex2varEpi64:
         )
 
     def test_mm512_permutex2var_epi64_select_from_b(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
 
         select_b_indices = [(1 << 3) | i for i in range(8)]
-        indices = zmm_reg_with_64b_values("indices", s, select_b_indices)
+        indices = zmm_reg_with_64b_values("indices", s, select_b_indices, ctx=ctx)
         output = _mm512_permutex2var_epi64(a, indices, b)
         s.add(b != output)
         result = s.check()
@@ -980,16 +1087,17 @@ class TestPermutex2varEpi64:
         )
 
     def test_mm512_permutex2var_epi64_reverse_permute_from_a(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
 
         reverse_a_indices = [(0 << 3) | (7 - i) for i in range(8)]
-        indices = zmm_reg_with_64b_values("indices", s, reverse_a_indices)
+        indices = zmm_reg_with_64b_values("indices", s, reverse_a_indices, ctx=ctx)
 
         output = _mm512_permutex2var_epi64(a, indices, b)
 
-        reversed_a = zmm_reg_reversed("a_reversed", s, a, bits=64)
+        reversed_a = zmm_reg_reversed("a_reversed", s, a, bits=64, ctx=ctx)
 
         s.add(reversed_a != output)
         result = s.check()
@@ -998,9 +1106,10 @@ class TestPermutex2varEpi64:
         )
 
     def test_mm512_permutex2var_epi64_mixed_sources(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
 
         mixed_indices = []
         for i in range(8):
@@ -1009,7 +1118,7 @@ class TestPermutex2varEpi64:
             else:
                 mixed_indices.append((1 << 3) | i)
 
-        indices = zmm_reg_with_64b_values("indices", s, mixed_indices)
+        indices = zmm_reg_with_64b_values("indices", s, mixed_indices, ctx=ctx)
         output = _mm512_permutex2var_epi64(a, indices, b)
 
         expected_specs = []
@@ -1032,9 +1141,10 @@ class TestShufflePs:
     """Tests for _mm256_shuffle_ps and _mm512_shuffle_ps"""
 
     def test_mm256_shuffle_ps_null_permute_works(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        input = ymm_reg("ymm0")
+        input = ymm_reg("ymm0", ctx=ctx)
         output = _mm256_shuffle_ps(input, input, null_shuffle_ps_imm8)
 
         s.add(output != input)
@@ -1044,10 +1154,11 @@ class TestShufflePs:
         )
 
     def test_mm256_shuffle_ps_null_permute_found(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        input = ymm_reg_with_unique_values("ymm0", s, bits=32)
-        imm8 = BitVec("imm8", 8)
+        input = ymm_reg_with_unique_values("ymm0", s, bits=32, ctx=ctx)
+        imm8 = BitVec("imm8", 8, ctx=ctx)
         output = _mm256_shuffle_ps(input, input, imm8)
 
         s.add(output == input)
@@ -1060,9 +1171,10 @@ class TestShufflePs:
         )
 
     def test_mm256_shuffle_ps_null_permute_2vec_works(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        op1, op2 = ymm_reg_pair_with_unique_values("op", s, bits=32)
+        op1, op2 = ymm_reg_pair_with_unique_values("op", s, bits=32, ctx=ctx)
 
         output = _mm256_shuffle_ps(op1, op2, null_shuffle_ps_2vec_imm8)
 
@@ -1087,11 +1199,12 @@ class TestShufflePs:
         )
 
     def test_mm256_shuffle_ps_null_permute_2vec_found(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        op1, op2 = ymm_reg_pair_with_unique_values("op", s, bits=32)
+        op1, op2 = ymm_reg_pair_with_unique_values("op", s, bits=32, ctx=ctx)
 
-        imm8 = BitVec("imm8", 8)
+        imm8 = BitVec("imm8", 8, ctx=ctx)
         output = _mm256_shuffle_ps(op1, op2, imm8)
 
         expected = construct_ymm_reg_from_elements(
@@ -1118,9 +1231,10 @@ class TestShufflePs:
         )
 
     def test_mm512_shuffle_ps_null_permute_works(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        input_vector = zmm_reg("zmm0")
+        input_vector = zmm_reg("zmm0", ctx=ctx)
         output_vector = _mm512_shuffle_ps(
             input_vector, input_vector, null_shuffle_ps_2vec_imm8
         )
@@ -1154,10 +1268,11 @@ class TestShufflePs:
         )
 
     def test_mm512_shuffle_ps_null_permute_found(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        input = zmm_reg_with_unique_values("zmm0", s, bits=32)
-        imm8 = BitVec("imm8", 8)
+        input = zmm_reg_with_unique_values("zmm0", s, bits=32, ctx=ctx)
+        imm8 = BitVec("imm8", 8, ctx=ctx)
         output = _mm512_shuffle_ps(input, input, imm8)
 
         expected = construct_zmm_reg_from_elements(
@@ -1192,9 +1307,10 @@ class TestShufflePs:
         )
 
     def test_mm512_shuffle_ps_null_permute_2vec_works(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        op1, op2 = zmm_reg_pair_with_unique_values("op", s, bits=32)
+        op1, op2 = zmm_reg_pair_with_unique_values("op", s, bits=32, ctx=ctx)
 
         output = _mm512_shuffle_ps(op1, op2, null_shuffle_ps_2vec_imm8)
 
@@ -1227,11 +1343,12 @@ class TestShufflePs:
         )
 
     def test_mm512_shuffle_ps_null_permute_2vec_found(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        op1, op2 = zmm_reg_pair_with_unique_values("op", s, bits=32)
+        op1, op2 = zmm_reg_pair_with_unique_values("op", s, bits=32, ctx=ctx)
 
-        imm8 = BitVec("imm8", 8)
+        imm8 = BitVec("imm8", 8, ctx=ctx)
         output = _mm512_shuffle_ps(op1, op2, imm8)
 
         expected = construct_zmm_reg_from_elements(
@@ -1278,10 +1395,11 @@ class TestShufflePs:
         2. Target output: [2, 6, 3, 7, 10, 14, 11, 15]
         """
         # First target: [1, 5, 4, 8, 9, 13, 12, 16]
-        s1 = Solver()
-        op1, op2 = ymm_reg_pair_with_unique_values("vec", s1, bits=32)
+        ctx = main_ctx()
+        s1 = Solver(ctx=ctx)
+        op1, op2 = ymm_reg_pair_with_unique_values("vec", s1, bits=32, ctx=ctx)
 
-        imm8_1 = BitVec("imm8_1", 8)
+        imm8_1 = BitVec("imm8_1", 8, ctx=ctx)
         out1 = _mm256_shuffle_ps(op1, op2, imm8_1)
 
         exp1 = construct_ymm_reg_from_elements(
@@ -1308,10 +1426,11 @@ class TestShufflePs:
         )
 
         # Second target: [2, 6, 3, 7, 10, 14, 11, 15]
-        s2 = Solver()
-        op1, op2 = ymm_reg_pair_with_unique_values("vec", s2, bits=32)
+        ctx = main_ctx()
+        s2 = Solver(ctx=ctx)
+        op1, op2 = ymm_reg_pair_with_unique_values("vec", s2, bits=32, ctx=ctx)
 
-        imm8_2 = BitVec("imm8_2", 8)
+        imm8_2 = BitVec("imm8_2", 8, ctx=ctx)
         out2 = _mm256_shuffle_ps(op1, op2, imm8_2)
 
         exp2 = construct_ymm_reg_from_elements(
@@ -1350,13 +1469,14 @@ class TestShufflePs:
         2. Target output: [2, 6, 3, 7, 10, 14, 11, 15]
         """
         # First target: [1, 5, 4, 8, 9, 13, 12, 16]
-        s1 = Solver()
-        op1 = ymm_reg_with_32b_values("op1", s1, [1, 2, 5, 6, 9, 10, 13, 14])
-        op2 = ymm_reg_with_32b_values("op2", s1, [4, 3, 8, 7, 12, 11, 16, 15])
+        ctx = main_ctx()
+        s1 = Solver(ctx=ctx)
+        op1 = ymm_reg_with_32b_values("op1", s1, [1, 2, 5, 6, 9, 10, 13, 14], ctx=ctx)
+        op2 = ymm_reg_with_32b_values("op2", s1, [4, 3, 8, 7, 12, 11, 16, 15], ctx=ctx)
 
-        imm8_1 = BitVec("imm8_1", 8)
+        imm8_1 = BitVec("imm8_1", 8, ctx=ctx)
         out1 = _mm256_shuffle_ps(op1, op2, imm8_1)
-        exp1 = ymm_reg_with_32b_values("exp1", s1, [1, 5, 4, 8, 9, 13, 12, 16])
+        exp1 = ymm_reg_with_32b_values("exp1", s1, [1, 5, 4, 8, 9, 13, 12, 16], ctx=ctx)
 
         s1.add(out1 == exp1)
         res1 = s1.check()
@@ -1368,13 +1488,16 @@ class TestShufflePs:
         )
 
         # Second target: [2, 6, 3, 7, 10, 14, 11, 15]
-        s2 = Solver()
-        op1 = ymm_reg_with_32b_values("op1", s2, [1, 2, 5, 6, 9, 10, 13, 14])
-        op2 = ymm_reg_with_32b_values("op2", s2, [4, 3, 8, 7, 12, 11, 16, 15])
+        ctx = main_ctx()
+        s2 = Solver(ctx=ctx)
+        op1 = ymm_reg_with_32b_values("op1", s2, [1, 2, 5, 6, 9, 10, 13, 14], ctx=ctx)
+        op2 = ymm_reg_with_32b_values("op2", s2, [4, 3, 8, 7, 12, 11, 16, 15], ctx=ctx)
 
-        imm8_2 = BitVec("imm8_2", 8)
+        imm8_2 = BitVec("imm8_2", 8, ctx=ctx)
         out2 = _mm256_shuffle_ps(op1, op2, imm8_2)
-        exp2 = ymm_reg_with_32b_values("exp2", s2, [2, 6, 3, 7, 10, 14, 11, 15])
+        exp2 = ymm_reg_with_32b_values(
+            "exp2", s2, [2, 6, 3, 7, 10, 14, 11, 15], ctx=ctx
+        )
 
         s2.add(out2 == exp2)
         res2 = s2.check()
@@ -1390,9 +1513,10 @@ class TestShufflePd:
     """Tests for _mm256_shuffle_pd and _mm512_shuffle_pd"""
 
     def test_mm256_shuffle_pd_null_permute_works(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        input = ymm_reg("ymm0")
+        input = ymm_reg("ymm0", ctx=ctx)
         output_vector = _mm256_shuffle_pd(input, input, null_shuffle_pd_avx2_imm8)
         s.add(output_vector != input)
         result = s.check()
@@ -1401,10 +1525,11 @@ class TestShufflePd:
         )
 
     def test_mm256_shuffle_pd_null_permute_found(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        input = ymm_reg_with_unique_values("ymm0", s, bits=64)
-        imm8 = BitVec("imm8", 8)
+        input = ymm_reg_with_unique_values("ymm0", s, bits=64, ctx=ctx)
+        imm8 = BitVec("imm8", 8, ctx=ctx)
         output = _mm256_shuffle_pd(input, input, imm8)
 
         s.add(output == input)
@@ -1417,9 +1542,10 @@ class TestShufflePd:
         )
 
     def test_mm256_shuffle_pd_null_permute_2vec_works(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        op1, op2 = ymm_reg_pair_with_unique_values("op", s, bits=64)
+        op1, op2 = ymm_reg_pair_with_unique_values("op", s, bits=64, ctx=ctx)
         output = _mm256_shuffle_pd(op1, op2, null_shuffle_pd_avx2_imm8)
         expected = construct_ymm_reg_from_elements(
             64, [(op1, 0), (op2, 1), (op1, 2), (op2, 3)]
@@ -1432,10 +1558,11 @@ class TestShufflePd:
         )
 
     def test_mm256_shuffle_pd_null_permute_2vec_found(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        op1, op2 = ymm_reg_pair_with_unique_values("op", s, bits=64)
-        imm8 = BitVec("imm8", 8)
+        op1, op2 = ymm_reg_pair_with_unique_values("op", s, bits=64, ctx=ctx)
+        imm8 = BitVec("imm8", 8, ctx=ctx)
         output = _mm256_shuffle_pd(op1, op2, imm8)
         expected = construct_ymm_reg_from_elements(
             64, [(op1, 0), (op2, 1), (op1, 2), (op2, 3)]
@@ -1451,9 +1578,10 @@ class TestShufflePd:
         )
 
     def test_mm512_shuffle_pd_null_permute_works(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        input = zmm_reg("zmm0")
+        input = zmm_reg("zmm0", ctx=ctx)
         output_vector = _mm512_shuffle_pd(input, input, null_shuffle_pd_avx512_imm8)
 
         s.add(output_vector != input)
@@ -1463,10 +1591,11 @@ class TestShufflePd:
         )
 
     def test_mm512_shuffle_pd_null_permute_found(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        input = zmm_reg_with_unique_values("zmm0", s, bits=64)
-        imm8 = BitVec("imm8", 8)
+        input = zmm_reg_with_unique_values("zmm0", s, bits=64, ctx=ctx)
+        imm8 = BitVec("imm8", 8, ctx=ctx)
         output = _mm512_shuffle_pd(input, input, imm8)
 
         s.add(output == input)
@@ -1479,9 +1608,10 @@ class TestShufflePd:
         )
 
     def test_mm512_shuffle_pd_null_permute_2vec_works(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        op1, op2 = zmm_reg_pair_with_unique_values("op", s, bits=64)
+        op1, op2 = zmm_reg_pair_with_unique_values("op", s, bits=64, ctx=ctx)
 
         output = _mm512_shuffle_pd(op1, op2, null_shuffle_pd_avx512_imm8)
 
@@ -1506,11 +1636,12 @@ class TestShufflePd:
         )
 
     def test_mm512_shuffle_pd_null_permute_2vec_found(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        op1, op2 = zmm_reg_pair_with_unique_values("op", s, bits=64)
+        op1, op2 = zmm_reg_pair_with_unique_values("op", s, bits=64, ctx=ctx)
 
-        imm8 = BitVec("imm8", 8)
+        imm8 = BitVec("imm8", 8, ctx=ctx)
         output = _mm512_shuffle_pd(op1, op2, imm8)
 
         expected = construct_zmm_reg_from_elements(
@@ -1541,9 +1672,10 @@ class TestPermute2x128Si256:
     """Tests for _mm256_permute2x128_si256 (256-bit only)"""
 
     def test_mm256_permute2x128_si256_null_permute_works(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        input_vector = ymm_reg("ymm0")
+        input_vector = ymm_reg("ymm0", ctx=ctx)
         output_vector = _mm256_permute2x128_si256(
             input_vector, input_vector, null_permute2x128_imm8
         )
@@ -1555,10 +1687,11 @@ class TestPermute2x128Si256:
         )
 
     def test_mm256_permute2x128_si256_null_permute_found(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        input_vector = ymm_reg_with_unique_values("ymm0", s, bits=128)
-        imm8 = BitVec("imm8", 8)
+        input_vector = ymm_reg_with_unique_values("ymm0", s, bits=128, ctx=ctx)
+        imm8 = BitVec("imm8", 8, ctx=ctx)
         output = _mm256_permute2x128_si256(input_vector, input_vector, imm8)
 
         s.add((imm8 & 0x88) == 0)  # No zero flags set
@@ -1580,9 +1713,10 @@ class TestPermute2x128Si256:
         )
 
     def test_mm256_permute2x128_si256_null_permute_2vec_works(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        op1, op2 = ymm_reg_pair_with_unique_values("op", s, bits=128)
+        op1, op2 = ymm_reg_pair_with_unique_values("op", s, bits=128, ctx=ctx)
 
         output = _mm256_permute2x128_si256(op1, op2, null_permute2x128_imm8)
 
@@ -1601,11 +1735,12 @@ class TestPermute2x128Si256:
         )
 
     def test_mm256_permute2x128_si256_null_permute_2vec_found(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        op1, op2 = ymm_reg_pair_with_unique_values("op", s, bits=128)
+        op1, op2 = ymm_reg_pair_with_unique_values("op", s, bits=128, ctx=ctx)
 
-        imm8 = BitVec("imm8", 8)
+        imm8 = BitVec("imm8", 8, ctx=ctx)
         output = _mm256_permute2x128_si256(op1, op2, imm8)
 
         s.add((imm8 & 0x88) == 0)  # No zero flags set
@@ -1628,9 +1763,10 @@ class TestPermute2x128Si256:
         )
 
     def test_mm256_permute2x128_si256_swap_lanes(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        input_vector = ymm_reg_with_unique_values("ymm0", s, bits=128)
+        input_vector = ymm_reg_with_unique_values("ymm0", s, bits=128, ctx=ctx)
 
         swap_imm8 = 0x01
         output = _mm256_permute2x128_si256(input_vector, input_vector, swap_imm8)
@@ -1650,9 +1786,10 @@ class TestPermute2x128Si256:
         )
 
     def test_mm256_permute2x128_si256_cross_vector(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = ymm_reg_pair_with_unique_values("input", s, bits=128)
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=128, ctx=ctx)
 
         cross_imm8 = 0x23
         output = _mm256_permute2x128_si256(a, b, cross_imm8)
@@ -1672,15 +1809,16 @@ class TestPermute2x128Si256:
         )
 
     def test_mm256_permute2x128_si256_zero_lanes(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        input_vector = ymm_reg_with_unique_values("ymm0", s, bits=128)
+        input_vector = ymm_reg_with_unique_values("ymm0", s, bits=128, ctx=ctx)
 
         zero_high_imm8 = 0x80
         output = _mm256_permute2x128_si256(input_vector, input_vector, zero_high_imm8)
 
         low_lane = Extract(127, 0, input_vector)
-        high_lane = BitVecVal(0, 128)
+        high_lane = BitVecVal(0, 128, ctx=ctx)
         expected = Concat(high_lane, low_lane)
 
         s.add(output != expected)
@@ -1690,14 +1828,15 @@ class TestPermute2x128Si256:
         )
 
     def test_mm256_permute2x128_si256_zero_both_lanes(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        input_vector = ymm_reg("ymm0")
+        input_vector = ymm_reg("ymm0", ctx=ctx)
 
         zero_both_imm8 = 0x88
         output = _mm256_permute2x128_si256(input_vector, input_vector, zero_both_imm8)
 
-        expected = BitVecVal(0, 256)
+        expected = BitVecVal(0, 256, ctx=ctx)
 
         s.add(output != expected)
         result = s.check()
@@ -1710,9 +1849,10 @@ class TestShuffleI32x4:
     """Tests for _mm512_shuffle_i32x4 (512-bit only)"""
 
     def test_mm512_shuffle_i32x4_null_permute_works(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        input_vector = zmm_reg("zmm0")
+        input_vector = zmm_reg("zmm0", ctx=ctx)
         output_vector = _mm512_shuffle_i32x4(
             input_vector, input_vector, null_shuffle_i32x4_imm8
         )
@@ -1724,10 +1864,11 @@ class TestShuffleI32x4:
         )
 
     def test_mm512_shuffle_i32x4_null_permute_found(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        input_vector = zmm_reg_with_unique_values("zmm0", s, bits=128)
-        imm8 = BitVec("imm8", 8)
+        input_vector = zmm_reg_with_unique_values("zmm0", s, bits=128, ctx=ctx)
+        imm8 = BitVec("imm8", 8, ctx=ctx)
         output = _mm512_shuffle_i32x4(input_vector, input_vector, imm8)
 
         s.add(input_vector == output)
@@ -1740,9 +1881,10 @@ class TestShuffleI32x4:
         )
 
     def test_mm512_shuffle_i32x4_null_permute_2vec_works(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        op1, op2 = zmm_reg_pair_with_unique_values("op", s, bits=128)
+        op1, op2 = zmm_reg_pair_with_unique_values("op", s, bits=128, ctx=ctx)
 
         output = _mm512_shuffle_i32x4(op1, op2, null_shuffle_i32x4_imm8)
 
@@ -1763,11 +1905,12 @@ class TestShuffleI32x4:
         )
 
     def test_mm512_shuffle_i32x4_null_permute_2vec_found(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        op1, op2 = zmm_reg_pair_with_unique_values("op", s, bits=128)
+        op1, op2 = zmm_reg_pair_with_unique_values("op", s, bits=128, ctx=ctx)
 
-        imm8 = BitVec("imm8", 8)
+        imm8 = BitVec("imm8", 8, ctx=ctx)
         output = _mm512_shuffle_i32x4(op1, op2, imm8)
 
         expected = construct_zmm_reg_from_elements(
@@ -1790,9 +1933,10 @@ class TestShuffleI32x4:
         )
 
     def test_mm512_shuffle_i32x4_cross_lanes(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=128)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=128, ctx=ctx)
 
         cross_imm8 = _MM_SHUFFLE(0, 1, 2, 3)
         output = _mm512_shuffle_i32x4(a, b, cross_imm8)
@@ -1818,13 +1962,17 @@ class TestMaskPermutex2varEpi32:
     """Tests for _mm512_mask_permutex2var_ps (512-bit only)"""
 
     def test_mm512_mask_permutex2var_epi32_mask_all_zeros(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
         indices = zmm_reg_with_32b_values(
-            "indices", s, null_permutex2var_vector_epi32_avx512
+            "indices",
+            s,
+            null_permutex2var_vector_epi32_avx512,
+            ctx=ctx,
         )
-        mask = BitVecVal(0, 16)
+        mask = BitVecVal(0, 16, ctx=ctx)
         output = _mm512_mask_permutex2var_epi32(a, mask, indices, b)
 
         s.add(a != output)
@@ -1834,13 +1982,17 @@ class TestMaskPermutex2varEpi32:
         )
 
     def test_mm512_mask_permutex2var_epi32_mask_all_ones(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
         indices = zmm_reg_with_32b_values(
-            "indices", s, null_permutex2var_vector_epi32_avx512
+            "indices",
+            s,
+            null_permutex2var_vector_epi32_avx512,
+            ctx=ctx,
         )
-        mask = BitVecVal(0xFFFF, 16)
+        mask = BitVecVal(0xFFFF, 16, ctx=ctx)
 
         masked_output = _mm512_mask_permutex2var_epi32(a, mask, indices, b)
         unmasked_output = _mm512_permutex2var_epi32(a, indices, b)
@@ -1852,12 +2004,13 @@ class TestMaskPermutex2varEpi32:
         )
 
     def test_mm512_mask_permutex2var_epi32_alternating_mask(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
         select_b_indices = [(1 << 4) | i for i in range(16)]
-        indices = zmm_reg_with_32b_values("indices", s, select_b_indices)
-        mask = BitVecVal(0x5555, 16)
+        indices = zmm_reg_with_32b_values("indices", s, select_b_indices, ctx=ctx)
+        mask = BitVecVal(0x5555, 16, ctx=ctx)
 
         output = _mm512_mask_permutex2var_epi32(a, mask, indices, b)
 
@@ -1873,12 +2026,13 @@ class TestMaskPermutex2varEpi32:
         )
 
     def test_mm512_mask_permutex2var_epi32_reverse_with_partial_mask(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
         reverse_a_indices = [(0 << 4) | (15 - i) for i in range(16)]
-        indices = zmm_reg_with_32b_values("indices", s, reverse_a_indices)
-        mask = BitVecVal(0x00FF, 16)
+        indices = zmm_reg_with_32b_values("indices", s, reverse_a_indices, ctx=ctx)
+        mask = BitVecVal(0x00FF, 16, ctx=ctx)
 
         output = _mm512_mask_permutex2var_epi32(a, mask, indices, b)
 
@@ -1898,9 +2052,10 @@ class TestMaskPermutex2varEpi32:
         )
 
     def test_mm512_mask_permutex2var_epi32_mixed_sources_with_mask(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
         mixed_indices = []
         for i in range(16):
             if i % 2 == 0:
@@ -1908,8 +2063,8 @@ class TestMaskPermutex2varEpi32:
             else:
                 mixed_indices.append((1 << 4) | i)
 
-        indices = zmm_reg_with_32b_values("indices", s, mixed_indices)
-        mask = BitVecVal(0x5555, 16)
+        indices = zmm_reg_with_32b_values("indices", s, mixed_indices, ctx=ctx)
+        mask = BitVecVal(0x5555, 16, ctx=ctx)
         output = _mm512_mask_permutex2var_epi32(a, mask, indices, b)
 
         expected_specs = [(a, i) for i in range(16)]
@@ -1922,11 +2077,12 @@ class TestMaskPermutex2varEpi32:
         )
 
     def test_mm512_mask_permutex2var_epi32_single_bit_mask(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
-        indices = zmm_reg_with_32b_values("indices", s, [(1 << 4) | 10] * 16)
-        mask = BitVecVal(1 << 5, 16)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
+        indices = zmm_reg_with_32b_values("indices", s, [(1 << 4) | 10] * 16, ctx=ctx)
+        mask = BitVecVal(1 << 5, 16, ctx=ctx)
         output = _mm512_mask_permutex2var_epi32(a, mask, indices, b)
 
         expected_specs = []
@@ -1945,13 +2101,17 @@ class TestMaskPermutex2varEpi32:
         )
 
     def test_mm512_mask_permutex2var_epi32_find_identity_mask(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
         indices = zmm_reg_with_32b_values(
-            "indices", s, [(1 << 4) | 7] * 16
+            "indices",
+            s,
+            [(1 << 4) | 7] * 16,
+            ctx=ctx,
         )  # All select b[7]
-        mask = BitVec("mask", 16)
+        mask = BitVec("mask", 16, ctx=ctx)
         output = _mm512_mask_permutex2var_epi32(a, mask, indices, b)
 
         s.add(output == a)
@@ -1964,13 +2124,17 @@ class TestMaskPermutex2varEpi32:
         )
 
     def test_mm512_mask_permutex2var_epi32_find_full_permute_mask(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
         indices = zmm_reg_with_32b_values(
-            "indices", s, [(1 << 4) | i for i in range(16)]
+            "indices",
+            s,
+            [(1 << 4) | i for i in range(16)],
+            ctx=ctx,
         )
-        mask = BitVec("mask", 16)
+        mask = BitVec("mask", 16, ctx=ctx)
         output = _mm512_mask_permutex2var_epi32(a, mask, indices, b)
 
         s.add(output == b)
@@ -1983,13 +2147,17 @@ class TestMaskPermutex2varEpi32:
         )
 
     def test_mm512_mask_permutex2var_epi32_find_partial_mask(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
         indices = zmm_reg_with_32b_values(
-            "indices", s, [(1 << 4) | i for i in range(16)]
+            "indices",
+            s,
+            [(1 << 4) | i for i in range(16)],
+            ctx=ctx,
         )
-        mask = BitVec("mask", 16)
+        mask = BitVec("mask", 16, ctx=ctx)
         output = _mm512_mask_permutex2var_epi32(a, mask, indices, b)
 
         expected_specs = []
@@ -2011,11 +2179,12 @@ class TestMaskPermutex2varEpi32:
         )
 
     def test_mm512_mask_permutex2var_epi32_find_indices_with_mask(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
-        mask = BitVecVal(0x5555, 16)
-        indices = zmm_reg("indices")
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
+        mask = BitVecVal(0x5555, 16, ctx=ctx)
+        indices = zmm_reg("indices", ctx=ctx)
         output = _mm512_mask_permutex2var_epi32(a, mask, indices, b)
 
         expected_specs = []
@@ -2041,11 +2210,12 @@ class TestMaskPermutex2varEpi32:
         )
 
     def test_mm512_mask_permutex2var_epi32_find_reverse_partial(self):
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
-        mask = BitVec("mask", 16)
-        indices = zmm_reg("indices")
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
+        mask = BitVec("mask", 16, ctx=ctx)
+        indices = zmm_reg("indices", ctx=ctx)
         output = _mm512_mask_permutex2var_epi32(a, mask, indices, b)
 
         expected_specs = []
@@ -2070,13 +2240,17 @@ class TestMaskPermutex2varEpi64:
 
     def test_mm512_mask_permutex2var_epi64_mask_all_zeros(self):
         """Test with mask all zeros (should preserve a)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
         indices = zmm_reg_with_64b_values(
-            "indices", s, null_permutex2var_vector_epi64_avx512
+            "indices",
+            s,
+            null_permutex2var_vector_epi64_avx512,
+            ctx=ctx,
         )
-        mask = BitVecVal(0, 8)
+        mask = BitVecVal(0, 8, ctx=ctx)
         output = _mm512_mask_permutex2var_epi64(a, mask, indices, b)
 
         s.add(a != output)
@@ -2087,13 +2261,17 @@ class TestMaskPermutex2varEpi64:
 
     def test_mm512_mask_permutex2var_epi64_mask_all_ones(self):
         """Test with mask all ones (should equal unmasked)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
         indices = zmm_reg_with_64b_values(
-            "indices", s, null_permutex2var_vector_epi64_avx512
+            "indices",
+            s,
+            null_permutex2var_vector_epi64_avx512,
+            ctx=ctx,
         )
-        mask = BitVecVal(0xFF, 8)
+        mask = BitVecVal(0xFF, 8, ctx=ctx)
 
         masked_output = _mm512_mask_permutex2var_epi64(a, mask, indices, b)
         unmasked_output = _mm512_permutex2var_epi64(a, indices, b)
@@ -2106,12 +2284,13 @@ class TestMaskPermutex2varEpi64:
 
     def test_mm512_mask_permutex2var_epi64_alternating_mask(self):
         """Test with alternating mask pattern"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
         select_b_indices = [(1 << 3) | i for i in range(8)]
-        indices = zmm_reg_with_64b_values("indices", s, select_b_indices)
-        mask = BitVecVal(0x55, 8)  # 01010101
+        indices = zmm_reg_with_64b_values("indices", s, select_b_indices, ctx=ctx)
+        mask = BitVecVal(0x55, 8, ctx=ctx)  # 01010101
 
         output = _mm512_mask_permutex2var_epi64(a, mask, indices, b)
         unmasked = _mm512_permutex2var_epi64(a, indices, b)
@@ -2134,11 +2313,12 @@ class TestMaskPermutex2varEpi64:
 
     def test_mm512_mask_permutex2var_epi64_single_bit_mask(self):
         """Test with only one bit set in mask"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
-        indices = zmm_reg_with_64b_values("indices", s, [(1 << 3) | 5] * 8)
-        mask = BitVecVal(1 << 3, 8)  # Only bit 3
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
+        indices = zmm_reg_with_64b_values("indices", s, [(1 << 3) | 5] * 8, ctx=ctx)
+        mask = BitVecVal(1 << 3, 8, ctx=ctx)  # Only bit 3
         output = _mm512_mask_permutex2var_epi64(a, mask, indices, b)
 
         expected_specs = []
@@ -2158,15 +2338,16 @@ class TestMaskPermutex2varEpi64:
 
     def test_mm512_mask_permutex2var_epi64_partial_mask(self):
         """Test with lower half masked"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
         reverse_a_indices = [(0 << 3) | (7 - i) for i in range(8)]
-        indices = zmm_reg_with_64b_values("indices", s, reverse_a_indices)
-        mask = BitVecVal(0x0F, 8)  # Lower 4 bits set
+        indices = zmm_reg_with_64b_values("indices", s, reverse_a_indices, ctx=ctx)
+        mask = BitVecVal(0x0F, 8, ctx=ctx)  # Lower 4 bits set
 
         output = _mm512_mask_permutex2var_epi64(a, mask, indices, b)
-        reversed_a = zmm_reg_reversed("a_reversed", s, a, bits=64)
+        reversed_a = zmm_reg_reversed("a_reversed", s, a, bits=64, ctx=ctx)
 
         # Expected: reversed a in positions 0-3, original a in positions 4-7
         expected_specs = []
@@ -2186,9 +2367,10 @@ class TestMaskPermutex2varEpi64:
 
     def test_mm512_mask_permutex2var_epi64_mixed_sources_with_mask(self):
         """Test with mixed sources and selective masking"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
         mixed_indices = []
         for i in range(8):
             if i % 2 == 0:
@@ -2196,8 +2378,8 @@ class TestMaskPermutex2varEpi64:
             else:
                 mixed_indices.append((1 << 3) | i)
 
-        indices = zmm_reg_with_64b_values("indices", s, mixed_indices)
-        mask = BitVecVal(0x55, 8)  # 01010101
+        indices = zmm_reg_with_64b_values("indices", s, mixed_indices, ctx=ctx)
+        mask = BitVecVal(0x55, 8, ctx=ctx)  # 01010101
         output = _mm512_mask_permutex2var_epi64(a, mask, indices, b)
 
         expected_specs = [(a, i) for i in range(8)]
@@ -2211,11 +2393,12 @@ class TestMaskPermutex2varEpi64:
 
     def test_mm512_mask_permutex2var_epi64_find_identity_mask(self):
         """Test that Z3 can find mask to preserve a (mask all zeros)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
-        indices = zmm_reg_with_64b_values("indices", s, [(1 << 3) | 7] * 8)
-        mask = BitVec("mask", 8)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
+        indices = zmm_reg_with_64b_values("indices", s, [(1 << 3) | 7] * 8, ctx=ctx)
+        mask = BitVec("mask", 8, ctx=ctx)
         output = _mm512_mask_permutex2var_epi64(a, mask, indices, b)
 
         s.add(output == a)
@@ -2229,13 +2412,17 @@ class TestMaskPermutex2varEpi64:
 
     def test_mm512_mask_permutex2var_epi64_find_full_permute_mask(self):
         """Test that Z3 can find mask for full permutation (mask all ones)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
         indices = zmm_reg_with_64b_values(
-            "indices", s, [(1 << 3) | i for i in range(8)]
+            "indices",
+            s,
+            [(1 << 3) | i for i in range(8)],
+            ctx=ctx,
         )
-        mask = BitVec("mask", 8)
+        mask = BitVec("mask", 8, ctx=ctx)
         output = _mm512_mask_permutex2var_epi64(a, mask, indices, b)
 
         s.add(output == b)
@@ -2249,13 +2436,17 @@ class TestMaskPermutex2varEpi64:
 
     def test_mm512_mask_permutex2var_epi64_find_partial_mask(self):
         """Test that Z3 can find mask for partial permutation"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
         indices = zmm_reg_with_64b_values(
-            "indices", s, [(1 << 3) | i for i in range(8)]
+            "indices",
+            s,
+            [(1 << 3) | i for i in range(8)],
+            ctx=ctx,
         )
-        mask = BitVec("mask", 8)
+        mask = BitVec("mask", 8, ctx=ctx)
         output = _mm512_mask_permutex2var_epi64(a, mask, indices, b)
 
         expected_specs = []
@@ -2278,11 +2469,12 @@ class TestMaskPermutex2varEpi64:
 
     def test_mm512_mask_permutex2var_epi64_find_indices_with_mask(self):
         """Test that Z3 can find indices to achieve pattern with fixed mask"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
-        mask = BitVecVal(0x55, 8)  # 01010101
-        indices = zmm_reg("indices")
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
+        mask = BitVecVal(0x55, 8, ctx=ctx)  # 01010101
+        indices = zmm_reg("indices", ctx=ctx)
         output = _mm512_mask_permutex2var_epi64(a, mask, indices, b)
 
         expected_specs = []
@@ -2308,9 +2500,10 @@ class TestMaskPermutex2varEpi64:
 
     def test_mm512_mask_permutex2var_epi64_cross_source_reverse(self):
         """Test reversing elements with cross-source selection"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
 
         # Create indices that reverse and alternate between sources
         # Position 0 gets b[7] (source=1, offset=7), position 1 gets a[6] (source=0, offset=6), etc.
@@ -2321,8 +2514,8 @@ class TestMaskPermutex2varEpi64:
             source = 1 if i % 2 == 0 else 0
             cross_reverse_indices.append((source << 3) | offset)
 
-        indices = zmm_reg_with_64b_values("indices", s, cross_reverse_indices)
-        mask = BitVecVal(0xFF, 8)  # All bits set
+        indices = zmm_reg_with_64b_values("indices", s, cross_reverse_indices, ctx=ctx)
+        mask = BitVecVal(0xFF, 8, ctx=ctx)  # All bits set
         output = _mm512_mask_permutex2var_epi64(a, mask, indices, b)
 
         expected_specs = []
@@ -2347,16 +2540,23 @@ class TestUnpackEpi32:
 
     def test_mm256_unpacklo_epi32_basic(self):
         """Test _mm256_unpacklo_epi32 with known values"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
         # Create test inputs with unique values per lane
         # a = [a0, a1, a2, a3 | a4, a5, a6, a7]
         # b = [b0, b1, b2, b3 | b4, b5, b6, b7]
         a = ymm_reg_with_32b_values(
-            "a", s, [0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7]
+            "a",
+            s,
+            [0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7],
+            ctx=ctx,
         )
         b = ymm_reg_with_32b_values(
-            "b", s, [0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7]
+            "b",
+            s,
+            [0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7],
+            ctx=ctx,
         )
 
         output = _mm256_unpacklo_epi32(a, b)
@@ -2384,14 +2584,21 @@ class TestUnpackEpi32:
 
     def test_mm256_unpackhi_epi32_basic(self):
         """Test _mm256_unpackhi_epi32 with known values"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
         # Create test inputs with unique values per lane
         a = ymm_reg_with_32b_values(
-            "a", s, [0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7]
+            "a",
+            s,
+            [0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7],
+            ctx=ctx,
         )
         b = ymm_reg_with_32b_values(
-            "b", s, [0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7]
+            "b",
+            s,
+            [0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7],
+            ctx=ctx,
         )
 
         output = _mm256_unpackhi_epi32(a, b)
@@ -2419,7 +2626,8 @@ class TestUnpackEpi32:
 
     def test_mm512_unpacklo_epi32_basic(self):
         """Test _mm512_unpacklo_epi32 with known values"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
         # Create test inputs with unique values
         a_vals = [
@@ -2459,8 +2667,8 @@ class TestUnpackEpi32:
             0xBF,
         ]
 
-        a = zmm_reg_with_32b_values("a", s, a_vals)
-        b = zmm_reg_with_32b_values("b", s, b_vals)
+        a = zmm_reg_with_32b_values("a", s, a_vals, ctx=ctx)
+        b = zmm_reg_with_32b_values("b", s, b_vals, ctx=ctx)
 
         output = _mm512_unpacklo_epi32(a, b)
 
@@ -2495,7 +2703,8 @@ class TestUnpackEpi32:
 
     def test_mm512_unpackhi_epi32_basic(self):
         """Test _mm512_unpackhi_epi32 with known values"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
         # Create test inputs with unique values
         a_vals = [
@@ -2535,8 +2744,8 @@ class TestUnpackEpi32:
             0xBF,
         ]
 
-        a = zmm_reg_with_32b_values("a", s, a_vals)
-        b = zmm_reg_with_32b_values("b", s, b_vals)
+        a = zmm_reg_with_32b_values("a", s, a_vals, ctx=ctx)
+        b = zmm_reg_with_32b_values("b", s, b_vals, ctx=ctx)
 
         output = _mm512_unpackhi_epi32(a, b)
 
@@ -2571,9 +2780,10 @@ class TestUnpackEpi32:
 
     def test_mm256_unpacklo_epi32_identity_check(self):
         """Test that _mm256_unpacklo_epi32 with identical inputs gives expected pattern"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        input_reg = ymm_reg_with_unique_values("input", s, bits=32)
+        input_reg = ymm_reg_with_unique_values("input", s, bits=32, ctx=ctx)
         output = _mm256_unpacklo_epi32(input_reg, input_reg)
 
         # When a == b, unpacklo should give [a0, a0, a1, a1 | a4, a4, a5, a5]
@@ -2599,9 +2809,10 @@ class TestUnpackEpi32:
 
     def test_mm256_unpackhi_epi32_identity_check(self):
         """Test that _mm256_unpackhi_epi32 with identical inputs gives expected pattern"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        input_reg = ymm_reg_with_unique_values("input", s, bits=32)
+        input_reg = ymm_reg_with_unique_values("input", s, bits=32, ctx=ctx)
         output = _mm256_unpackhi_epi32(input_reg, input_reg)
 
         # When a == b, unpackhi should give [a2, a2, a3, a3 | a6, a6, a7, a7]
@@ -2627,11 +2838,12 @@ class TestUnpackEpi32:
 
     def test_mm512_mask_unpacklo_epi32_mask_all_zeros(self):
         """Test _mm512_mask_unpacklo_epi32 with mask all zeros (should preserve src)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
-        src = zmm_reg_with_unique_values("src", s, bits=32)
-        mask = BitVecVal(0, 16)  # All mask bits are 0
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        mask = BitVecVal(0, 16, ctx=ctx)  # All mask bits are 0
 
         output = _mm512_mask_unpacklo_epi32(src, mask, a, b)
 
@@ -2643,11 +2855,12 @@ class TestUnpackEpi32:
 
     def test_mm512_mask_unpacklo_epi32_mask_all_ones(self):
         """Test _mm512_mask_unpacklo_epi32 with mask all ones (should equal unmasked)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
-        src = zmm_reg_with_unique_values("src", s, bits=32)
-        mask = BitVecVal(0xFFFF, 16)  # All mask bits are 1
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        mask = BitVecVal(0xFFFF, 16, ctx=ctx)  # All mask bits are 1
 
         masked_output = _mm512_mask_unpacklo_epi32(src, mask, a, b)
         unmasked_output = _mm512_unpacklo_epi32(a, b)
@@ -2660,11 +2873,12 @@ class TestUnpackEpi32:
 
     def test_mm512_mask_unpackhi_epi32_alternating_mask(self):
         """Test _mm512_mask_unpackhi_epi32 with alternating mask pattern"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
-        src = zmm_reg_with_unique_values("src", s, bits=32)
-        mask = BitVecVal(0x5555, 16)  # 0101010101010101 in binary
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        mask = BitVecVal(0x5555, 16, ctx=ctx)  # 0101010101010101 in binary
 
         output = _mm512_mask_unpackhi_epi32(src, mask, a, b)
 
@@ -2689,11 +2903,12 @@ class TestUnpackEpi32:
 
     def test_mm512_mask_unpacklo_epi32_single_bit_mask(self):
         """Test _mm512_mask_unpacklo_epi32 with only one bit set in mask"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
-        src = zmm_reg_with_unique_values("src", s, bits=32)
-        mask = BitVecVal(1 << 3, 16)  # Only bit 3 is set
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        mask = BitVecVal(1 << 3, 16, ctx=ctx)  # Only bit 3 is set
 
         output = _mm512_mask_unpacklo_epi32(src, mask, a, b)
 
@@ -2716,14 +2931,15 @@ class TestUnpackEpi32:
 
     def test_mm256_unpacklo_epi32_reconstruct_pattern(self):
         """Test that Z3 can find inputs that produce a specific output pattern"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a = ymm_reg("a")
-        b = ymm_reg("b")
+        a = ymm_reg("a", ctx=ctx)
+        b = ymm_reg("b", ctx=ctx)
         output = _mm256_unpacklo_epi32(a, b)
 
         # Specify a target pattern: all elements should be the same value
-        target_value = BitVecVal(0x12345678, 32)
+        target_value = BitVecVal(0x12345678, 32, ctx=ctx)
         for i in range(8):
             element = Extract(i * 32 + 31, i * 32, output)
             s.add(element == target_value)
@@ -2750,11 +2966,12 @@ class TestUnpackEpi32:
 
     def test_mm512_mask_unpackhi_epi32_find_mask(self):
         """Test that Z3 can find the correct mask to achieve a specific pattern"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
-        src = zmm_reg_with_unique_values("src", s, bits=32)
-        mask = BitVec("mask", 16)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        mask = BitVec("mask", 16, ctx=ctx)
 
         output = _mm512_mask_unpackhi_epi32(src, mask, a, b)
 
@@ -2780,9 +2997,10 @@ class TestUnpackEpi32:
 
     def test_mm256_unpack_combo_lo_hi(self):
         """Test combining unpacklo and unpackhi operations"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32)
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
 
         lo_result = _mm256_unpacklo_epi32(a, b)
         hi_result = _mm256_unpackhi_epi32(a, b)
@@ -2808,7 +3026,8 @@ class TestUnpackEpi32:
 
     def test_mm512_unpack_lane_independence(self):
         """Test that unpack operations work independently on each 128-bit lane"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
         # Create inputs where each 128-bit lane has distinct patterns
         a_vals = [
@@ -2848,8 +3067,8 @@ class TestUnpackEpi32:
             0x83,
         ]  # Lane 3
 
-        a = zmm_reg_with_32b_values("a", s, a_vals)
-        b = zmm_reg_with_32b_values("b", s, b_vals)
+        a = zmm_reg_with_32b_values("a", s, a_vals, ctx=ctx)
+        b = zmm_reg_with_32b_values("b", s, b_vals, ctx=ctx)
 
         lo_result = _mm512_unpacklo_epi32(a, b)
 
@@ -2891,11 +3110,12 @@ class TestMaskPermutePs:
 
     def test_mm512_mask_permute_ps_mask_all_zeros(self):
         """Test with mask all zeros (should preserve src)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=32)
-        a = zmm_reg_with_unique_values("a", s, bits=32)
-        mask = BitVecVal(0, 16)
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
+        mask = BitVecVal(0, 16, ctx=ctx)
 
         output = _mm512_mask_permute_ps(src, mask, a, null_permute_epi32_imm8)
 
@@ -2907,11 +3127,12 @@ class TestMaskPermutePs:
 
     def test_mm512_mask_permute_ps_mask_all_ones(self):
         """Test with mask all ones (should equal unmasked)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=32)
-        a = zmm_reg_with_unique_values("a", s, bits=32)
-        mask = BitVecVal(0xFFFF, 16)
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
+        mask = BitVecVal(0xFFFF, 16, ctx=ctx)
 
         masked_output = _mm512_mask_permute_ps(src, mask, a, null_permute_epi32_imm8)
         unmasked_output = _mm512_permute_ps(a, null_permute_epi32_imm8)
@@ -2924,11 +3145,12 @@ class TestMaskPermutePs:
 
     def test_mm512_mask_permute_ps_alternating_mask(self):
         """Test with alternating mask pattern"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=32)
-        a = zmm_reg_with_unique_values("a", s, bits=32)
-        mask = BitVecVal(0x5555, 16)  # Alternating: 0101010101010101
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
+        mask = BitVecVal(0x5555, 16, ctx=ctx)  # Alternating: 0101010101010101
         imm8 = _MM_SHUFFLE(0, 1, 2, 3)  # Reverse within lanes
 
         output = _mm512_mask_permute_ps(src, mask, a, imm8)
@@ -2956,11 +3178,12 @@ class TestMaskPermutePd:
 
     def test_mm512_mask_permute_pd_mask_all_zeros(self):
         """Test with mask all zeros (should preserve src)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=64)
-        a = zmm_reg_with_unique_values("a", s, bits=64)
-        mask = BitVecVal(0, 8)
+        src = zmm_reg_with_unique_values("src", s, bits=64, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=64, ctx=ctx)
+        mask = BitVecVal(0, 8, ctx=ctx)
 
         output = _mm512_mask_permute_pd(src, mask, a, null_permute_pd_imm8)
 
@@ -2972,11 +3195,12 @@ class TestMaskPermutePd:
 
     def test_mm512_mask_permute_pd_mask_all_ones(self):
         """Test with mask all ones (should equal unmasked)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=64)
-        a = zmm_reg_with_unique_values("a", s, bits=64)
-        mask = BitVecVal(0xFF, 8)
+        src = zmm_reg_with_unique_values("src", s, bits=64, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=64, ctx=ctx)
+        mask = BitVecVal(0xFF, 8, ctx=ctx)
 
         masked_output = _mm512_mask_permute_pd(src, mask, a, null_permute_pd_imm8)
         unmasked_output = _mm512_permute_pd(a, null_permute_pd_imm8)
@@ -2989,11 +3213,12 @@ class TestMaskPermutePd:
 
     def test_mm512_mask_permute_pd_single_bit_mask(self):
         """Test with only one bit set in mask"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=64)
-        a = zmm_reg_with_unique_values("a", s, bits=64)
-        mask = BitVecVal(1 << 3, 8)  # Only bit 3
+        src = zmm_reg_with_unique_values("src", s, bits=64, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=64, ctx=ctx)
+        mask = BitVecVal(1 << 3, 8, ctx=ctx)  # Only bit 3
         imm8 = _MM_SHUFFLE2(0, 1)  # Swap within lanes
 
         output = _mm512_mask_permute_pd(src, mask, a, imm8)
@@ -3021,11 +3246,12 @@ class TestMaskShufflePs:
 
     def test_mm512_mask_shuffle_ps_mask_all_zeros(self):
         """Test with mask all zeros (should preserve src)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=32)
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
-        mask = BitVecVal(0, 16)
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
+        mask = BitVecVal(0, 16, ctx=ctx)
 
         output = _mm512_mask_shuffle_ps(src, mask, a, b, null_shuffle_ps_2vec_imm8)
 
@@ -3037,11 +3263,12 @@ class TestMaskShufflePs:
 
     def test_mm512_mask_shuffle_ps_mask_all_ones(self):
         """Test with mask all ones (should equal unmasked)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=32)
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
-        mask = BitVecVal(0xFFFF, 16)
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
+        mask = BitVecVal(0xFFFF, 16, ctx=ctx)
 
         masked_output = _mm512_mask_shuffle_ps(
             src, mask, a, b, null_shuffle_ps_2vec_imm8
@@ -3056,11 +3283,12 @@ class TestMaskShufflePs:
 
     def test_mm512_mask_shuffle_ps_partial_mask(self):
         """Test with partial mask (lower half only)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=32)
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32)
-        mask = BitVecVal(0x00FF, 16)  # Lower 8 bits set
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
+        mask = BitVecVal(0x00FF, 16, ctx=ctx)  # Lower 8 bits set
 
         output = _mm512_mask_shuffle_ps(src, mask, a, b, null_shuffle_ps_2vec_imm8)
         unmasked = _mm512_shuffle_ps(a, b, null_shuffle_ps_2vec_imm8)
@@ -3087,11 +3315,12 @@ class TestMaskShufflePd:
 
     def test_mm512_mask_shuffle_pd_mask_all_zeros(self):
         """Test with mask all zeros (should preserve src)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=64)
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
-        mask = BitVecVal(0, 8)
+        src = zmm_reg_with_unique_values("src", s, bits=64, ctx=ctx)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
+        mask = BitVecVal(0, 8, ctx=ctx)
 
         output = _mm512_mask_shuffle_pd(src, mask, a, b, null_shuffle_pd_avx512_imm8)
 
@@ -3103,11 +3332,12 @@ class TestMaskShufflePd:
 
     def test_mm512_mask_shuffle_pd_mask_all_ones(self):
         """Test with mask all ones (should equal unmasked)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=64)
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
-        mask = BitVecVal(0xFF, 8)
+        src = zmm_reg_with_unique_values("src", s, bits=64, ctx=ctx)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
+        mask = BitVecVal(0xFF, 8, ctx=ctx)
 
         masked_output = _mm512_mask_shuffle_pd(
             src, mask, a, b, null_shuffle_pd_avx512_imm8
@@ -3122,11 +3352,12 @@ class TestMaskShufflePd:
 
     def test_mm512_mask_shuffle_pd_alternating_mask(self):
         """Test with alternating mask pattern"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=64)
-        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64)
-        mask = BitVecVal(0x55, 8)  # 01010101
+        src = zmm_reg_with_unique_values("src", s, bits=64, ctx=ctx)
+        a, b = zmm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
+        mask = BitVecVal(0x55, 8, ctx=ctx)  # 01010101
 
         output = _mm512_mask_shuffle_pd(src, mask, a, b, null_shuffle_pd_avx512_imm8)
         unmasked = _mm512_shuffle_pd(a, b, null_shuffle_pd_avx512_imm8)
@@ -3153,13 +3384,14 @@ class TestMaskPermutevarPs:
 
     def test_mm512_mask_permutevar_ps_mask_all_zeros(self):
         """Test with mask all zeros (should preserve src)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=32)
-        a = zmm_reg_with_unique_values("a", s, bits=32)
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
         # Create control vector for identity permute within lanes
-        ctrl = zmm_reg_with_32b_values("ctrl", s, [i % 4 for i in range(16)])
-        mask = BitVecVal(0, 16)
+        ctrl = zmm_reg_with_32b_values("ctrl", s, [i % 4 for i in range(16)], ctx=ctx)
+        mask = BitVecVal(0, 16, ctx=ctx)
 
         output = _mm512_mask_permutevar_ps(src, mask, a, ctrl)
 
@@ -3171,14 +3403,15 @@ class TestMaskPermutevarPs:
 
     def test_mm512_mask_permutevar_ps_identity_permute(self):
         """Test identity permutation within lanes"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=32)
-        a = zmm_reg_with_unique_values("a", s, bits=32)
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
         # Create control vector: each element selects itself within its lane
         # Lane 0: [0, 1, 2, 3], Lane 1: [0, 1, 2, 3], etc.
-        ctrl = zmm_reg_with_32b_values("ctrl", s, [i % 4 for i in range(16)])
-        mask = BitVecVal(0xFFFF, 16)
+        ctrl = zmm_reg_with_32b_values("ctrl", s, [i % 4 for i in range(16)], ctx=ctx)
+        mask = BitVecVal(0xFFFF, 16, ctx=ctx)
 
         output = _mm512_mask_permutevar_ps(src, mask, a, ctrl)
 
@@ -3190,13 +3423,16 @@ class TestMaskPermutevarPs:
 
     def test_mm512_mask_permutevar_ps_reverse_within_lanes(self):
         """Test reversing elements within each 128-bit lane"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=32)
-        a = zmm_reg_with_unique_values("a", s, bits=32)
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
         # Create control vector: reverse within each lane [3, 2, 1, 0, 3, 2, 1, 0, ...]
-        ctrl = zmm_reg_with_32b_values("ctrl", s, [3 - (i % 4) for i in range(16)])
-        mask = BitVecVal(0xFFFF, 16)
+        ctrl = zmm_reg_with_32b_values(
+            "ctrl", s, [3 - (i % 4) for i in range(16)], ctx=ctx
+        )
+        mask = BitVecVal(0xFFFF, 16, ctx=ctx)
 
         output = _mm512_mask_permutevar_ps(src, mask, a, ctrl)
 
@@ -3231,13 +3467,14 @@ class TestMaskPermutevarPs:
 
     def test_mm512_mask_permutevar_ps_broadcast_within_lanes(self):
         """Test broadcasting first element within each lane"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=32)
-        a = zmm_reg_with_unique_values("a", s, bits=32)
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
         # Create control vector: all zeros (broadcast element 0 of each lane)
-        ctrl = zmm_reg_with_32b_values("ctrl", s, [0] * 16)
-        mask = BitVecVal(0xFFFF, 16)
+        ctrl = zmm_reg_with_32b_values("ctrl", s, [0] * 16, ctx=ctx)
+        mask = BitVecVal(0xFFFF, 16, ctx=ctx)
 
         output = _mm512_mask_permutevar_ps(src, mask, a, ctrl)
 
@@ -3276,13 +3513,14 @@ class TestMaskPermutevarPd:
 
     def test_mm512_mask_permutevar_pd_mask_all_zeros(self):
         """Test with mask all zeros (should preserve src)"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=64)
-        a = zmm_reg_with_unique_values("a", s, bits=64)
+        src = zmm_reg_with_unique_values("src", s, bits=64, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=64, ctx=ctx)
         # Create control vector for identity permute (bits at positions 1, 65, 129, 193, 257, 321, 385, 449 = 0)
-        ctrl = zmm_reg("ctrl")
-        mask = BitVecVal(0, 8)
+        ctrl = zmm_reg("ctrl", ctx=ctx)
+        mask = BitVecVal(0, 8, ctx=ctx)
 
         output = _mm512_mask_permutevar_pd(src, mask, a, ctrl)
 
@@ -3294,13 +3532,14 @@ class TestMaskPermutevarPd:
 
     def test_mm512_mask_permutevar_pd_identity_permute(self):
         """Test identity permutation within lanes"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=64)
-        a = zmm_reg_with_unique_values("a", s, bits=64)
+        src = zmm_reg_with_unique_values("src", s, bits=64, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=64, ctx=ctx)
         # Create control vector with bits at correct positions set to 0 for identity
         # Positions: [1, 65, 129, 193, 257, 321, 385, 449] should be [0, 1, 0, 1, 0, 1, 0, 1]
-        ctrl = zmm_reg("ctrl")
+        ctrl = zmm_reg("ctrl", ctx=ctx)
         # Set control bits: element j%2 of each lane
         s.add(Extract(1, 1, ctrl) == 0)  # Element 0 selects from position 0
         s.add(Extract(65, 65, ctrl) == 1)  # Element 1 selects from position 1
@@ -3310,7 +3549,7 @@ class TestMaskPermutevarPd:
         s.add(Extract(321, 321, ctrl) == 1)  # Element 5 selects from position 1
         s.add(Extract(385, 385, ctrl) == 0)  # Element 6 selects from position 0
         s.add(Extract(449, 449, ctrl) == 1)  # Element 7 selects from position 1
-        mask = BitVecVal(0xFF, 8)
+        mask = BitVecVal(0xFF, 8, ctx=ctx)
 
         output = _mm512_mask_permutevar_pd(src, mask, a, ctrl)
 
@@ -3322,12 +3561,13 @@ class TestMaskPermutevarPd:
 
     def test_mm512_mask_permutevar_pd_swap_within_lanes(self):
         """Test swapping elements within each 128-bit lane"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=64)
-        a = zmm_reg_with_unique_values("a", s, bits=64)
+        src = zmm_reg_with_unique_values("src", s, bits=64, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=64, ctx=ctx)
         # Create control vector: swap within each lane
-        ctrl = zmm_reg("ctrl")
+        ctrl = zmm_reg("ctrl", ctx=ctx)
         # Set control bits to swap: [1, 0, 1, 0, 1, 0, 1, 0]
         s.add(Extract(1, 1, ctrl) == 1)  # Element 0 selects from position 1
         s.add(Extract(65, 65, ctrl) == 0)  # Element 1 selects from position 0
@@ -3337,7 +3577,7 @@ class TestMaskPermutevarPd:
         s.add(Extract(321, 321, ctrl) == 0)  # Element 5 selects from position 0
         s.add(Extract(385, 385, ctrl) == 1)  # Element 6 selects from position 1
         s.add(Extract(449, 449, ctrl) == 0)  # Element 7 selects from position 0
-        mask = BitVecVal(0xFF, 8)
+        mask = BitVecVal(0xFF, 8, ctx=ctx)
 
         output = _mm512_mask_permutevar_pd(src, mask, a, ctrl)
 
@@ -3364,12 +3604,13 @@ class TestMaskPermutevarPd:
 
     def test_mm512_mask_permutevar_pd_broadcast_within_lanes(self):
         """Test broadcasting first element within each lane"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        src = zmm_reg_with_unique_values("src", s, bits=64)
-        a = zmm_reg_with_unique_values("a", s, bits=64)
+        src = zmm_reg_with_unique_values("src", s, bits=64, ctx=ctx)
+        a = zmm_reg_with_unique_values("a", s, bits=64, ctx=ctx)
         # Create control vector: all control bits = 0 (broadcast element 0 of each lane)
-        ctrl = zmm_reg("ctrl")
+        ctrl = zmm_reg("ctrl", ctx=ctx)
         s.add(Extract(1, 1, ctrl) == 0)
         s.add(Extract(65, 65, ctrl) == 0)
         s.add(Extract(129, 129, ctrl) == 0)
@@ -3378,7 +3619,7 @@ class TestMaskPermutevarPd:
         s.add(Extract(321, 321, ctrl) == 0)
         s.add(Extract(385, 385, ctrl) == 0)
         s.add(Extract(449, 449, ctrl) == 0)
-        mask = BitVecVal(0xFF, 8)
+        mask = BitVecVal(0xFF, 8, ctx=ctx)
 
         output = _mm512_mask_permutevar_pd(src, mask, a, ctrl)
 
@@ -3409,12 +3650,13 @@ class TestPermutevarPs:
 
     def test_mm256_permutevar_ps_identity_permute(self):
         """Test identity permutation within lanes for 256-bit"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a = ymm_reg_with_unique_values("a", s, bits=32)
+        a = ymm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
         # Create control vector: each element selects itself within its lane
         # Lane 0: [0, 1, 2, 3], Lane 1: [0, 1, 2, 3]
-        ctrl = ymm_reg_with_32b_values("ctrl", s, [i % 4 for i in range(8)])
+        ctrl = ymm_reg_with_32b_values("ctrl", s, [i % 4 for i in range(8)], ctx=ctx)
 
         output = _mm256_permutevar_ps(a, ctrl)
 
@@ -3426,11 +3668,14 @@ class TestPermutevarPs:
 
     def test_mm256_permutevar_ps_reverse_within_lanes(self):
         """Test reversing elements within each 128-bit lane for 256-bit"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a = ymm_reg_with_unique_values("a", s, bits=32)
+        a = ymm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
         # Create control vector: reverse within each lane [3, 2, 1, 0, 3, 2, 1, 0]
-        ctrl = ymm_reg_with_32b_values("ctrl", s, [3 - (i % 4) for i in range(8)])
+        ctrl = ymm_reg_with_32b_values(
+            "ctrl", s, [3 - (i % 4) for i in range(8)], ctx=ctx
+        )
 
         output = _mm256_permutevar_ps(a, ctrl)
 
@@ -3457,11 +3702,12 @@ class TestPermutevarPs:
 
     def test_mm256_permutevar_ps_broadcast_within_lanes(self):
         """Test broadcasting first element within each lane for 256-bit"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a = ymm_reg_with_unique_values("a", s, bits=32)
+        a = ymm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
         # Create control vector: all zeros (broadcast element 0 of each lane)
-        ctrl = ymm_reg_with_32b_values("ctrl", s, [0] * 8)
+        ctrl = ymm_reg_with_32b_values("ctrl", s, [0] * 8, ctx=ctx)
 
         output = _mm256_permutevar_ps(a, ctrl)
 
@@ -3488,11 +3734,12 @@ class TestPermutevarPs:
 
     def test_mm256_permutevar_ps_mixed_permute(self):
         """Test mixed permutation pattern for 256-bit"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a = ymm_reg_with_unique_values("a", s, bits=32)
+        a = ymm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
         # Create control vector: [1, 0, 3, 2, 2, 3, 0, 1]
-        ctrl = ymm_reg_with_32b_values("ctrl", s, [1, 0, 3, 2, 2, 3, 0, 1])
+        ctrl = ymm_reg_with_32b_values("ctrl", s, [1, 0, 3, 2, 2, 3, 0, 1], ctx=ctx)
 
         output = _mm256_permutevar_ps(a, ctrl)
 
@@ -3519,11 +3766,12 @@ class TestPermutevarPs:
 
     def test_mm512_permutevar_ps_identity_permute(self):
         """Test identity permutation within lanes for 512-bit"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a = zmm_reg_with_unique_values("a", s, bits=32)
+        a = zmm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
         # Create control vector: each element selects itself within its lane
-        ctrl = zmm_reg_with_32b_values("ctrl", s, [i % 4 for i in range(16)])
+        ctrl = zmm_reg_with_32b_values("ctrl", s, [i % 4 for i in range(16)], ctx=ctx)
 
         output = _mm512_permutevar_ps(a, ctrl)
 
@@ -3535,11 +3783,14 @@ class TestPermutevarPs:
 
     def test_mm512_permutevar_ps_reverse_within_lanes(self):
         """Test reversing elements within each 128-bit lane for 512-bit"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a = zmm_reg_with_unique_values("a", s, bits=32)
+        a = zmm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
         # Create control vector: reverse within each lane [3, 2, 1, 0, ...]
-        ctrl = zmm_reg_with_32b_values("ctrl", s, [3 - (i % 4) for i in range(16)])
+        ctrl = zmm_reg_with_32b_values(
+            "ctrl", s, [3 - (i % 4) for i in range(16)], ctx=ctx
+        )
 
         output = _mm512_permutevar_ps(a, ctrl)
 
@@ -3574,11 +3825,12 @@ class TestPermutevarPs:
 
     def test_mm512_permutevar_ps_broadcast_within_lanes(self):
         """Test broadcasting last element within each lane for 512-bit"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a = zmm_reg_with_unique_values("a", s, bits=32)
+        a = zmm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
         # Create control vector: all 3s (broadcast element 3 of each lane)
-        ctrl = zmm_reg_with_32b_values("ctrl", s, [3] * 16)
+        ctrl = zmm_reg_with_32b_values("ctrl", s, [3] * 16, ctx=ctx)
 
         output = _mm512_permutevar_ps(a, ctrl)
 
@@ -3613,12 +3865,16 @@ class TestPermutevarPs:
 
     def test_mm512_permutevar_ps_alternating_pattern(self):
         """Test alternating permutation pattern for 512-bit"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a = zmm_reg_with_unique_values("a", s, bits=32)
+        a = zmm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
         # Create control vector: alternating [0, 2, 0, 2, ...]
         ctrl = zmm_reg_with_32b_values(
-            "ctrl", s, [0 if i % 2 == 0 else 2 for i in range(16)]
+            "ctrl",
+            s,
+            [0 if i % 2 == 0 else 2 for i in range(16)],
+            ctx=ctx,
         )
 
         output = _mm512_permutevar_ps(a, ctrl)
@@ -3658,11 +3914,12 @@ class TestPermutevarPd:
 
     def test_mm256_permutevar_pd_identity_permute(self):
         """Test identity permutation within lanes for 256-bit"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a = ymm_reg_with_unique_values("a", s, bits=64)
+        a = ymm_reg_with_unique_values("a", s, bits=64, ctx=ctx)
         # Create control vector with bits at correct positions set for identity [0, 1, 0, 1]
-        ctrl = ymm_reg("ctrl")
+        ctrl = ymm_reg("ctrl", ctx=ctx)
         s.add(Extract(1, 1, ctrl) == 0)  # Element 0 selects from position 0
         s.add(Extract(65, 65, ctrl) == 1)  # Element 1 selects from position 1
         s.add(Extract(129, 129, ctrl) == 0)  # Element 2 selects from position 0
@@ -3678,11 +3935,12 @@ class TestPermutevarPd:
 
     def test_mm256_permutevar_pd_swap_within_lanes(self):
         """Test swapping elements within each 128-bit lane for 256-bit"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a = ymm_reg_with_unique_values("a", s, bits=64)
+        a = ymm_reg_with_unique_values("a", s, bits=64, ctx=ctx)
         # Create control vector: swap within each lane [1, 0, 1, 0]
-        ctrl = ymm_reg("ctrl")
+        ctrl = ymm_reg("ctrl", ctx=ctx)
         s.add(Extract(1, 1, ctrl) == 1)  # Element 0 selects from position 1
         s.add(Extract(65, 65, ctrl) == 0)  # Element 1 selects from position 0
         s.add(Extract(129, 129, ctrl) == 1)  # Element 2 selects from position 1
@@ -3709,11 +3967,12 @@ class TestPermutevarPd:
 
     def test_mm256_permutevar_pd_broadcast_first_within_lanes(self):
         """Test broadcasting first element within each lane for 256-bit"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a = ymm_reg_with_unique_values("a", s, bits=64)
+        a = ymm_reg_with_unique_values("a", s, bits=64, ctx=ctx)
         # Create control vector: all control bits = 0 (broadcast element 0 of each lane)
-        ctrl = ymm_reg("ctrl")
+        ctrl = ymm_reg("ctrl", ctx=ctx)
         s.add(Extract(1, 1, ctrl) == 0)
         s.add(Extract(65, 65, ctrl) == 0)
         s.add(Extract(129, 129, ctrl) == 0)
@@ -3740,11 +3999,12 @@ class TestPermutevarPd:
 
     def test_mm256_permutevar_pd_broadcast_second_within_lanes(self):
         """Test broadcasting second element within each lane for 256-bit"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a = ymm_reg_with_unique_values("a", s, bits=64)
+        a = ymm_reg_with_unique_values("a", s, bits=64, ctx=ctx)
         # Create control vector: all control bits = 1 (broadcast element 1 of each lane)
-        ctrl = ymm_reg("ctrl")
+        ctrl = ymm_reg("ctrl", ctx=ctx)
         s.add(Extract(1, 1, ctrl) == 1)
         s.add(Extract(65, 65, ctrl) == 1)
         s.add(Extract(129, 129, ctrl) == 1)
@@ -3771,11 +4031,12 @@ class TestPermutevarPd:
 
     def test_mm512_permutevar_pd_identity_permute(self):
         """Test identity permutation within lanes for 512-bit"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a = zmm_reg_with_unique_values("a", s, bits=64)
+        a = zmm_reg_with_unique_values("a", s, bits=64, ctx=ctx)
         # Create control vector with bits at correct positions set for identity
-        ctrl = zmm_reg("ctrl")
+        ctrl = zmm_reg("ctrl", ctx=ctx)
         s.add(Extract(1, 1, ctrl) == 0)  # Element 0 selects from position 0
         s.add(Extract(65, 65, ctrl) == 1)  # Element 1 selects from position 1
         s.add(Extract(129, 129, ctrl) == 0)  # Element 2 selects from position 0
@@ -3795,11 +4056,12 @@ class TestPermutevarPd:
 
     def test_mm512_permutevar_pd_swap_within_lanes(self):
         """Test swapping elements within each 128-bit lane for 512-bit"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a = zmm_reg_with_unique_values("a", s, bits=64)
+        a = zmm_reg_with_unique_values("a", s, bits=64, ctx=ctx)
         # Create control vector: swap within each lane [1, 0, 1, 0, 1, 0, 1, 0]
-        ctrl = zmm_reg("ctrl")
+        ctrl = zmm_reg("ctrl", ctx=ctx)
         s.add(Extract(1, 1, ctrl) == 1)  # Element 0 selects from position 1
         s.add(Extract(65, 65, ctrl) == 0)  # Element 1 selects from position 0
         s.add(Extract(129, 129, ctrl) == 1)  # Element 2 selects from position 1
@@ -3834,11 +4096,12 @@ class TestPermutevarPd:
 
     def test_mm512_permutevar_pd_broadcast_first_within_lanes(self):
         """Test broadcasting first element within each lane for 512-bit"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a = zmm_reg_with_unique_values("a", s, bits=64)
+        a = zmm_reg_with_unique_values("a", s, bits=64, ctx=ctx)
         # Create control vector: all control bits = 0 (broadcast element 0 of each lane)
-        ctrl = zmm_reg("ctrl")
+        ctrl = zmm_reg("ctrl", ctx=ctx)
         s.add(Extract(1, 1, ctrl) == 0)
         s.add(Extract(65, 65, ctrl) == 0)
         s.add(Extract(129, 129, ctrl) == 0)
@@ -3873,11 +4136,12 @@ class TestPermutevarPd:
 
     def test_mm512_permutevar_pd_broadcast_second_within_lanes(self):
         """Test broadcasting second element within each lane for 512-bit"""
-        s = Solver()
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
 
-        a = zmm_reg_with_unique_values("a", s, bits=64)
+        a = zmm_reg_with_unique_values("a", s, bits=64, ctx=ctx)
         # Create control vector: all control bits = 1 (broadcast element 1 of each lane)
-        ctrl = zmm_reg("ctrl")
+        ctrl = zmm_reg("ctrl", ctx=ctx)
         s.add(Extract(1, 1, ctrl) == 1)
         s.add(Extract(65, 65, ctrl) == 1)
         s.add(Extract(129, 129, ctrl) == 1)
@@ -3916,9 +4180,10 @@ class TestBlendPd:
 
     def test_mm256_blend_pd_all_from_a(self):
         """Test blend_pd with all elements from a (imm8 = 0b0000)"""
-        s = Solver()
-        a = ymm_reg("a")
-        b = ymm_reg("b")
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = ymm_reg("a", ctx=ctx)
+        b = ymm_reg("b", ctx=ctx)
         imm8 = 0b0000  # All bits 0: select all from a
 
         output = _mm256_blend_pd(a, b, imm8)
@@ -3932,9 +4197,10 @@ class TestBlendPd:
 
     def test_mm256_blend_pd_all_from_b(self):
         """Test blend_pd with all elements from b (imm8 = 0b1111)"""
-        s = Solver()
-        a = ymm_reg("a")
-        b = ymm_reg("b")
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = ymm_reg("a", ctx=ctx)
+        b = ymm_reg("b", ctx=ctx)
         imm8 = 0b1111  # All bits 1: select all from b
 
         output = _mm256_blend_pd(a, b, imm8)
@@ -3948,8 +4214,9 @@ class TestBlendPd:
 
     def test_mm256_blend_pd_alternating(self):
         """Test blend_pd with alternating pattern (imm8 = 0b1010)"""
-        s = Solver()
-        a, b = ymm_reg_pair_with_unique_values("input", s, bits=64)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
         imm8 = 0b1010  # Pattern: b, a, b, a (from element 0 to 3)
 
         output = _mm256_blend_pd(a, b, imm8)
@@ -3973,8 +4240,9 @@ class TestBlendPd:
 
     def test_mm256_blend_pd_first_two_from_b(self):
         """Test blend_pd with first two elements from b (imm8 = 0b0011)"""
-        s = Solver()
-        a, b = ymm_reg_pair_with_unique_values("input", s, bits=64)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
         imm8 = 0b0011  # First two from b, last two from a
 
         output = _mm256_blend_pd(a, b, imm8)
@@ -3997,9 +4265,10 @@ class TestBlendPd:
 
     def test_mm256_blend_pd_symbolic_mask(self):
         """Test that Z3 can find the correct mask to produce a specific blend"""
-        s = Solver()
-        a, b = ymm_reg_pair_with_unique_values("input", s, bits=64)
-        imm8 = BitVec("imm8", 8)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
+        imm8 = BitVec("imm8", 8, ctx=ctx)
 
         output = _mm256_blend_pd(a, b, imm8)
 
@@ -4030,9 +4299,10 @@ class TestBlendPs:
 
     def test_mm256_blend_ps_all_from_a(self):
         """Test blend_ps with all elements from a (imm8 = 0b00000000)"""
-        s = Solver()
-        a = ymm_reg("a")
-        b = ymm_reg("b")
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = ymm_reg("a", ctx=ctx)
+        b = ymm_reg("b", ctx=ctx)
         imm8 = 0b00000000  # All bits 0: select all from a
 
         output = _mm256_blend_ps(a, b, imm8)
@@ -4046,9 +4316,10 @@ class TestBlendPs:
 
     def test_mm256_blend_ps_all_from_b(self):
         """Test blend_ps with all elements from b (imm8 = 0b11111111)"""
-        s = Solver()
-        a = ymm_reg("a")
-        b = ymm_reg("b")
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = ymm_reg("a", ctx=ctx)
+        b = ymm_reg("b", ctx=ctx)
         imm8 = 0b11111111  # All bits 1: select all from b
 
         output = _mm256_blend_ps(a, b, imm8)
@@ -4062,8 +4333,9 @@ class TestBlendPs:
 
     def test_mm256_blend_ps_alternating(self):
         """Test blend_ps with alternating pattern (imm8 = 0b10101010)"""
-        s = Solver()
-        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
         imm8 = 0b10101010  # Pattern: a, b, a, b, a, b, a, b
 
         output = _mm256_blend_ps(a, b, imm8)
@@ -4091,8 +4363,9 @@ class TestBlendPs:
 
     def test_mm256_blend_ps_first_four_from_b(self):
         """Test blend_ps with first four elements from b (imm8 = 0b00001111)"""
-        s = Solver()
-        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
         imm8 = 0b00001111  # First four from b, last four from a
 
         output = _mm256_blend_ps(a, b, imm8)
@@ -4119,9 +4392,10 @@ class TestBlendPs:
 
     def test_mm256_blend_ps_symbolic_mask(self):
         """Test that Z3 can find the correct mask to produce a specific blend"""
-        s = Solver()
-        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32)
-        imm8 = BitVec("imm8", 8)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
+        imm8 = BitVec("imm8", 8, ctx=ctx)
 
         output = _mm256_blend_ps(a, b, imm8)
 
@@ -4156,11 +4430,12 @@ class TestBlendvPd:
 
     def test_mm256_blendv_pd_all_from_a(self):
         """Test blendv_pd with all sign bits 0 (select all from a)"""
-        s = Solver()
-        a, b = ymm_reg_pair_with_unique_values("input", s, bits=64)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
 
         # Create mask with all sign bits = 0 (all positive)
-        mask = ymm_reg("mask")
+        mask = ymm_reg("mask", ctx=ctx)
         for j in range(4):
             i = j * 64
             s.add(Extract(i + 63, i + 63, mask) == 0)
@@ -4176,11 +4451,12 @@ class TestBlendvPd:
 
     def test_mm256_blendv_pd_all_from_b(self):
         """Test blendv_pd with all sign bits 1 (select all from b)"""
-        s = Solver()
-        a, b = ymm_reg_pair_with_unique_values("input", s, bits=64)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
 
         # Create mask with all sign bits = 1 (all negative)
-        mask = ymm_reg("mask")
+        mask = ymm_reg("mask", ctx=ctx)
         for j in range(4):
             i = j * 64
             s.add(Extract(i + 63, i + 63, mask) == 1)
@@ -4196,11 +4472,12 @@ class TestBlendvPd:
 
     def test_mm256_blendv_pd_alternating(self):
         """Test blendv_pd with alternating sign bits"""
-        s = Solver()
-        a, b = ymm_reg_pair_with_unique_values("input", s, bits=64)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
 
         # Create mask with alternating sign bits: 0, 1, 0, 1
-        mask = ymm_reg("mask")
+        mask = ymm_reg("mask", ctx=ctx)
         s.add(Extract(63, 63, mask) == 0)  # Element 0: from a
         s.add(Extract(127, 127, mask) == 1)  # Element 1: from b
         s.add(Extract(191, 191, mask) == 0)  # Element 2: from a
@@ -4226,9 +4503,10 @@ class TestBlendvPd:
 
     def test_mm256_blendv_pd_symbolic_mask(self):
         """Test that Z3 can find the correct mask to produce a specific blend"""
-        s = Solver()
-        a, b = ymm_reg_pair_with_unique_values("input", s, bits=64)
-        mask = ymm_reg("mask")
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=64, ctx=ctx)
+        mask = ymm_reg("mask", ctx=ctx)
 
         output = _mm256_blendv_pd(a, b, mask)
 
@@ -4266,11 +4544,12 @@ class TestBlendvPs:
 
     def test_mm256_blendv_ps_all_from_a(self):
         """Test blendv_ps with all sign bits 0 (select all from a)"""
-        s = Solver()
-        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
 
         # Create mask with all sign bits = 0 (all positive)
-        mask = ymm_reg("mask")
+        mask = ymm_reg("mask", ctx=ctx)
         for j in range(8):
             i = j * 32
             s.add(Extract(i + 31, i + 31, mask) == 0)
@@ -4286,11 +4565,12 @@ class TestBlendvPs:
 
     def test_mm256_blendv_ps_all_from_b(self):
         """Test blendv_ps with all sign bits 1 (select all from b)"""
-        s = Solver()
-        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
 
         # Create mask with all sign bits = 1 (all negative)
-        mask = ymm_reg("mask")
+        mask = ymm_reg("mask", ctx=ctx)
         for j in range(8):
             i = j * 32
             s.add(Extract(i + 31, i + 31, mask) == 1)
@@ -4306,11 +4586,12 @@ class TestBlendvPs:
 
     def test_mm256_blendv_ps_alternating(self):
         """Test blendv_ps with alternating sign bits"""
-        s = Solver()
-        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
 
         # Create mask with alternating sign bits: 0, 1, 0, 1, 0, 1, 0, 1
-        mask = ymm_reg("mask")
+        mask = ymm_reg("mask", ctx=ctx)
         for j in range(8):
             i = j * 32
             expected_bit = j % 2
@@ -4340,11 +4621,12 @@ class TestBlendvPs:
 
     def test_mm256_blendv_ps_first_four_from_b(self):
         """Test blendv_ps with first four elements from b"""
-        s = Solver()
-        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
 
         # Create mask: first four sign bits = 1, last four = 0
-        mask = ymm_reg("mask")
+        mask = ymm_reg("mask", ctx=ctx)
         for j in range(8):
             i = j * 32
             expected_bit = 1 if j < 4 else 0
@@ -4374,9 +4656,10 @@ class TestBlendvPs:
 
     def test_mm256_blendv_ps_symbolic_mask(self):
         """Test that Z3 can find the correct mask to produce a specific blend"""
-        s = Solver()
-        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32)
-        mask = ymm_reg("mask")
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a, b = ymm_reg_pair_with_unique_values("input", s, bits=32, ctx=ctx)
+        mask = ymm_reg("mask", ctx=ctx)
 
         output = _mm256_blendv_ps(a, b, mask)
 
@@ -4417,8 +4700,9 @@ class TestPermute4x64Epi64:
 
     def test_mm256_permute4x64_epi64_identity(self):
         """Test identity permutation"""
-        s = Solver()
-        input = ymm_reg("ymm0")
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = ymm_reg("ymm0", ctx=ctx)
         # Identity: [0, 1, 2, 3] - each 2-bit field selects its corresponding element
         imm8 = _MM_SHUFFLE(
             3, 2, 1, 0
@@ -4435,8 +4719,9 @@ class TestPermute4x64Epi64:
 
     def test_mm256_permute4x64_epi64_reverse(self):
         """Test reverse permutation"""
-        s = Solver()
-        input = ymm_reg_with_unique_values("ymm0", s, bits=64)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = ymm_reg_with_unique_values("ymm0", s, bits=64, ctx=ctx)
         # Reverse: [3, 2, 1, 0]
         imm8 = _MM_SHUFFLE(
             0, 1, 2, 3
@@ -4445,7 +4730,7 @@ class TestPermute4x64Epi64:
         output = _mm256_permute4x64_epi64(input, imm8)
 
         # Create reversed input using constraints
-        reversed_input = ymm_reg_reversed("ymm_reversed", s, input, bits=64)
+        reversed_input = ymm_reg_reversed("ymm_reversed", s, input, bits=64, ctx=ctx)
 
         # Output should equal reversed input
         s.add(output != reversed_input)
@@ -4456,8 +4741,9 @@ class TestPermute4x64Epi64:
 
     def test_mm256_permute4x64_epi64_broadcast_first(self):
         """Test broadcasting first element"""
-        s = Solver()
-        input = ymm_reg_with_unique_values("ymm0", s, bits=64)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = ymm_reg_with_unique_values("ymm0", s, bits=64, ctx=ctx)
         # Broadcast element 0: [0, 0, 0, 0]
         imm8 = _MM_SHUFFLE(0, 0, 0, 0)  # dst[0..3]=src[0]
 
@@ -4482,8 +4768,9 @@ class TestPermute4x64Epi64:
 
     def test_mm256_permute4x64_epi64_broadcast_last(self):
         """Test broadcasting last element"""
-        s = Solver()
-        input = ymm_reg_with_unique_values("ymm0", s, bits=64)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = ymm_reg_with_unique_values("ymm0", s, bits=64, ctx=ctx)
         # Broadcast element 3: [3, 3, 3, 3]
         imm8 = _MM_SHUFFLE(3, 3, 3, 3)  # dst[0..3]=src[3]
 
@@ -4508,8 +4795,9 @@ class TestPermute4x64Epi64:
 
     def test_mm256_permute4x64_epi64_swap_pairs(self):
         """Test swapping adjacent pairs"""
-        s = Solver()
-        input = ymm_reg_with_unique_values("ymm0", s, bits=64)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = ymm_reg_with_unique_values("ymm0", s, bits=64, ctx=ctx)
         # Swap pairs: [1, 0, 3, 2]
         imm8 = _MM_SHUFFLE(
             2, 3, 0, 1
@@ -4535,8 +4823,9 @@ class TestPermute4x64Epi64:
 
     def test_mm256_permute4x64_epi64_swap_halves(self):
         """Test swapping halves"""
-        s = Solver()
-        input = ymm_reg_with_unique_values("ymm0", s, bits=64)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = ymm_reg_with_unique_values("ymm0", s, bits=64, ctx=ctx)
         # Swap halves: [2, 3, 0, 1]
         imm8 = _MM_SHUFFLE(
             1, 0, 3, 2
@@ -4562,8 +4851,9 @@ class TestPermute4x64Epi64:
 
     def test_mm256_permute4x64_epi64_custom_pattern(self):
         """Test custom pattern [1, 3, 2, 0]"""
-        s = Solver()
-        input = ymm_reg_with_unique_values("ymm0", s, bits=64)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = ymm_reg_with_unique_values("ymm0", s, bits=64, ctx=ctx)
         # Custom pattern: [1, 3, 2, 0] (from low to high)
         imm8 = _MM_SHUFFLE(
             0, 2, 3, 1
@@ -4589,9 +4879,10 @@ class TestPermute4x64Epi64:
 
     def test_mm256_permute4x64_epi64_symbolic_imm(self):
         """Test that Z3 can find the imm8 value to produce a specific permutation"""
-        s = Solver()
-        input = ymm_reg_with_unique_values("ymm0", s, bits=64)
-        imm8 = BitVec("imm8", 8)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        input = ymm_reg_with_unique_values("ymm0", s, bits=64, ctx=ctx)
+        imm8 = BitVec("imm8", 8, ctx=ctx)
 
         output = _mm256_permute4x64_epi64(input, imm8)
 
@@ -4623,58 +4914,69 @@ class TestAlignrEpi32:
 
     def test_mm256_alignr_epi32_shift_zero(self):
         """Shift by 0 should return b unchanged"""
-        s = Solver()
-        a = ymm_reg_with_32b_values("a", s, list(range(10, 18)))
-        b = ymm_reg_with_32b_values("b", s, list(range(8)))
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = ymm_reg_with_32b_values("a", s, list(range(10, 18)), ctx=ctx)
+        b = ymm_reg_with_32b_values("b", s, list(range(8)), ctx=ctx)
 
         output = _mm256_alignr_epi32(a, b, 0)
-        expected = ymm_reg_with_32b_values("expected", s, list(range(8)))
+        expected = ymm_reg_with_32b_values("expected", s, list(range(8)), ctx=ctx)
 
         s.add(output == expected)
         assert s.check() == sat
 
     def test_mm256_alignr_epi32_shift_one(self):
         """Shift by 1 should shift one element from b to a"""
-        s = Solver()
-        a = ymm_reg_with_32b_values("a", s, list(range(10, 18)))
-        b = ymm_reg_with_32b_values("b", s, list(range(8)))
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = ymm_reg_with_32b_values("a", s, list(range(10, 18)), ctx=ctx)
+        b = ymm_reg_with_32b_values("b", s, list(range(8)), ctx=ctx)
 
         # Concatenated: [10, 11, 12, 13, 14, 15, 16, 17, 0, 1, 2, 3, 4, 5, 6, 7]
         # Shift right by 1: [1, 2, 3, 4, 5, 6, 7, 10, ...]
         # Take low 8: [1, 2, 3, 4, 5, 6, 7, 10]
         output = _mm256_alignr_epi32(a, b, 1)
-        expected = ymm_reg_with_32b_values("expected", s, list(range(1, 8)) + [10])
+        expected = ymm_reg_with_32b_values(
+            "expected", s, list(range(1, 8)) + [10], ctx=ctx
+        )
 
         s.add(output == expected)
         assert s.check() == sat
 
     def test_mm256_alignr_epi32_shift_seven(self):
         """Shift by 7 (max for 3 bits) should get mostly from a"""
-        s = Solver()
-        a = ymm_reg_with_32b_values("a", s, list(range(10, 18)))
-        b = ymm_reg_with_32b_values("b", s, list(range(8)))
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = ymm_reg_with_32b_values("a", s, list(range(10, 18)), ctx=ctx)
+        b = ymm_reg_with_32b_values("b", s, list(range(8)), ctx=ctx)
 
         # Concatenated: [10, 11, 12, 13, 14, 15, 16, 17, 0, 1, 2, 3, 4, 5, 6, 7]
         # Shift right by 7: [7, 10, 11, 12, 13, 14, 15, 16, ...]
         # Take low 8: [7, 10, 11, 12, 13, 14, 15, 16]
         output = _mm256_alignr_epi32(a, b, 7)
-        expected = ymm_reg_with_32b_values("expected", s, [7] + list(range(10, 17)))
+        expected = ymm_reg_with_32b_values(
+            "expected", s, [7] + list(range(10, 17)), ctx=ctx
+        )
 
         s.add(output == expected)
         assert s.check() == sat
 
     def test_mm256_alignr_epi32_shift_four(self):
         """Shift by 4 should get half from each"""
-        s = Solver()
-        a = ymm_reg_with_32b_values("a", s, list(range(10, 18)))
-        b = ymm_reg_with_32b_values("b", s, list(range(8)))
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = ymm_reg_with_32b_values("a", s, list(range(10, 18)), ctx=ctx)
+        b = ymm_reg_with_32b_values("b", s, list(range(8)), ctx=ctx)
 
         # Concatenated: [10, 11, 12, 13, 14, 15, 16, 17, 0, 1, 2, 3, 4, 5, 6, 7]
         # Shift right by 4: [4, 5, 6, 7, 10, 11, 12, 13, ...]
         # Take low 8: [4, 5, 6, 7, 10, 11, 12, 13]
         output = _mm256_alignr_epi32(a, b, 4)
         expected = ymm_reg_with_32b_values(
-            "expected", s, list(range(4, 8)) + list(range(10, 14))
+            "expected",
+            s,
+            list(range(4, 8)) + list(range(10, 14)),
+            ctx=ctx,
         )
 
         s.add(output == expected)
@@ -4682,51 +4984,62 @@ class TestAlignrEpi32:
 
     def test_mm512_alignr_epi32_shift_zero(self):
         """Shift by 0 should return b unchanged"""
-        s = Solver()
-        a = zmm_reg_with_32b_values("a", s, list(range(20, 36)))
-        b = zmm_reg_with_32b_values("b", s, list(range(16)))
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = zmm_reg_with_32b_values("a", s, list(range(20, 36)), ctx=ctx)
+        b = zmm_reg_with_32b_values("b", s, list(range(16)), ctx=ctx)
 
         output = _mm512_alignr_epi32(a, b, 0)
-        expected = zmm_reg_with_32b_values("expected", s, list(range(16)))
+        expected = zmm_reg_with_32b_values("expected", s, list(range(16)), ctx=ctx)
 
         s.add(output == expected)
         assert s.check() == sat
 
     def test_mm512_alignr_epi32_shift_fifteen(self):
         """Shift by 15 (max for 4 bits) should get mostly from a"""
-        s = Solver()
-        a = zmm_reg_with_32b_values("a", s, list(range(20, 36)))
-        b = zmm_reg_with_32b_values("b", s, list(range(16)))
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = zmm_reg_with_32b_values("a", s, list(range(20, 36)), ctx=ctx)
+        b = zmm_reg_with_32b_values("b", s, list(range(16)), ctx=ctx)
 
         # Shift right by 15: [15, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34]
         output = _mm512_alignr_epi32(a, b, 15)
-        expected = zmm_reg_with_32b_values("expected", s, [15] + list(range(20, 35)))
+        expected = zmm_reg_with_32b_values(
+            "expected", s, [15] + list(range(20, 35)), ctx=ctx
+        )
 
         s.add(output == expected)
         assert s.check() == sat
 
     def test_mm512_alignr_epi32_shift_four(self):
         """Shift by 3 elements"""
-        s = Solver()
-        a = zmm_reg_with_32b_values("a", s, [i for i in range(16, 32)])
-        b = zmm_reg_with_32b_values("b", s, [i for i in range(16)])
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = zmm_reg_with_32b_values("a", s, [i for i in range(16, 32)], ctx=ctx)
+        b = zmm_reg_with_32b_values("b", s, [i for i in range(16)], ctx=ctx)
 
         output = _mm512_alignr_epi32(a, b, 4)
-        expected = zmm_reg_with_32b_values("expected", s, [i for i in range(4, 20)])
+        expected = zmm_reg_with_32b_values(
+            "expected", s, [i for i in range(4, 20)], ctx=ctx
+        )
 
         s.add(output == expected)
         assert s.check() == sat
 
     def test_mm256_alignr_epi32_find_shift(self):
         """Use Z3 to find the shift amount"""
-        s = Solver()
-        a = ymm_reg_with_32b_values("a", s, list(range(10, 18)))
-        b = ymm_reg_with_32b_values("b", s, list(range(8)))
-        imm8 = BitVec("imm8", 8)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = ymm_reg_with_32b_values("a", s, list(range(10, 18)), ctx=ctx)
+        b = ymm_reg_with_32b_values("b", s, list(range(8)), ctx=ctx)
+        imm8 = BitVec("imm8", 8, ctx=ctx)
 
         output = _mm256_alignr_epi32(a, b, imm8)
         expected = ymm_reg_with_32b_values(
-            "expected", s, list(range(2, 8)) + list(range(10, 12))
+            "expected",
+            s,
+            list(range(2, 8)) + list(range(10, 12)),
+            ctx=ctx,
         )
 
         s.add(output == expected)
@@ -4740,40 +5053,48 @@ class TestAlignrEpi64:
 
     def test_mm256_alignr_epi64_shift_zero(self):
         """Shift by 0 should return b unchanged"""
-        s = Solver()
-        a = ymm_reg_with_64b_values("a", s, list(range(100, 104)))
-        b = ymm_reg_with_64b_values("b", s, list(range(4)))
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = ymm_reg_with_64b_values("a", s, list(range(100, 104)), ctx=ctx)
+        b = ymm_reg_with_64b_values("b", s, list(range(4)), ctx=ctx)
 
         output = _mm256_alignr_epi64(a, b, 0)
-        expected = ymm_reg_with_64b_values("expected", s, list(range(4)))
+        expected = ymm_reg_with_64b_values("expected", s, list(range(4)), ctx=ctx)
 
         s.add(output == expected)
         assert s.check() == sat
 
     def test_mm256_alignr_epi64_shift_one(self):
         """Shift by 1 element"""
-        s = Solver()
-        a = ymm_reg_with_64b_values("a", s, list(range(100, 104)))
-        b = ymm_reg_with_64b_values("b", s, list(range(4)))
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = ymm_reg_with_64b_values("a", s, list(range(100, 104)), ctx=ctx)
+        b = ymm_reg_with_64b_values("b", s, list(range(4)), ctx=ctx)
 
         # Concatenated: [100, 101, 102, 103, 0, 1, 2, 3]
         # Shift right by 1: [1, 2, 3, 100, ...]
         # Take low 4: [1, 2, 3, 100]
         output = _mm256_alignr_epi64(a, b, 1)
-        expected = ymm_reg_with_64b_values("expected", s, list(range(1, 4)) + [100])
+        expected = ymm_reg_with_64b_values(
+            "expected", s, list(range(1, 4)) + [100], ctx=ctx
+        )
 
         s.add(output == expected)
         assert s.check() == sat
 
     def test_mm256_alignr_epi64_shift_two(self):
         """Shift by 2 should get half from each"""
-        s = Solver()
-        a = ymm_reg_with_64b_values("a", s, list(range(100, 104)))
-        b = ymm_reg_with_64b_values("b", s, list(range(4)))
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = ymm_reg_with_64b_values("a", s, list(range(100, 104)), ctx=ctx)
+        b = ymm_reg_with_64b_values("b", s, list(range(4)), ctx=ctx)
 
         output = _mm256_alignr_epi64(a, b, 2)
         expected = ymm_reg_with_64b_values(
-            "expected", s, list(range(2, 4)) + list(range(100, 102))
+            "expected",
+            s,
+            list(range(2, 4)) + list(range(100, 102)),
+            ctx=ctx,
         )
 
         s.add(output == expected)
@@ -4781,51 +5102,62 @@ class TestAlignrEpi64:
 
     def test_mm256_alignr_epi64_shift_three(self):
         """Shift by 3 (max for 2 bits) should get mostly from a"""
-        s = Solver()
-        a = ymm_reg_with_64b_values("a", s, list(range(100, 104)))
-        b = ymm_reg_with_64b_values("b", s, list(range(4)))
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = ymm_reg_with_64b_values("a", s, list(range(100, 104)), ctx=ctx)
+        b = ymm_reg_with_64b_values("b", s, list(range(4)), ctx=ctx)
 
         # Shift right by 3: [3, 100, 101, 102]
         output = _mm256_alignr_epi64(a, b, 3)
-        expected = ymm_reg_with_64b_values("expected", s, [3] + list(range(100, 103)))
+        expected = ymm_reg_with_64b_values(
+            "expected", s, [3] + list(range(100, 103)), ctx=ctx
+        )
 
         s.add(output == expected)
         assert s.check() == sat
 
     def test_mm512_alignr_epi64_shift_zero(self):
         """Shift by 0 should return b unchanged"""
-        s = Solver()
-        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)))
-        b = zmm_reg_with_64b_values("b", s, list(range(8)))
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)), ctx=ctx)
+        b = zmm_reg_with_64b_values("b", s, list(range(8)), ctx=ctx)
 
         output = _mm512_alignr_epi64(a, b, 0)
-        expected = zmm_reg_with_64b_values("expected", s, list(range(8)))
+        expected = zmm_reg_with_64b_values("expected", s, list(range(8)), ctx=ctx)
 
         s.add(output == expected)
         assert s.check() == sat
 
     def test_mm512_alignr_epi64_shift_seven(self):
         """Shift by 7 (max for 3 bits) should get mostly from a"""
-        s = Solver()
-        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)))
-        b = zmm_reg_with_64b_values("b", s, list(range(8)))
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)), ctx=ctx)
+        b = zmm_reg_with_64b_values("b", s, list(range(8)), ctx=ctx)
 
         # Shift right by 7: [7, 200, 201, 202, 203, 204, 205, 206]
         output = _mm512_alignr_epi64(a, b, 7)
-        expected = zmm_reg_with_64b_values("expected", s, [7] + list(range(200, 207)))
+        expected = zmm_reg_with_64b_values(
+            "expected", s, [7] + list(range(200, 207)), ctx=ctx
+        )
 
         s.add(output == expected)
         assert s.check() == sat
 
     def test_mm512_alignr_epi64_shift_four(self):
         """Shift by 4 should get half from each"""
-        s = Solver()
-        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)))
-        b = zmm_reg_with_64b_values("b", s, list(range(8)))
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)), ctx=ctx)
+        b = zmm_reg_with_64b_values("b", s, list(range(8)), ctx=ctx)
 
         output = _mm512_alignr_epi64(a, b, 4)
         expected = zmm_reg_with_64b_values(
-            "expected", s, list(range(4, 8)) + list(range(200, 204))
+            "expected",
+            s,
+            list(range(4, 8)) + list(range(200, 204)),
+            ctx=ctx,
         )
 
         s.add(output == expected)
@@ -4833,13 +5165,17 @@ class TestAlignrEpi64:
 
     def test_mm512_alignr_epi64_shift_three(self):
         """Shift by 3 elements"""
-        s = Solver()
-        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)))
-        b = zmm_reg_with_64b_values("b", s, list(range(8)))
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)), ctx=ctx)
+        b = zmm_reg_with_64b_values("b", s, list(range(8)), ctx=ctx)
 
         output = _mm512_alignr_epi64(a, b, 3)
         expected = zmm_reg_with_64b_values(
-            "expected", s, list(range(3, 8)) + list(range(200, 203))
+            "expected",
+            s,
+            list(range(3, 8)) + list(range(200, 203)),
+            ctx=ctx,
         )
 
         s.add(output == expected)
@@ -4847,13 +5183,16 @@ class TestAlignrEpi64:
 
     def test_mm256_alignr_epi64_find_shift(self):
         """Use Z3 to find the shift amount"""
-        s = Solver()
-        a = ymm_reg_with_64b_values("a", s, list(range(100, 104)))
-        b = ymm_reg_with_64b_values("b", s, list(range(4)))
-        imm8 = BitVec("imm8", 8)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = ymm_reg_with_64b_values("a", s, list(range(100, 104)), ctx=ctx)
+        b = ymm_reg_with_64b_values("b", s, list(range(4)), ctx=ctx)
+        imm8 = BitVec("imm8", 8, ctx=ctx)
 
         output = _mm256_alignr_epi64(a, b, imm8)
-        expected = ymm_reg_with_64b_values("expected", s, list(range(1, 4)) + [100])
+        expected = ymm_reg_with_64b_values(
+            "expected", s, list(range(1, 4)) + [100], ctx=ctx
+        )
 
         s.add(output == expected)
         assert s.check() == sat
@@ -4866,11 +5205,12 @@ class TestMaskAlignrEpi32:
 
     def test_mm512_mask_alignr_epi32_mask_all_zeros(self):
         """All mask bits zero should return src unchanged"""
-        s = Solver()
-        src = zmm_reg_with_32b_values("src", s, list(range(100, 116)))
-        a = zmm_reg_with_32b_values("a", s, list(range(20, 36)))
-        b = zmm_reg_with_32b_values("b", s, list(range(16)))
-        k = BitVecVal(0x0000, 16)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        src = zmm_reg_with_32b_values("src", s, list(range(100, 116)), ctx=ctx)
+        a = zmm_reg_with_32b_values("a", s, list(range(20, 36)), ctx=ctx)
+        b = zmm_reg_with_32b_values("b", s, list(range(16)), ctx=ctx)
+        k = BitVecVal(0x0000, 16, ctx=ctx)
 
         output = _mm512_mask_alignr_epi32(src, k, a, b, 4)
         expected = src
@@ -4880,15 +5220,19 @@ class TestMaskAlignrEpi32:
 
     def test_mm512_mask_alignr_epi32_mask_all_ones(self):
         """All mask bits set should perform normal alignr"""
-        s = Solver()
-        src = zmm_reg_with_32b_values("src", s, list(range(100, 116)))
-        a = zmm_reg_with_32b_values("a", s, list(range(20, 36)))
-        b = zmm_reg_with_32b_values("b", s, list(range(16)))
-        k = BitVecVal(0xFFFF, 16)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        src = zmm_reg_with_32b_values("src", s, list(range(100, 116)), ctx=ctx)
+        a = zmm_reg_with_32b_values("a", s, list(range(20, 36)), ctx=ctx)
+        b = zmm_reg_with_32b_values("b", s, list(range(16)), ctx=ctx)
+        k = BitVecVal(0xFFFF, 16, ctx=ctx)
 
         output = _mm512_mask_alignr_epi32(src, k, a, b, 4)
         expected = zmm_reg_with_32b_values(
-            "expected", s, list(range(4, 16)) + list(range(20, 24))
+            "expected",
+            s,
+            list(range(4, 16)) + list(range(20, 24)),
+            ctx=ctx,
         )
 
         s.add(output == expected)
@@ -4896,11 +5240,12 @@ class TestMaskAlignrEpi32:
 
     def test_mm512_mask_alignr_epi32_alternating_mask(self):
         """Alternating mask bits"""
-        s = Solver()
-        src = zmm_reg_with_32b_values("src", s, list(range(100, 116)))
-        a = zmm_reg_with_32b_values("a", s, list(range(20, 36)))
-        b = zmm_reg_with_32b_values("b", s, list(range(16)))
-        k = BitVecVal(0xAAAA, 16)  # 0b1010101010101010
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        src = zmm_reg_with_32b_values("src", s, list(range(100, 116)), ctx=ctx)
+        a = zmm_reg_with_32b_values("a", s, list(range(20, 36)), ctx=ctx)
+        b = zmm_reg_with_32b_values("b", s, list(range(16)), ctx=ctx)
+        k = BitVecVal(0xAAAA, 16, ctx=ctx)  # 0b1010101010101010
 
         output = _mm512_mask_alignr_epi32(src, k, a, b, 2)
         # Alignr by 2: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 20, 21]
@@ -4909,6 +5254,7 @@ class TestMaskAlignrEpi32:
             "expected",
             s,
             [100, 3, 102, 5, 104, 7, 106, 9, 108, 11, 110, 13, 112, 15, 114, 21],
+            ctx=ctx,
         )
 
         s.add(output == expected)
@@ -4916,17 +5262,21 @@ class TestMaskAlignrEpi32:
 
     def test_mm512_mask_alignr_epi32_partial_mask(self):
         """Partial mask - lower half masked"""
-        s = Solver()
-        src = zmm_reg_with_32b_values("src", s, list(range(100, 116)))
-        a = zmm_reg_with_32b_values("a", s, list(range(20, 36)))
-        b = zmm_reg_with_32b_values("b", s, list(range(16)))
-        k = BitVecVal(0x00FF, 16)  # Lower 8 elements enabled
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        src = zmm_reg_with_32b_values("src", s, list(range(100, 116)), ctx=ctx)
+        a = zmm_reg_with_32b_values("a", s, list(range(20, 36)), ctx=ctx)
+        b = zmm_reg_with_32b_values("b", s, list(range(16)), ctx=ctx)
+        k = BitVecVal(0x00FF, 16, ctx=ctx)  # Lower 8 elements enabled
 
         output = _mm512_mask_alignr_epi32(src, k, a, b, 1)
         # Alignr by 1: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 20]
         # With mask 0x00FF: [1, 2, 3, 4, 5, 6, 7, 8, 108, 109, 110, 111, 112, 113, 114, 115]
         expected = zmm_reg_with_32b_values(
-            "expected", s, list(range(1, 9)) + list(range(108, 116))
+            "expected",
+            s,
+            list(range(1, 9)) + list(range(108, 116)),
+            ctx=ctx,
         )
 
         s.add(output == expected)
@@ -4934,11 +5284,12 @@ class TestMaskAlignrEpi32:
 
     def test_mm512_mask_alignr_epi32_find_mask(self):
         """Use Z3 to find the mask"""
-        s = Solver()
-        src = zmm_reg_with_32b_values("src", s, list(range(100, 116)))
-        a = zmm_reg_with_32b_values("a", s, list(range(20, 36)))
-        b = zmm_reg_with_32b_values("b", s, list(range(16)))
-        k = BitVec("k", 16)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        src = zmm_reg_with_32b_values("src", s, list(range(100, 116)), ctx=ctx)
+        a = zmm_reg_with_32b_values("a", s, list(range(20, 36)), ctx=ctx)
+        b = zmm_reg_with_32b_values("b", s, list(range(16)), ctx=ctx)
+        k = BitVec("k", 16, ctx=ctx)
 
         output = _mm512_mask_alignr_epi32(src, k, a, b, 8)
         # Alignr by 8: [8, 9, 10, 11, 12, 13, 14, 15, 20, 21, 22, 23, 24, 25, 26, 27]
@@ -4947,6 +5298,7 @@ class TestMaskAlignrEpi32:
             "expected",
             s,
             [8, 101, 10, 103, 12, 105, 14, 107, 20, 109, 22, 111, 24, 113, 26, 115],
+            ctx=ctx,
         )
 
         s.add(output == expected)
@@ -4960,11 +5312,12 @@ class TestMaskAlignrEpi64:
 
     def test_mm512_mask_alignr_epi64_mask_all_zeros(self):
         """All mask bits zero should return src unchanged"""
-        s = Solver()
-        src = zmm_reg_with_64b_values("src", s, list(range(100, 108)))
-        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)))
-        b = zmm_reg_with_64b_values("b", s, list(range(8)))
-        k = BitVecVal(0x00, 8)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        src = zmm_reg_with_64b_values("src", s, list(range(100, 108)), ctx=ctx)
+        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)), ctx=ctx)
+        b = zmm_reg_with_64b_values("b", s, list(range(8)), ctx=ctx)
+        k = BitVecVal(0x00, 8, ctx=ctx)
 
         output = _mm512_mask_alignr_epi64(src, k, a, b, 2)
         expected = src
@@ -4974,15 +5327,19 @@ class TestMaskAlignrEpi64:
 
     def test_mm512_mask_alignr_epi64_mask_all_ones(self):
         """All mask bits set should perform normal alignr"""
-        s = Solver()
-        src = zmm_reg_with_64b_values("src", s, list(range(100, 108)))
-        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)))
-        b = zmm_reg_with_64b_values("b", s, list(range(8)))
-        k = BitVecVal(0xFF, 8)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        src = zmm_reg_with_64b_values("src", s, list(range(100, 108)), ctx=ctx)
+        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)), ctx=ctx)
+        b = zmm_reg_with_64b_values("b", s, list(range(8)), ctx=ctx)
+        k = BitVecVal(0xFF, 8, ctx=ctx)
 
         output = _mm512_mask_alignr_epi64(src, k, a, b, 2)
         expected = zmm_reg_with_64b_values(
-            "expected", s, list(range(2, 8)) + list(range(200, 202))
+            "expected",
+            s,
+            list(range(2, 8)) + list(range(200, 202)),
+            ctx=ctx,
         )
 
         s.add(output == expected)
@@ -4990,17 +5347,21 @@ class TestMaskAlignrEpi64:
 
     def test_mm512_mask_alignr_epi64_alternating_mask(self):
         """Alternating mask bits"""
-        s = Solver()
-        src = zmm_reg_with_64b_values("src", s, list(range(100, 108)))
-        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)))
-        b = zmm_reg_with_64b_values("b", s, list(range(8)))
-        k = BitVecVal(0xAA, 8)  # 0b10101010
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        src = zmm_reg_with_64b_values("src", s, list(range(100, 108)), ctx=ctx)
+        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)), ctx=ctx)
+        b = zmm_reg_with_64b_values("b", s, list(range(8)), ctx=ctx)
+        k = BitVecVal(0xAA, 8, ctx=ctx)  # 0b10101010
 
         output = _mm512_mask_alignr_epi64(src, k, a, b, 1)
         # Alignr by 1: [1, 2, 3, 4, 5, 6, 7, 200]
         # With mask 0xAA: [100, 2, 102, 4, 104, 6, 106, 200]
         expected = zmm_reg_with_64b_values(
-            "expected", s, [100, 2, 102, 4, 104, 6, 106, 200]
+            "expected",
+            s,
+            [100, 2, 102, 4, 104, 6, 106, 200],
+            ctx=ctx,
         )
 
         s.add(output == expected)
@@ -5008,17 +5369,21 @@ class TestMaskAlignrEpi64:
 
     def test_mm512_mask_alignr_epi64_partial_mask(self):
         """Partial mask - lower half enabled"""
-        s = Solver()
-        src = zmm_reg_with_64b_values("src", s, list(range(100, 108)))
-        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)))
-        b = zmm_reg_with_64b_values("b", s, list(range(8)))
-        k = BitVecVal(0x0F, 8)  # 0b00001111 - lower 4 elements enabled
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        src = zmm_reg_with_64b_values("src", s, list(range(100, 108)), ctx=ctx)
+        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)), ctx=ctx)
+        b = zmm_reg_with_64b_values("b", s, list(range(8)), ctx=ctx)
+        k = BitVecVal(0x0F, 8, ctx=ctx)  # 0b00001111 - lower 4 elements enabled
 
         output = _mm512_mask_alignr_epi64(src, k, a, b, 3)
         # Alignr by 3: [3, 4, 5, 6, 7, 200, 201, 202]
         # With mask 0x0F: [3, 4, 5, 6, 104, 105, 106, 107]
         expected = zmm_reg_with_64b_values(
-            "expected", s, list(range(3, 7)) + list(range(104, 108))
+            "expected",
+            s,
+            list(range(3, 7)) + list(range(104, 108)),
+            ctx=ctx,
         )
 
         s.add(output == expected)
@@ -5026,17 +5391,21 @@ class TestMaskAlignrEpi64:
 
     def test_mm512_mask_alignr_epi64_single_bit_mask(self):
         """Single bit mask"""
-        s = Solver()
-        src = zmm_reg_with_64b_values("src", s, list(range(100, 108)))
-        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)))
-        b = zmm_reg_with_64b_values("b", s, list(range(8)))
-        k = BitVecVal(0x10, 8)  # 0b00010000 - only element 4 enabled
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        src = zmm_reg_with_64b_values("src", s, list(range(100, 108)), ctx=ctx)
+        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)), ctx=ctx)
+        b = zmm_reg_with_64b_values("b", s, list(range(8)), ctx=ctx)
+        k = BitVecVal(0x10, 8, ctx=ctx)  # 0b00010000 - only element 4 enabled
 
         output = _mm512_mask_alignr_epi64(src, k, a, b, 2)
         # Alignr by 2: [2, 3, 4, 5, 6, 7, 200, 201]
         # With mask 0x10: [100, 101, 102, 103, 6, 105, 106, 107]
         expected = zmm_reg_with_64b_values(
-            "expected", s, list(range(100, 104)) + [6] + list(range(105, 108))
+            "expected",
+            s,
+            list(range(100, 104)) + [6] + list(range(105, 108)),
+            ctx=ctx,
         )
 
         s.add(output == expected)
@@ -5044,17 +5413,21 @@ class TestMaskAlignrEpi64:
 
     def test_mm512_mask_alignr_epi64_find_shift_and_mask(self):
         """Use Z3 to find both shift and mask"""
-        s = Solver()
-        src = zmm_reg_with_64b_values("src", s, list(range(100, 108)))
-        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)))
-        b = zmm_reg_with_64b_values("b", s, list(range(8)))
-        k = BitVec("k", 8)
-        imm8 = BitVec("imm8", 8)
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        src = zmm_reg_with_64b_values("src", s, list(range(100, 108)), ctx=ctx)
+        a = zmm_reg_with_64b_values("a", s, list(range(200, 208)), ctx=ctx)
+        b = zmm_reg_with_64b_values("b", s, list(range(8)), ctx=ctx)
+        k = BitVec("k", 8, ctx=ctx)
+        imm8 = BitVec("imm8", 8, ctx=ctx)
 
         output = _mm512_mask_alignr_epi64(src, k, a, b, imm8)
         # Want: [5, 6, 7, 103, 104, 105, 106, 107] (shift by 5, mask = 0x07)
         expected = zmm_reg_with_64b_values(
-            "expected", s, list(range(5, 8)) + list(range(103, 108))
+            "expected",
+            s,
+            list(range(5, 8)) + list(range(103, 108)),
+            ctx=ctx,
         )
 
         s.add(output == expected)

@@ -19,7 +19,7 @@ class DualBarColumn(BarColumn):
 
     def __init__(
         self,
-        bar_width: int | None = None,
+        bar_width: int = 40,
         attempt_style: str = "yellow",
         success_style: str = "green",
     ):
@@ -33,7 +33,7 @@ class DualBarColumn(BarColumn):
 
     def render(self, task):
         # Determine bar width (use provided or fallback)
-        total_width = self.bar_width or 40
+        total_width = self.bar_width - 2
 
         # Safely get progress numbers
         total = task.total or 1  # avoid division by zero
@@ -49,7 +49,7 @@ class DualBarColumn(BarColumn):
 
         blocks = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"]
 
-        pieces = Text()
+        pieces = Text("[")
 
         for i in range(total_width):
             # Success level in this character (0.0 to 1.0)
@@ -57,29 +57,43 @@ class DualBarColumn(BarColumn):
             # Attempted level in this character (0.0 to 1.0)
             a_level = max(0.0, min(1.0, attempt_v - i))
 
+            # 1. Full success
             if s_level >= 1.0:
-                # Fully success
                 pieces.append("█", style=self.success_style)
-            elif s_level > 0.0:
-                # Partially success
+                continue
+
+            # 2. Partial success
+            s_idx = int(round(s_level * 8))
+            if s_idx > 0:
                 # Use pre-computed style to avoid "gaps" if attempt continues
-                idx = int(round(s_level * 8))
                 style = (
                     self.success_on_attempt_style
                     if a_level > s_level
                     else self.success_style
                 )
-                pieces.append(blocks[idx], style=style)
-            elif a_level >= 1.0:
-                # Fully attempted
+                pieces.append(blocks[s_idx], style=style)
+                continue
+
+            # 3. Full attempt (no success in this block)
+            if a_level >= 1.0:
                 pieces.append("█", style=self.attempt_style)
-            elif a_level > 0.0:
-                # Partially attempted
-                idx = int(round(a_level * 8))
-                pieces.append(blocks[idx], style=self.attempt_style)
-            else:
-                # Unfilled
-                pieces.append(" ")
+                continue
+
+            # 4. Partial attempt
+            a_idx = int(round(a_level * 8))
+            if a_idx > 0:
+                pieces.append(blocks[a_idx], style=self.attempt_style)
+                continue
+
+            # 5. Unfilled
+            pieces.append(" ")
+
+        pieces.append("]")
+
+        assert len(pieces) == self.bar_width, (
+            f"Expected width {self.bar_width}, got {len(pieces)} "
+            f"for total={task.total}, completed={task.completed}, successes={task.fields.get('successes', 0)}"
+        )
 
         return pieces
 
@@ -123,7 +137,7 @@ class SuccessProgress(Progress):
 
     @staticmethod
     def create(
-        description_column: str = "[bold blue]{task.description}",
+        description_column: str = "[orange1]{task.description}",
         width: int = 60,
         success_style: str = "green",
         attempt_style: str = "yellow",
