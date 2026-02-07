@@ -1,9 +1,23 @@
 from __future__ import annotations
+import time
 import copy
+import os
+import tarfile
+import io
+import zstandard as zstd
 from dataclasses import dataclass
 from tabulate import tabulate
 from multiprocessing import Pool
-from z3 import Solver, Context, main_ctx, Extract, BitVecVal, sat, BitVec, Distinct
+from z3 import (
+    Solver,
+    Context,
+    main_ctx,
+    Extract,
+    BitVecVal,
+    sat,
+    BitVec,
+    Distinct,
+)
 
 try:
     from .success_progress import SuccessProgress
@@ -299,7 +313,8 @@ class GadgetSynthesizer:
         input_state: VectorState,
         target_pairs: list[tuple[int, int]],
         max_solutions: int | None = None,
-    ) -> list[tuple[PermutationGadget, VectorState]]:
+        solver_callback: callable | None = None,
+    ) -> tuple[list[tuple[PermutationGadget, VectorState]], float, float]:
         """
         Synthesize gadgets using symbolic immediates in Z3.
 
@@ -309,7 +324,8 @@ class GadgetSynthesizer:
         The symbolic values are represented using SymbolicPlaceholder for pickling.
         The pickling is required for multiprocessing.
 
-        Returns list of (gadget, output_state) tuples. The output state is computed
+        Returns (results, construction_time, solver_time) where results is
+        list of (gadget, output_state) tuples. The output state is computed
         directly from the satisfying model, avoiding a redundant Z3 solve. The output
         state is in canonical form: for each pair, the lower element index goes to
         the top vector and the higher index goes to bottom, reflecting the
@@ -318,7 +334,9 @@ class GadgetSynthesizer:
         Args:
             max_solutions: Optional cap on the number of solutions returned.
                 When ``None`` (the default) all solutions are enumerated.
+            solver_callback: Optional callback receiving the Solver instance.
         """
+        start_construction = time.perf_counter()
         ctx = main_ctx()
         solver = Solver(ctx=ctx)
 
@@ -400,14 +418,19 @@ class GadgetSynthesizer:
         # have the same pair_id, losing elements in the process.
         solver.add(Distinct(*output_lanes))
 
+        if solver_callback:
+            solver_callback(solver)
+
         # Collect symbolic variable terms for enumeration
         terms = list(symbolic_vars.values())
-
+        construction_time = time.perf_counter() - start_construction
+        solver_start = time.perf_counter()
         # If no symbolic variables, single check suffices
         if not terms:
             result = solver.check()
             if result != sat:
-                return []
+                solver_time = time.perf_counter() - solver_start
+                return [], construction_time, solver_time
             model = solver.model()
             gadget, output_state = self._extract_solution_from_model(
                 model,
@@ -418,7 +441,8 @@ class GadgetSynthesizer:
                 top_instructions_template,
                 bottom_instructions_template,
             )
-            return [(gadget, output_state)]
+            solver_time = time.perf_counter() - solver_start
+            return [(gadget, output_state)], construction_time, solver_time
 
         # Enumerate all solutions over symbolic variables
         results = []
@@ -433,7 +457,8 @@ class GadgetSynthesizer:
                 bottom_instructions_template,
             )
             results.append((gadget, output_state))
-        return results
+        solver_time = time.perf_counter() - solver_start
+        return results, construction_time, solver_time
 
     def _extract_solution_from_model(
         self,
@@ -827,22 +852,54 @@ class GadgetSynthesizer:
             )
 
         try:
-            with Pool() as pool:
-                # Use imap_unordered for streaming results and progress updates
-                for (
-                    gadget_results,
-                    job_input_state,
-                    job_metadata,
-                ) in pool.imap_unordered(_validate_gadget_worker, jobs):
-                    success_inc = 0
-                    for gadget, output_state in gadget_results:
-                        validated_gadgets.append(
-                            (gadget, job_input_state, output_state, job_metadata)
-                        )
-                        success_inc = 1
+            pool = Pool()
+            total_construct_time = 0.0
+            total_solve_time = 0.0
 
-                    if progress:
-                        progress.update(task_id, advance=1, success=success_inc)
+            # Use imap_unordered for streaming results and progress updates
+            for (
+                gadget_results,
+                job_input_state,
+                job_metadata,
+                construct_time,
+                solver_time,
+            ) in pool.imap_unordered(_validate_gadget_worker, jobs):
+                total_construct_time += construct_time
+                total_solve_time += solver_time
+
+                success_inc = 0
+                for gadget, output_state in gadget_results:
+                    validated_gadgets.append(
+                        (gadget, job_input_state, output_state, job_metadata)
+                    )
+                    success_inc = 1
+
+                if progress:
+                    progress.update(task_id, advance=1, success=success_inc)
+
+            pool.close()
+            pool.join()
+
+            if jobs:
+                print(
+                    f"TOTAL construction time: {total_construct_time:.2f}s, TOTAL solver time: {total_solve_time:.2f}s"
+                )
+
+            # Phase 2.5: Compress tar files if smt2_dump_dir is set
+            if jobs and "smt2_dump_dir" in jobs[0][6]:
+                smt2_dump_dir = jobs[0][6]["smt2_dump_dir"]
+                stage_idx = jobs[0][6]["stage_idx"]
+                for filename in os.listdir(smt2_dump_dir):
+                    if filename.startswith(f"stage{stage_idx}_") and filename.endswith(
+                        ".tar"
+                    ):
+                        tar_path = os.path.join(smt2_dump_dir, filename)
+                        zst_path = tar_path + ".zst"
+                        cctx = zstd.ZstdCompressor()
+                        with open(tar_path, "rb") as f_in:
+                            with open(zst_path, "wb") as f_out:
+                                cctx.copy_stream(f_in, f_out)
+                        os.remove(tar_path)
         finally:
             if progress:
                 progress.stop()
@@ -979,10 +1036,17 @@ class GadgetSynthesizer:
 class BitonicSuperVectorizer:
     """Super-optimizer for bitonic sorting networks using Z3-based gadget synthesis."""
 
-    def __init__(self, num_vecs: int, prim_type: primitive_type, vm: vector_machine):
+    def __init__(
+        self,
+        num_vecs: int,
+        prim_type: primitive_type,
+        vm: vector_machine,
+        smt2_dump_dir: str | None = None,
+    ):
         self.num_vecs = num_vecs
         self.prim_type = prim_type
         self.vm = vm
+        self.smt2_dump_dir = smt2_dump_dir
 
         # Calculate total elements and elements per vector
         self.elements_per_vector = width_dict[vm] // int(prim_type.value[0])
@@ -1104,7 +1168,11 @@ class BitonicSuperVectorizer:
             metadata = {
                 "input_state": input_state,
                 "parent_path": parent_path,
+                "stage_idx": stage_idx,
             }
+            if self.smt2_dump_dir:
+                metadata["smt2_dump_dir"] = self.smt2_dump_dir
+
             if max_solutions_per_gadget is not None:
                 metadata["max_solutions"] = max_solutions_per_gadget
 
@@ -1296,13 +1364,17 @@ class BitonicSuperVectorizer:
         print(f"Exported {len(roots)} solution trees to {output_path}")
 
 
+_worker_tar = None
+_worker_job_count = 0
+
+
 def _validate_gadget_worker(job):
     """Worker function for parallel gadget validation.
 
-    Returns (gadget_results, input_state, metadata) where gadget_results is
-    a list of (gadget, output_state) tuples. The output_state is computed
-    directly during validation.
+    Returns (gadget_results, input_state, metadata, construction_time, solver_time)
+    where gadget_results is a list of (gadget, output_state) tuples.
     """
+    global _worker_tar, _worker_job_count
     top_seq, bottom_seq, input_state, target_pairs, vm, prim_type, metadata = job
 
     # Create clones of sequences to avoid modifying the ones in the main process
@@ -1314,12 +1386,42 @@ def _validate_gadget_worker(job):
     # Default to 1 for backward compatibility; callers opt in to more via
     # build_solution_tree(max_solutions_per_gadget=N).
     max_solutions = metadata.get("max_solutions", 1)
-    gadget_results = synthesizer.synthesize_gadget_with_symbolic(
-        top_seq_clone,
-        bottom_seq_clone,
-        input_state,
-        target_pairs,
-        max_solutions=max_solutions,
+
+    smt2_dump_dir = metadata.get("smt2_dump_dir")
+    stage_idx = metadata.get("stage_idx")
+
+    def dump_smt2_to_tar(solver):
+        global _worker_tar, _worker_job_count
+        if smt2_dump_dir is None:
+            return
+
+        if _worker_tar is None:
+            pid = os.getpid()
+            # Write to an uncompressed tar file first; we'll compress it in the main process
+            tar_filename = f"stage{stage_idx}_pid_{pid}.tar"
+            tar_path = os.path.join(smt2_dump_dir, tar_filename)
+            _worker_tar = tarfile.open(tar_path, mode="a")
+
+        _worker_job_count += 1
+        smt2_text = "(reset)\n" + solver.sexpr() + "\n(check-sat)\n"
+        smt2_bytes = smt2_text.encode("utf-8")
+
+        tar_info = tarfile.TarInfo(name=f"job_{_worker_job_count}.smt2")
+        tar_info.size = len(smt2_bytes)
+        _worker_tar.addfile(tar_info, io.BytesIO(smt2_bytes))
+        # Ensure it's written to disk
+        _worker_tar.fileobj.flush()
+
+    gadget_results, construction_time, solver_time = (
+        synthesizer.synthesize_gadget_with_symbolic(
+            top_seq_clone,
+            bottom_seq_clone,
+            input_state,
+            target_pairs,
+            max_solutions=max_solutions,
+            solver_callback=dump_smt2_to_tar,
+        )
     )
 
-    return gadget_results, input_state, metadata
+    metadata["worker_pid"] = os.getpid()
+    return gadget_results, input_state, metadata, construction_time, solver_time

@@ -36,8 +36,9 @@ def test_symbolic_synthesis():
     print(f"Target pairs: {target_pairs}")
 
     # Try with no instructions (should succeed)
-    # Returns list of (gadget, output_state) tuples
-    results = synthesizer.synthesize_gadget_with_symbolic(
+    # Returns (results, construction_time, solver_time)
+    # where results is list of (gadget, output_state) tuples
+    results, _, _ = synthesizer.synthesize_gadget_with_symbolic(
         [], [], input_state, target_pairs
     )
 
@@ -82,8 +83,9 @@ def test_symbolic_synthesis():
     print(f"Target pairs: {target_pairs2}")
     print(f"Instruction template: {inst_template.intrinsic_name}")
 
-    # Returns list of (gadget, output_state) tuples
-    results2 = synthesizer.synthesize_gadget_with_symbolic(
+    # Returns (results, construction_time, solver_time)
+    # where results is list of (gadget, output_state) tuples
+    results2, _, _ = synthesizer.synthesize_gadget_with_symbolic(
         [inst_template], [], input_state2, target_pairs2
     )
 
@@ -200,7 +202,7 @@ def test_multi_solution_enumeration():
 
     # Top: apply blend(top, bottom, symbolic_imm8)
     # Bottom: identity (no instructions) — stays as bottom
-    results = synthesizer.synthesize_gadget_with_symbolic(
+    results, _, _ = synthesizer.synthesize_gadget_with_symbolic(
         [blend_template], [], input_state, target_pairs
     )
 

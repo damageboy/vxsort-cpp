@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 import argparse
+import tempfile
 
 # Handle both relative and absolute imports
 try:
@@ -105,6 +106,7 @@ def generate_bitonic_sorter(
     top_k: int | None = None,
     output_format: str = "json",
     gadget_depth: int = 3,
+    smt2_dump_dir: str | None = None,
 ):
     """
     Generate bitonic sorter with super-optimized permutation sequences.
@@ -117,6 +119,7 @@ def generate_bitonic_sorter(
         top_k: Number of best solutions to keep. If None, all solutions are kept.
         output_format: Output format ("json" or "asm")
         gadget_depth: Maximum instruction depth per gadget (1-3, default 3)
+        smt2_dump_dir: Directory to dump SMT2 files if requested
 
     Returns:
         List of SolutionNode trees representing different optimized solutions
@@ -128,7 +131,7 @@ def generate_bitonic_sorter(
     )
 
     # Create super-vectorizer
-    super_opt = BitonicSuperVectorizer(num_vecs, type, vm)
+    super_opt = BitonicSuperVectorizer(num_vecs, type, vm, smt2_dump_dir=smt2_dump_dir)
 
     # Synthesize all stages to build solution tree
     print("Synthesizing permutation gadgets...")
@@ -215,12 +218,22 @@ if __name__ == "__main__":
         choices=[1, 2, 3],
         help="Maximum instruction depth per gadget (1-3, default: 3)",
     )
+    parser.add_argument(
+        "--dump-smt2",
+        action="store_true",
+        help="Dump SMT2 files from Z3 into compressed tar files in /tmp",
+    )
 
     args = parser.parse_args()
 
     # Convert string arguments to Enum members
     vm = vector_machine[args.vector_machine]
     dtype = primitive_type[args.datatype]
+
+    smt2_dump_dir = None
+    if args.dump_smt2:
+        smt2_dump_dir = tempfile.mkdtemp(prefix="vxsort_smt2_", dir="/tmp")
+        print(f"SMT2 dump directory: {smt2_dump_dir}")
 
     generate_bitonic_sorter(
         args.num_vecs,
@@ -230,4 +243,5 @@ if __name__ == "__main__":
         top_k=args.top_k,
         output_format=args.output_format,
         gadget_depth=args.gadget_depth + 1,  # +1 because range is exclusive
+        smt2_dump_dir=smt2_dump_dir,
     )
