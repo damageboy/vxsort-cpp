@@ -198,21 +198,43 @@ def _format_instruction(
     return asm_line
 
 
-def _collect_all_paths(node, current_path=None) -> list[list]:
+def _count_paths(node, cache: dict[int, int] | None = None) -> int:
+    """Count root-to-leaf paths through the DAG, using memoization for shared children."""
+    if cache is None:
+        cache = {}
+    nid = id(node)
+    if nid in cache:
+        return cache[nid]
+    if not node.children:
+        cache[nid] = 1
+        return 1
+    total = sum(_count_paths(child, cache) for child in node.children)
+    cache[nid] = total
+    return total
+
+
+def _collect_all_paths(node, current_path=None, max_paths=None, _counter=None) -> list[list]:
     """
-    Collect all root-to-leaf paths in the tree.
-    Returns a list of paths, where each path is a list of nodes.
+    Collect root-to-leaf paths in the DAG.
+
+    When *max_paths* is set, collection stops early once enough paths have
+    been gathered, avoiding the exponential blowup caused by shared children.
     """
+    if _counter is None:
+        _counter = [0]  # mutable counter shared across recursive calls
     if current_path is None:
         current_path = []
     current_path = current_path + [node]
 
     if not node.children:
+        _counter[0] += 1
         return [current_path]
 
     paths = []
     for child in node.children:
-        paths.extend(_collect_all_paths(child, current_path))
+        if max_paths is not None and _counter[0] >= max_paths:
+            break
+        paths.extend(_collect_all_paths(child, current_path, max_paths, _counter))
     return paths
 
 
@@ -225,14 +247,14 @@ def _format_vector_state_as_comment(state, prefix: str = "") -> str:
 
 
 def _print_solution_as_assembly(
-    solution_node, reg_allocator: RegisterAllocator, path_num: int = 1, indent: int = 0
+    solution_node, reg_allocator: RegisterAllocator, cumulative_cost: float = 0.0, path_num: int = 1, indent: int = 0
 ):
     """Print a single solution path as assembly code."""
     prefix = "  " * indent
 
     # Print stage header
     print(f"{prefix}; Stage {solution_node.stage}")
-    print(f"{prefix}; Cost: {solution_node.cost:.2f}")
+    print(f"{prefix}; Cost: {cumulative_cost:.2f}")
 
     # Get register names
     top_reg = reg_allocator.get_data_reg(0)
@@ -268,7 +290,10 @@ def _print_solution_as_assembly(
     reg_allocator.reset_temps()
 
 
-def export_solutions_as_assembly(
+_MAX_ASM_PATHS = 10_000
+
+
+def export_solutions_to_asm(
     solutions,
     num_vecs: int,
     dtype: primitive_type,
@@ -276,60 +301,77 @@ def export_solutions_as_assembly(
     output_path: str,
 ):
     """Export solutions as readable assembly code."""
-    # Lazy import to avoid circular dependency
+    import sys
+
+    # Count total paths through the DAG (cheap, memoized)
+    cache: dict[int, int] = {}
+    total_path_count = sum(_count_paths(root, cache) for root in solutions)
+    truncated = total_path_count > _MAX_ASM_PATHS
+
+    if truncated:
+        print(
+            f"Warning: DAG contains {total_path_count} paths, "
+            f"capping assembly output at {_MAX_ASM_PATHS} cheapest paths"
+        )
+
+    # Collect paths (with cap to avoid exponential blowup)
+    all_paths = []
+    for solution in solutions:
+        all_paths.extend(
+            _collect_all_paths(solution, max_paths=_MAX_ASM_PATHS)
+        )
+    all_paths.sort(key=lambda path: sum(node.cost for node in path))
+    if len(all_paths) > _MAX_ASM_PATHS:
+        all_paths = all_paths[:_MAX_ASM_PATHS]
 
     with open(output_path, "w") as f:
-        import sys
-
         old_stdout = sys.stdout
         sys.stdout = f
-
-        print("; Bitonic Sort Assembly Output")
-        print(f"; Architecture: {vm.name}")
-        print(f"; Data Type: {dtype.name}")
-        print(f"; Number of vectors: {num_vecs}")
-        print(f"; Root solutions: {len(solutions)}")
-        print(";")
-        print("; Registers:")
-        reg_prefix = "ymm" if vm == vector_machine.AVX2 else "zmm"
-        for i in range(num_vecs):
-            print(f";   {reg_prefix}{i}: Input/output vector {i}")
-        print(f";   {reg_prefix}{num_vecs}+: Temporary registers as needed")
-        print()
-        print("=" * 80)
-        print()
-
-        # Collect all root-to-leaf paths across all roots, sorted by leaf cost
-        all_paths = []
-        for solution in solutions:
-            all_paths.extend(_collect_all_paths(solution))
-        all_paths.sort(key=lambda path: path[-1].cost)
-
-        print(f"; Total paths: {len(all_paths)}")
-        print()
-
-        for i, path in enumerate(all_paths):
-            leaf_cost = path[-1].cost
-
-            print(f"; ========== SOLUTION {i + 1} of {len(all_paths)} ==========")
-            print(f"; Total cost: {leaf_cost:.2f}")
+        try:
+            print("; Bitonic Sort Assembly Output")
+            print(f"; Architecture: {vm.name}")
+            print(f"; Data Type: {dtype.name}")
+            print(f"; Number of vectors: {num_vecs}")
+            print(f"; Root solutions: {len(solutions)}")
+            if truncated:
+                print(f"; NOTE: Showing {len(all_paths)} of {total_path_count} total paths")
+            print(";")
+            print("; Registers:")
+            reg_prefix = "ymm" if vm == vector_machine.AVX2 else "zmm"
+            for i in range(num_vecs):
+                print(f";   {reg_prefix}{i}: Input/output vector {i}")
+            print(f";   {reg_prefix}{num_vecs}+: Temporary registers as needed")
             print()
-
-            # Print initial input state (before first stage)
-            if path:
-                print("; Initial Input State:")
-                print(_format_vector_state_as_comment(path[0].input_state, ""))
-                print()
-
-            reg_allocator = RegisterAllocator(vm, dtype, num_vecs)
-
-            # Print each stage in the path
-            for node in path:
-                _print_solution_as_assembly(node, reg_allocator)
-
             print("=" * 80)
             print()
 
-        sys.stdout = old_stdout
+            print(f"; Total paths: {len(all_paths)}")
+            print()
 
-    print(f"Exported {len(solutions)} solutions to {output_path}")
+            for i, path in enumerate(all_paths):
+                leaf_cost = sum(node.cost for node in path)
+
+                print(f"; ========== SOLUTION {i + 1} of {len(all_paths)} ==========")
+                print(f"; Total cost: {leaf_cost:.2f}")
+                print()
+
+                # Print initial input state (before first stage)
+                if path:
+                    print("; Initial Input State:")
+                    print(_format_vector_state_as_comment(path[0].input_state, ""))
+                    print()
+
+                reg_allocator = RegisterAllocator(vm, dtype, num_vecs)
+
+                # Print each stage in the path, accumulating cost
+                running_cost = 0.0
+                for node in path:
+                    running_cost += node.cost
+                    _print_solution_as_assembly(node, reg_allocator, cumulative_cost=running_cost)
+
+                print("=" * 80)
+                print()
+        finally:
+            sys.stdout = old_stdout
+
+    print(f"Exported {len(all_paths)} solutions to {output_path}")

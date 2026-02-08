@@ -1225,9 +1225,24 @@ class BitonicSuperVectorizer:
             f"Stage {stage_idx}: Pruned to {len(gadgets_by_transition)} unique state transitions"
         )
 
+        # Post-validation statistics: analyze output_state sharing across input_states
+        output_to_inputs: dict[tuple, set[tuple]] = {}
+        for _parent_path, input_tuple, output_tuple in gadgets_by_transition.keys():
+            if output_tuple not in output_to_inputs:
+                output_to_inputs[output_tuple] = set()
+            output_to_inputs[output_tuple].add(input_tuple)
+
+        num_unique_outputs = len(output_to_inputs)
+        shared_outputs = {
+            out: inputs
+            for out, inputs in output_to_inputs.items()
+            if len(inputs) > 1
+        }
+
         # Phase 4: Create nodes from grouped gadgets
         nodes_by_parent: dict[tuple, list[SolutionNode]] = {}
-        next_stage_inputs = [] if has_next_stage else None
+        # Deduplicate: track one representative per unique output_state
+        unique_outputs: dict[tuple, VectorState] = {}
 
         for (
             parent_path,
@@ -1256,14 +1271,22 @@ class BitonicSuperVectorizer:
                 nodes_by_parent[parent_path] = []
             nodes_by_parent[parent_path].append(node)
 
-            # Prepare for next stage (only if there is one)
-            # Only one entry per unique output_state per parent_path
-            if has_next_stage:
-                new_path = parent_path + (id(node),)
-                next_stage_inputs.append((output_state, new_path))
+            # Track unique output_states for deduplication
+            if has_next_stage and output_tuple not in unique_outputs:
+                unique_outputs[output_tuple] = output_state
 
-        # Phase 4: Recursively process next stage
-        if has_next_stage and next_stage_inputs:
+        # Recurse with deduplicated next-stage inputs
+        if has_next_stage and unique_outputs:
+            total_next = sum(len(nodes) for nodes in nodes_by_parent.values())
+            print(
+                f"Stage {stage_idx}: Deduplicated {total_next} -> {len(unique_outputs)} next-stage inputs"
+            )
+
+            next_stage_inputs = [
+                (state, ("canonical", out_tuple))
+                for out_tuple, state in unique_outputs.items()
+            ]
+
             children_by_path = self._build_tree_recursive(
                 next_stage_inputs,
                 stage_idx + 1,
@@ -1272,12 +1295,19 @@ class BitonicSuperVectorizer:
                 max_solutions_per_gadget=max_solutions_per_gadget,
             )
 
-            # Attach children to their parent nodes
+            # Build lookup from output_state_tuple -> shared children list
+            output_to_children: dict[tuple, list[SolutionNode]] = {
+                out_tuple: children_by_path.get(("canonical", out_tuple), [])
+                for out_tuple in unique_outputs
+            }
+
+            # Attach shared children: all nodes with the same output_state
+            # get the same list object as their children
             for parent_path, nodes in nodes_by_parent.items():
                 for node in nodes:
-                    node_path = parent_path + (id(node),)
-                    if node_path in children_by_path:
-                        node.children = children_by_path[node_path]
+                    out_key = node.output_state.as_tuple()
+                    if out_key in output_to_children:
+                        node.children = output_to_children[out_key]
 
         return nodes_by_parent
 
@@ -1299,70 +1329,6 @@ class BitonicSuperVectorizer:
             gadget_depth=gadget_depth,
             max_solutions_per_gadget=max_solutions_per_gadget,
         )
-
-    def compute_costs(self, roots: list[SolutionNode], cost_model):
-        """Traverse tree and compute cumulative costs for each path."""
-        for root in roots:
-            self._compute_costs_recursive(root, cost_model)
-
-    def _compute_costs_recursive(self, node: SolutionNode, cost_model):
-        """Recursively compute costs for node and its children.
-
-        Uses the best (lowest instruction count) gadget for cost calculation.
-        """
-        node.cost = cost_model.calculate_gadget_cost(node.best_gadget())
-        for child in node.children:
-            self._compute_costs_recursive(child, cost_model)
-            # Add parent cost to child for cumulative cost
-            child.cost += node.cost
-
-    def export_solutions_to_json(self, roots: list[SolutionNode], output_path: str):
-        """Generate JSON with all solutions and costs."""
-        import json
-
-        def gadget_to_dict(gadget: PermutationGadget) -> dict:
-            return {
-                "top_instructions": [
-                    {"name": inst.intrinsic_name, "args": inst.args}
-                    for inst in gadget.top_instructions
-                ],
-                "bottom_instructions": [
-                    {"name": inst.intrinsic_name, "args": inst.args}
-                    for inst in gadget.bottom_instructions
-                ],
-                "instruction_count": gadget.instruction_count(),
-            }
-
-        def node_to_dict(node: SolutionNode) -> dict:
-            best = node.best_gadget()
-            return {
-                "stage": node.stage,
-                "input_state": {
-                    "top": node.input_state.top,
-                    "bottom": node.input_state.bottom,
-                },
-                "output_state": {
-                    "top": node.output_state.top,
-                    "bottom": node.output_state.bottom,
-                },
-                "gadget": gadget_to_dict(
-                    best
-                ),  # Best gadget for backward compatibility
-                "gadgets": [
-                    gadget_to_dict(g) for g in node.gadgets
-                ],  # All equivalent gadgets
-                "gadget_count": len(node.gadgets),
-                "cost": node.cost,
-                "children": [node_to_dict(child) for child in node.children],
-            }
-
-        solutions = [node_to_dict(root) for root in roots]
-
-        with open(output_path, "w") as f:
-            json.dump(solutions, f, indent=2)
-
-        print(f"Exported {len(roots)} solution trees to {output_path}")
-
 
 _worker_tar = None
 _worker_job_count = 0
@@ -1425,3 +1391,5 @@ def _validate_gadget_worker(job):
 
     metadata["worker_pid"] = os.getpid()
     return gadget_results, input_state, metadata, construction_time, solver_time
+
+

@@ -1,7 +1,10 @@
 """Cost model for AVX instructions based on CPU microarchitecture."""
+from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict
+
+from bitonic_super_optimizer import SolutionNode
 
 
 @dataclass
@@ -129,6 +132,27 @@ class CostModel:
             self.calculate_gadget_cost(node.best_gadget()) for node in solution_path
         )
 
+    def _compute_costs_recursive(self, node: SolutionNode, visited: set[int]):
+        """Recursively compute per-node costs, skipping already-visited nodes."""
+        node_id = id(node)
+        if node_id in visited:
+            return
+        visited.add(node_id)
+        node.cost = self.calculate_gadget_cost(node.best_gadget())
+        for child in node.children:
+            self._compute_costs_recursive(child, visited)
+
+    def compute_costs(self, roots: list[SolutionNode]):
+        """Traverse DAG and compute per-node costs (non-cumulative).
+
+        Each node stores only its own gadget cost.  Cumulative costs are
+        computed at query time by summing along a path.  A ``visited`` set
+        prevents reprocessing shared children.
+        """
+        visited: set[int] = set()
+        for root in roots:
+            self._compute_costs_recursive(root, visited)
+
 
 def load_costs_from_uops_info(cpu_model: str) -> Dict[str, InstructionCost]:
     """
@@ -179,3 +203,5 @@ def load_costs_from_uops_info(cpu_model: str) -> Dict[str, InstructionCost]:
     except Exception as e:
         print(f"Warning: Failed to load cost data from {cost_file}: {e}")
         return {}
+
+

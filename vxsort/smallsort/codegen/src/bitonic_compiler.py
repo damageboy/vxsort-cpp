@@ -1,33 +1,45 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 import argparse
+import heapq
 import tempfile
+
+from json_exporter import export_solutions_to_json
 
 # Handle both relative and absolute imports
 try:
     from .cost_model import CostModel
     from .bitonic_super_optimizer import BitonicSuperVectorizer
     from .utils import vector_machine, primitive_type, width_dict
-    from .asm_exporter import export_solutions_as_assembly
+    from .asm_exporter import export_solutions_to_asm
 
 except ImportError:
     from cost_model import CostModel
     from bitonic_super_optimizer import BitonicSuperVectorizer
     from utils import vector_machine, primitive_type, width_dict
-    from asm_exporter import export_solutions_as_assembly
+    from asm_exporter import export_solutions_to_asm
 
 
-def _collect_leaf_paths(node, current_path=None):
-    """Yield all root-to-leaf paths as (leaf_cost, [node, ...]) tuples."""
-    if current_path is None:
-        current_path = []
-    current_path = current_path + [node]
+def _count_dag_paths(roots):
+    """Count total root-to-leaf paths through the DAG using memoization.
 
-    if not node.children:
-        yield (node.cost, current_path)
-    else:
-        for child in node.children:
-            yield from _collect_leaf_paths(child, current_path)
+    O(unique nodes) time and space, regardless of the (potentially
+    exponential) number of paths.
+    """
+    cache: dict[int, int] = {}
+
+    def _count(node):
+        nid = id(node)
+        if nid in cache:
+            return cache[nid]
+        if not node.children:
+            cache[nid] = 1
+            return 1
+        total = sum(_count(child) for child in node.children)
+        cache[nid] = total
+        return total
+
+    return sum(_count(root) for root in roots)
 
 
 def _count_control_vectors_in_path(path):
@@ -58,23 +70,76 @@ def _count_control_vectors_in_path(path):
     return count
 
 
+def _select_top_k_paths(solutions, top_k):
+    """Find the top K cheapest root-to-leaf paths using A* search.
+
+    Instead of materializing every path (exponential for DAGs with shared
+    children), this uses a priority queue with an admissible heuristic
+    (minimum remaining cost to any leaf).  Only the cheapest *top_k*
+    complete paths are ever held in memory.
+    """
+    # Phase 1: compute admissible heuristic — min remaining cost to a leaf
+    min_remaining: dict[int, float] = {}
+
+    def _compute_h(node):
+        nid = id(node)
+        if nid in min_remaining:
+            return min_remaining[nid]
+        if not node.children:
+            min_remaining[nid] = 0.0
+            return 0.0
+        best = min(child.cost + _compute_h(child) for child in node.children)
+        min_remaining[nid] = best
+        return best
+
+    for root in solutions:
+        _compute_h(root)
+
+    # Phase 2: A* priority queue
+    # Heap entries: (estimated_total, tiebreaker, cumulative_cost, path)
+    counter = 0
+    heap: list[tuple[float, int, float, list]] = []
+    for root in solutions:
+        est = root.cost + min_remaining.get(id(root), 0.0)
+        heapq.heappush(heap, (est, counter, root.cost, [root]))
+        counter += 1
+
+    selected: list[tuple[float, list]] = []
+    while heap and len(selected) < top_k:
+        _est, _tie, cost, path = heapq.heappop(heap)
+        node = path[-1]
+
+        if not node.children:
+            # Complete path
+            selected.append((cost, path))
+        else:
+            for child in node.children:
+                new_cost = cost + child.cost
+                new_est = new_cost + min_remaining.get(id(child), 0.0)
+                heapq.heappush(heap, (new_est, counter, new_cost, path + [child]))
+                counter += 1
+
+    return selected
+
+
 def _prune_to_top_k_paths(solutions, top_k):
     """Keep only the top K cheapest root-to-leaf paths, preferring immediate-based instructions.
 
-    Sorts by (cost, control_vector_count) where control_vector_count is the number
-    of instructions requiring YMM/ZMM control inputs. At equal cost, paths with
-    fewer control vector instructions are preferred (immediates are more efficient).
+    Uses A* search to find the cheapest paths without materializing all
+    paths (which is exponential for DAGs with shared children).
+
+    Among equal-cost paths, prefers those with fewer control vector
+    instructions (YMM/ZMM control inputs).
 
     Modifies the tree in place by removing children not on any selected path.
     Returns the filtered list of roots.
     """
-    all_paths = []
-    for root in solutions:
-        all_paths.extend(_collect_leaf_paths(root))
+    selected_paths = _select_top_k_paths(solutions, top_k)
 
-    # Sort by (cost, control_vector_count) - prefer fewer control vectors at same cost
-    all_paths.sort(key=lambda x: (x[0], _count_control_vectors_in_path(x[1])))
-    selected_paths = all_paths[:top_k]
+    # Sort by (cost, control_vector_count) for stable ordering
+    selected_paths.sort(
+        key=lambda x: (x[0], _count_control_vectors_in_path(x[1]))
+    )
 
     # Build set of kept edges (parent_id, child_id) and kept root ids
     kept_edges = set()
@@ -84,12 +149,17 @@ def _prune_to_top_k_paths(solutions, top_k):
         for i in range(len(path) - 1):
             kept_edges.add((id(path[i]), id(path[i + 1])))
 
-    def prune_node(node):
+    def prune_node(node, visited=None):
+        if visited is None:
+            visited = set()
+        if id(node) in visited:
+            return
+        visited.add(id(node))
         node.children = [
             child for child in node.children if (id(node), id(child)) in kept_edges
         ]
         for child in node.children:
-            prune_node(child)
+            prune_node(child, visited)
 
     solutions = [root for root in solutions if id(root) in kept_roots]
     for root in solutions:
@@ -104,7 +174,7 @@ def generate_bitonic_sorter(
     vm: vector_machine,
     depth_limit: int | None = None,
     top_k: int | None = None,
-    output_format: str = "json",
+    output_formats: list[str] = None,
     gadget_depth: int = 3,
     smt2_dump_dir: str | None = None,
 ):
@@ -117,13 +187,15 @@ def generate_bitonic_sorter(
         vm: Vector machine (AVX2, AVX512)
         depth_limit: Maximum stage depth to explore (inclusive). If None, all stages are explored.
         top_k: Number of best solutions to keep. If None, all solutions are kept.
-        output_format: Output format ("json" or "asm")
+        output_formats: List of output formats (e.g., ["json", "asm"]). Default is ["json"].
         gadget_depth: Maximum instruction depth per gadget (1-3, default 3)
         smt2_dump_dir: Directory to dump SMT2 files if requested
 
     Returns:
         List of SolutionNode trees representing different optimized solutions
     """
+    if output_formats is None:
+        output_formats = ["json"]
     total_elements = int(num_vecs * (width_dict[vm] / int(type.value[0])))
 
     print(
@@ -144,11 +216,11 @@ def generate_bitonic_sorter(
     # Compute costs
     print("Computing costs...")
     cost_model = CostModel("generic")
-    super_opt.compute_costs(solutions, cost_model)
+    cost_model.compute_costs(solutions)
 
     # Filter to top K cheapest root-to-leaf paths if requested
     if top_k is not None:
-        total_paths = sum(1 for root in solutions for _ in _collect_leaf_paths(root))
+        total_paths = _count_dag_paths(solutions)
         if total_paths > top_k:
             print(
                 f"Filtering to top {top_k} cheapest paths (out of {total_paths} total)..."
@@ -156,13 +228,16 @@ def generate_bitonic_sorter(
             solutions = _prune_to_top_k_paths(solutions, top_k)
             print(f"Kept {len(solutions)} roots after pruning")
 
-    # Export solutions in the requested format
-    if output_format == "asm":
-        output_path = f"bitonic_solutions_{num_vecs}x{vm.name}_{type.name}.asm"
-        export_solutions_as_assembly(solutions, num_vecs, type, vm, output_path)
-    else:  # json
-        output_path = f"bitonic_solutions_{num_vecs}x{vm.name}_{type.name}.json"
-        super_opt.export_solutions_to_json(solutions, output_path)
+    # Export solutions in the requested format(s)
+    for output_format in output_formats:
+        if output_format == "asm":
+            output_path = f"bitonic_solutions_{num_vecs}x{vm.name}_{type.name}.asm"
+            export_solutions_to_asm(solutions, num_vecs, type, vm, output_path)
+        elif output_format == "json":
+            output_path = f"bitonic_solutions_{num_vecs}x{vm.name}_{type.name}.json"
+            export_solutions_to_json(solutions, output_path)
+        else:
+            print(f"Warning: Unknown output format '{output_format}', skipping")
 
     return solutions
 
@@ -207,9 +282,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output-format",
         type=str,
-        default="json",
+        action="append",
         choices=["json", "asm"],
-        help="Output format: 'json' for structured JSON output, 'asm' for readable assembly code (default: json)",
+        help="Output format: 'json' for structured JSON output, 'asm' for readable assembly code. Can be specified multiple times (default: json)",
     )
     parser.add_argument(
         "--gadget-depth",
@@ -241,7 +316,7 @@ if __name__ == "__main__":
         vm,
         depth_limit=args.depth_limit,
         top_k=args.top_k,
-        output_format=args.output_format,
+        output_formats=args.output_format,  # Will be None if not specified, handled by function default
         gadget_depth=args.gadget_depth + 1,  # +1 because range is exclusive
         smt2_dump_dir=smt2_dump_dir,
     )
