@@ -261,6 +261,29 @@ class GadgetSynthesizer:
             # Align operations
             intrinsics["_mm256_alignr_epi32"] = z3_avx._mm256_alignr_epi32
 
+        # For AVX2 i64, we need YMM (256-bit) operations on 64-bit elements
+        if self.vm == vector_machine.AVX2 and self.prim_type == primitive_type.i64:
+            # Single input permutes (with immediates)
+            intrinsics["_mm256_permute4x64_epi64"] = z3_avx._mm256_permute4x64_epi64
+            intrinsics["_mm256_permute_pd"] = z3_avx._mm256_permute_pd
+
+            # Single input permutes (with control vectors)
+            intrinsics["_mm256_permutexvar_epi64"] = z3_avx._mm256_permutexvar_epi64
+            intrinsics["_mm256_permutevar_pd"] = z3_avx._mm256_permutevar_pd
+
+            # Two input permutes/shuffles
+            intrinsics["_mm256_shuffle_pd"] = z3_avx._mm256_shuffle_pd
+            intrinsics["_mm256_unpacklo_epi64"] = z3_avx._mm256_unpacklo_epi64
+            intrinsics["_mm256_unpackhi_epi64"] = z3_avx._mm256_unpackhi_epi64
+            intrinsics["_mm256_permute2x128_si256"] = z3_avx._mm256_permute2x128_si256
+
+            # Blends
+            intrinsics["_mm256_blend_pd"] = z3_avx._mm256_blend_pd
+            intrinsics["_mm256_blendv_pd"] = z3_avx._mm256_blendv_pd
+
+            # Align operations
+            intrinsics["_mm256_alignr_epi64"] = z3_avx._mm256_alignr_epi64
+
         return intrinsics
 
     def _create_pair_id_mapping(
@@ -979,6 +1002,48 @@ class GadgetSynthesizer:
 
             return [permute_ps, permute4x64, permutexvar, permutevar_ps]
 
+        if self.vm == vector_machine.AVX2 and self.prim_type == primitive_type.i64:
+            input_reg = reg_name
+            unique_id = id(input_reg)
+
+            # Permute within 128-bit lanes using immediate (for pd/64-bit doubles)
+            permute_pd = InstructionSpec(
+                "_mm256_permute_pd",
+                {
+                    "a": input_reg,
+                    "imm8": SymbolicPlaceholder(f"imm8_permute_pd_{unique_id}", 8),
+                },
+            )
+
+            # Permute 64-bit elements across full register
+            permute4x64 = InstructionSpec(
+                "_mm256_permute4x64_epi64",
+                {
+                    "a": input_reg,
+                    "imm8": SymbolicPlaceholder(f"imm8_permute4x64_{unique_id}", 8),
+                },
+            )
+
+            # Variable permute across all lanes (most powerful for 64-bit)
+            permutexvar = InstructionSpec(
+                "_mm256_permutexvar_epi64",
+                {
+                    "a": input_reg,
+                    "op_idx": SymbolicPlaceholder(f"ctrl_permutexvar_{unique_id}", 256),
+                },
+            )
+
+            # Variable permute within 128-bit lanes (for pd)
+            permutevar_pd = InstructionSpec(
+                "_mm256_permutevar_pd",
+                {
+                    "a": input_reg,
+                    "b": SymbolicPlaceholder(f"ctrl_permutevar_pd_{unique_id}", 256),
+                },
+            )
+
+            return [permute_pd, permute4x64, permutexvar, permutevar_pd]
+
         raise NotImplementedError(
             f"Single-input instructions not implemented for {self.vm} and {self.prim_type}"
         )
@@ -1048,6 +1113,65 @@ class GadgetSynthesizer:
             )
 
             return [shuffle_ps, unpacklo, unpackhi, permute2x128, blend_ps, alignr]
+
+        if self.vm == vector_machine.AVX2 and self.prim_type == primitive_type.i64:
+            reg1 = reg1_name
+            reg2 = reg2_name
+            unique_id = f"{id(reg1)}_{id(reg2)}"
+
+            # Shuffle: select 64-bit elements from both inputs within 128-bit lanes (pd variant)
+            shuffle_pd = InstructionSpec(
+                "_mm256_shuffle_pd",
+                {
+                    "a": reg1,
+                    "b": reg2,
+                    "imm8": SymbolicPlaceholder(f"imm8_shuffle_{unique_id}", 8),
+                },
+            )
+
+            # Unpack low: interleave low 64-bit elements from both inputs
+            unpacklo = InstructionSpec(
+                "_mm256_unpacklo_epi64",
+                {"a": reg1, "b": reg2},
+            )
+
+            # Unpack high: interleave high 64-bit elements from both inputs
+            unpackhi = InstructionSpec(
+                "_mm256_unpackhi_epi64",
+                {"a": reg1, "b": reg2},
+            )
+
+            # Permute 128-bit lanes between two registers (works for any element size)
+            permute2x128 = InstructionSpec(
+                "_mm256_permute2x128_si256",
+                {
+                    "a": reg1,
+                    "b": reg2,
+                    "imm8": SymbolicPlaceholder(f"imm8_perm2x128_{unique_id}", 8),
+                },
+            )
+
+            # Blend: select 64-bit elements from either input based on mask (pd variant)
+            blend_pd = InstructionSpec(
+                "_mm256_blend_pd",
+                {
+                    "a": reg1,
+                    "b": reg2,
+                    "imm8": SymbolicPlaceholder(f"imm8_blend_{unique_id}", 8),
+                },
+            )
+
+            # Align right: concatenate and shift by 64-bit elements
+            alignr = InstructionSpec(
+                "_mm256_alignr_epi64",
+                {
+                    "a": reg1,
+                    "b": reg2,
+                    "imm8": SymbolicPlaceholder(f"imm8_alignr_{unique_id}", 8),
+                },
+            )
+
+            return [shuffle_pd, unpacklo, unpackhi, permute2x128, blend_pd, alignr]
 
         raise NotImplementedError(
             f"Dual-input instructions not implemented for {self.vm} and {self.prim_type}"

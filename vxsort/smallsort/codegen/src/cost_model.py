@@ -54,6 +54,16 @@ class CostModel:
                 "_mm256_blend_ps": InstructionCost(1.0, 0.33, ["p015"]),
                 "_mm256_blendv_ps": InstructionCost(2.0, 0.67, ["p015"]),
                 "_mm256_alignr_epi32": InstructionCost(1.0, 1.0, ["p5"]),
+                # AVX2 i64 instructions
+                "_mm256_permutexvar_epi64": InstructionCost(3.0, 1.0, ["p5"]),
+                "_mm256_permute_pd": InstructionCost(1.0, 1.0, ["p5"]),
+                "_mm256_permutevar_pd": InstructionCost(1.0, 1.0, ["p5"]),
+                "_mm256_shuffle_pd": InstructionCost(1.0, 1.0, ["p5"]),
+                "_mm256_unpacklo_epi64": InstructionCost(1.0, 1.0, ["p5"]),
+                "_mm256_unpackhi_epi64": InstructionCost(1.0, 1.0, ["p5"]),
+                "_mm256_blend_pd": InstructionCost(1.0, 0.33, ["p015"]),
+                "_mm256_blendv_pd": InstructionCost(2.0, 0.67, ["p015"]),
+                "_mm256_alignr_epi64": InstructionCost(1.0, 1.0, ["p5"]),
             }
         )
 
