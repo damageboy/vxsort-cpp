@@ -51,7 +51,6 @@ def export_solutions_to_json(roots: list[SolutionNode], output_path: str):
         node_id_map[obj_id] = stable_id
         # Register children first so their ids are available
         child_ids = [register_node(child) for child in node.children]
-        best = node.best_gadget()
         nodes_dict[stable_id] = {
             "stage": node.stage,
             "input_state": {
@@ -62,7 +61,6 @@ def export_solutions_to_json(roots: list[SolutionNode], output_path: str):
                 "top": node.output_state.top,
                 "bottom": node.output_state.bottom,
             },
-            "gadget": gadget_to_dict(best),
             "gadgets": [gadget_to_dict(g) for g in node.gadgets],
             "gadget_count": len(node.gadgets),
             "cost": node.cost,
