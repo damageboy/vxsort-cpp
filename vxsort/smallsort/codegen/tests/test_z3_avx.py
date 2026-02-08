@@ -25,6 +25,9 @@ from z3_avx import _mm512_shuffle_i32x4
 from z3_avx import _mm256_unpacklo_epi32, _mm256_unpackhi_epi32
 from z3_avx import _mm512_unpacklo_epi32, _mm512_unpackhi_epi32
 from z3_avx import _mm512_mask_unpacklo_epi32, _mm512_mask_unpackhi_epi32
+from z3_avx import _mm256_unpacklo_epi64, _mm256_unpackhi_epi64
+from z3_avx import _mm512_unpacklo_epi64, _mm512_unpackhi_epi64
+from z3_avx import _mm512_mask_unpacklo_epi64, _mm512_mask_unpackhi_epi64
 from z3_avx import _mm512_mask_permute_ps, _mm512_mask_permute_pd
 from z3_avx import _mm512_mask_shuffle_ps, _mm512_mask_shuffle_pd
 from z3_avx import _mm256_permutevar_ps, _mm512_permutevar_ps, _mm512_mask_permutevar_ps
@@ -5497,3 +5500,111 @@ class TestShuffleMaskDecode:
             assert result.endswith(")"), f"Bad format for 0x{imm8:02x}: {result}"
             # Check it contains the right number of commas
             assert result.count(",") == 3, f"Bad format for 0x{imm8:02x}: {result}"
+
+
+class TestUnpackEpi64:
+    """Tests for 64-bit unpack operations."""
+
+    def test_mm256_unpacklo_epi64_interleaves_low_elements(self):
+        """Verify unpacklo interleaves low elements from each 128-bit lane."""
+        s = Solver()
+        ctx = s.ctx
+
+        a = ymm_reg_with_64b_values("a", s, [10, 11, 12, 13], ctx=ctx)
+        b = ymm_reg_with_64b_values("b", s, [20, 21, 22, 23], ctx=ctx)
+
+        result = _mm256_unpacklo_epi64(a, b)
+        expected = ymm_reg_with_64b_values("exp", s, [10, 20, 12, 22], ctx=ctx)
+
+        s.add(result == expected)
+        assert s.check() == sat
+
+    def test_mm256_unpackhi_epi64_interleaves_high_elements(self):
+        """Verify unpackhi interleaves high elements from each 128-bit lane."""
+        s = Solver()
+        ctx = s.ctx
+
+        a = ymm_reg_with_64b_values("a", s, [10, 11, 12, 13], ctx=ctx)
+        b = ymm_reg_with_64b_values("b", s, [20, 21, 22, 23], ctx=ctx)
+
+        result = _mm256_unpackhi_epi64(a, b)
+        expected = ymm_reg_with_64b_values("exp", s, [11, 21, 13, 23], ctx=ctx)
+
+        s.add(result == expected)
+        assert s.check() == sat
+
+    def test_mm512_unpacklo_epi64_interleaves_low_elements(self):
+        """Verify 512-bit unpacklo interleaves low elements from each 128-bit lane."""
+        s = Solver()
+        ctx = s.ctx
+
+        a = zmm_reg_with_64b_values("a", s, [10, 11, 12, 13, 14, 15, 16, 17], ctx=ctx)
+        b = zmm_reg_with_64b_values("b", s, [20, 21, 22, 23, 24, 25, 26, 27], ctx=ctx)
+
+        result = _mm512_unpacklo_epi64(a, b)
+        expected = zmm_reg_with_64b_values(
+            "exp", s, [10, 20, 12, 22, 14, 24, 16, 26], ctx=ctx
+        )
+
+        s.add(result == expected)
+        assert s.check() == sat
+
+    def test_mm512_unpackhi_epi64_interleaves_high_elements(self):
+        """Verify 512-bit unpackhi interleaves high elements from each 128-bit lane."""
+        s = Solver()
+        ctx = s.ctx
+
+        a = zmm_reg_with_64b_values("a", s, [10, 11, 12, 13, 14, 15, 16, 17], ctx=ctx)
+        b = zmm_reg_with_64b_values("b", s, [20, 21, 22, 23, 24, 25, 26, 27], ctx=ctx)
+
+        result = _mm512_unpackhi_epi64(a, b)
+        expected = zmm_reg_with_64b_values(
+            "exp", s, [11, 21, 13, 23, 15, 25, 17, 27], ctx=ctx
+        )
+
+        s.add(result == expected)
+        assert s.check() == sat
+
+    def test_mm512_mask_unpacklo_epi64_applies_writemask(self):
+        """Verify masked unpacklo uses src for masked-off elements."""
+        s = Solver()
+        ctx = s.ctx
+
+        src = zmm_reg_with_64b_values("src", s, [100, 101, 102, 103, 104, 105, 106, 107], ctx=ctx)
+        a = zmm_reg_with_64b_values("a", s, [10, 11, 12, 13, 14, 15, 16, 17], ctx=ctx)
+        b = zmm_reg_with_64b_values("b", s, [20, 21, 22, 23, 24, 25, 26, 27], ctx=ctx)
+
+        # Mask: 0b10101010 = keep elements 1, 3, 5, 7 from unpacked result
+        k = BitVecVal(0b10101010, 8)
+
+        result = _mm512_mask_unpacklo_epi64(src, k, a, b)
+        # Expected: unpack gives [10, 20, 12, 22, 14, 24, 16, 26]
+        # With mask 0b10101010, elements 0,2,4,6 come from src, 1,3,5,7 from unpack
+        expected = zmm_reg_with_64b_values(
+            "exp", s, [100, 20, 102, 22, 104, 24, 106, 26], ctx=ctx
+        )
+
+        s.add(result == expected)
+        assert s.check() == sat
+
+    def test_mm512_mask_unpackhi_epi64_applies_writemask(self):
+        """Verify masked unpackhi uses src for masked-off elements."""
+        s = Solver()
+        ctx = s.ctx
+
+        src = zmm_reg_with_64b_values("src", s, [100, 101, 102, 103, 104, 105, 106, 107], ctx=ctx)
+        a = zmm_reg_with_64b_values("a", s, [10, 11, 12, 13, 14, 15, 16, 17], ctx=ctx)
+        b = zmm_reg_with_64b_values("b", s, [20, 21, 22, 23, 24, 25, 26, 27], ctx=ctx)
+
+        # Mask: 0b11110000 = keep elements 4,5,6,7 from unpacked result
+        k = BitVecVal(0b11110000, 8)
+
+        result = _mm512_mask_unpackhi_epi64(src, k, a, b)
+        # Expected: unpack gives [11, 21, 13, 23, 15, 25, 17, 27]
+        # With mask 0b11110000, elements 0-3 come from src, 4-7 from unpack
+        expected = zmm_reg_with_64b_values(
+            "exp", s, [100, 101, 102, 103, 15, 25, 17, 27], ctx=ctx
+        )
+
+        s.add(result == expected)
+        assert s.check() == sat

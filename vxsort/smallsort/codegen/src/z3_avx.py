@@ -1655,6 +1655,138 @@ def _mm512_mask_unpackhi_epi32(
     return _unpack_epi32_generic(a, b, high=True, total_bits=512, src=src, k=k)
 
 
+def _unpack_epi64_generic(
+    a: BitVecRef,
+    b: BitVecRef,
+    high: bool,
+    total_bits: int,
+    src: BitVecRef = None,
+    k: BitVecRef = None,
+):
+    """
+    Generic unpack implementation for 64-bit integers with optional masking.
+
+    Args:
+        a: First source register
+        b: Second source register
+        high: True for unpackhi (element 1), False for unpacklo (element 0)
+        total_bits: Register size (256 or 512)
+        src: Source register for masked operations (None for unmasked)
+        k: Write mask (None for unmasked operations)
+
+    Returns:
+        BitVecRef representing the unpacked result
+
+    Pseudocode:
+    For each 128-bit lane in the input:
+      If high is False (unpacklo), interleave element 0 of a and b within each lane:
+        dst[0] = a[0], dst[1] = b[0]
+      If high is True (unpackhi), interleave element 1 of a and b within each lane:
+        dst[0] = a[1], dst[1] = b[1]
+
+    For total_bits=256, process 2 lanes (4 elements total); for 512, process 4 lanes (8 elements total).
+    If masking is requested (src and k are not None), for each 64-bit element, choose the result from
+    the unpacked value if the corresponding mask bit is set, otherwise use the value from src.
+    """
+    assert total_bits in [256, 512], "total_bits must be 256 or 512"
+
+    num_lanes = total_bits // 128  # Number of 128-bit lanes
+    num_elements = total_bits // 64  # Total number of 64-bit elements
+
+    elements = [None] * num_elements
+
+    # Process each 128-bit lane
+    for lane in range(num_lanes):
+        lane_start = lane * 128
+
+        if high:
+            # Extract high element (1) from each lane
+            a_elem = Extract(lane_start + 127, lane_start + 64, a)  # a[lane][1]
+            b_elem = Extract(lane_start + 127, lane_start + 64, b)  # b[lane][1]
+        else:
+            # Extract low element (0) from each lane
+            a_elem = Extract(lane_start + 63, lane_start + 0, a)  # a[lane][0]
+            b_elem = Extract(lane_start + 63, lane_start + 0, b)  # b[lane][0]
+
+        # Interleave: a[elem], b[elem]
+        base_idx = lane * 2
+        elements[base_idx + 0] = a_elem
+        elements[base_idx + 1] = b_elem
+
+    # If masking is requested, apply the mask
+    if src is not None and k is not None:
+        masked_elements = [None] * num_elements
+        for j in range(num_elements):
+            i = j * 64
+
+            # Extract mask bit for this element
+            mask_bit = Extract(j, j, k)
+
+            # Extract elements from both unpacked result and src
+            unpack_elem = elements[j]
+            src_elem = Extract(i + 63, i, src)
+
+            # Apply mask: if mask bit is set, use unpacked result, otherwise use src
+            masked_elements[j] = simplify(If(mask_bit == 1, unpack_elem, src_elem))
+        elements = masked_elements
+
+    return simplify(Concat(elements[::-1]))
+
+
+def _mm256_unpacklo_epi64(a: BitVecRef, b: BitVecRef):
+    """
+    Unpack and interleave 64-bit integers from the low half of each 128-bit lane in "a" and "b", and store the results in "dst".
+    Implements __m256i _mm256_unpacklo_epi64(__m256i a, __m256i b)
+    """
+    return _unpack_epi64_generic(a, b, high=False, total_bits=256)
+
+
+def _mm256_unpackhi_epi64(a: BitVecRef, b: BitVecRef):
+    """
+    Unpack and interleave 64-bit integers from the high half of each 128-bit lane in "a" and "b", and store the results in "dst".
+    Implements __m256i _mm256_unpackhi_epi64(__m256i a, __m256i b)
+    """
+    return _unpack_epi64_generic(a, b, high=True, total_bits=256)
+
+
+def _mm512_unpacklo_epi64(a: BitVecRef, b: BitVecRef):
+    """
+    Unpack and interleave 64-bit integers from the low half of each 128-bit lane in "a" and "b", and store the results in "dst".
+    Implements __m512i _mm512_unpacklo_epi64(__m512i a, __m512i b)
+    """
+    return _unpack_epi64_generic(a, b, high=False, total_bits=512)
+
+
+def _mm512_unpackhi_epi64(a: BitVecRef, b: BitVecRef):
+    """
+    Unpack and interleave 64-bit integers from the high half of each 128-bit lane in "a" and "b", and store the results in "dst".
+    Implements __m512i _mm512_unpackhi_epi64(__m512i a, __m512i b)
+    """
+    return _unpack_epi64_generic(a, b, high=True, total_bits=512)
+
+
+def _mm512_mask_unpacklo_epi64(
+    src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef
+):
+    """
+    Unpack and interleave 64-bit integers from the low half of each 128-bit lane in "a" and "b", and store the results in "dst"
+    using writemask "k" (elements are copied from "src" when the corresponding mask bit is not set).
+    Implements __m512i _mm512_mask_unpacklo_epi64(__m512i src, __mmask8 k, __m512i a, __m512i b)
+    """
+    return _unpack_epi64_generic(a, b, high=False, total_bits=512, src=src, k=k)
+
+
+def _mm512_mask_unpackhi_epi64(
+    src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef
+):
+    """
+    Unpack and interleave 64-bit integers from the high half of each 128-bit lane in "a" and "b", and store the results in "dst"
+    using writemask "k" (elements are copied from "src" when the corresponding mask bit is not set).
+    Implements __m512i _mm512_mask_unpackhi_epi64(__m512i src, __mmask8 k, __m512i a, __m512i b)
+    """
+    return _unpack_epi64_generic(a, b, high=True, total_bits=512, src=src, k=k)
+
+
 ##
 # 2xInput -> 1xOutput, blend operations
 # - vblendpd:
