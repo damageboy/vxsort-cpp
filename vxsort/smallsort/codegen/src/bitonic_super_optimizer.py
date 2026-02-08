@@ -189,8 +189,29 @@ class SolutionNode:
         return f"SolutionNode(stage={self.stage}, gadgets={len(self.gadgets)}, cost={self.cost}, children={len(self.children)})"
 
     def best_gadget(self) -> PermutationGadget:
-        """Return the gadget with fewest instructions."""
-        return min(self.gadgets, key=lambda g: g.instruction_count())
+        """Return the gadget with fewest instructions, preferring imm8 over control vectors."""
+        def gadget_sort_key(gadget: PermutationGadget) -> tuple[int, int]:
+            """Sort key: (instruction_count, control_vector_count).
+
+            Prefer gadgets with fewer instructions first, then among equal-cost
+            gadgets prefer those with fewer control vector instructions (which
+            require additional YMM/ZMM registers).
+            """
+            control_count = 0
+            for inst in gadget.top_instructions + gadget.bottom_instructions:
+                # Check if instruction uses a control vector instead of immediate
+                if "op_idx" in inst.args:
+                    # permutexvar family - uses control vector
+                    control_count += 1
+                elif "mask" in inst.args and inst.intrinsic_name.endswith("v_ps"):
+                    # blendv_ps - uses variable mask (256-bit control)
+                    control_count += 1
+                elif "b" in inst.args and "permutevar" in inst.intrinsic_name:
+                    # permutevar_ps - 'b' is control vector
+                    control_count += 1
+            return (gadget.instruction_count(), control_count)
+
+        return min(self.gadgets, key=gadget_sort_key)
 
 
 class GadgetSynthesizer:
