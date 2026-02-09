@@ -208,7 +208,7 @@ def test_output_state_computation():
 
 
 @pytest.mark.parametrize("vm", [vector_machine.AVX2])
-@pytest.mark.parametrize("dt", [primitive_type.i32])
+@pytest.mark.parametrize("dt", [primitive_type.i32, primitive_type.i64])
 # @pytest.mark.parametrize("vm", [vector_machine.AVX2, vector_machine.AVX512])
 # @pytest.mark.parametrize("dt", [primitive_type.i16, primitive_type.i32, primitive_type.i64])
 def test_first_stage_requires_no_permutation(vm, dt):
