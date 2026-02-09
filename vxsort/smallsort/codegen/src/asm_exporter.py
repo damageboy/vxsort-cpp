@@ -1,7 +1,64 @@
 from __future__ import annotations
 
 from utils import vector_machine, primitive_type
-from z3_avx import mm_shuffle_str
+from z3_avx import mm_shuffle_str, mm_shuffle2_str
+
+
+def _get_instruction_metadata(intrinsic_name: str) -> dict:
+    """
+    Get metadata about an instruction for proper comment formatting.
+
+    Returns:
+        dict with:
+        - 'shuffle_type': 'shuffle2' for 2-element, 'shuffle4' for 4-element, None for not a shuffle
+        - 'control_vector_width': element width in bits for control vector operations, None otherwise
+    """
+    # Instructions that use shuffle with 2 elements (shuffle_pd variants)
+    shuffle2_instructions = {
+        "_mm256_shuffle_pd",
+        "_mm512_shuffle_pd",
+        "_mm256_permute_pd",
+        "_mm512_permute_pd",
+    }
+
+    # Instructions that use shuffle with 4 elements (shuffle_ps variants)
+    shuffle4_instructions = {
+        "_mm256_shuffle_ps",
+        "_mm512_shuffle_ps",
+        "_mm256_permute_ps",
+        "_mm512_permute_ps",
+    }
+
+    # Instructions that use control vectors with their element widths
+    control_vector_instructions = {
+        # 32-bit control vectors
+        "_mm256_permutexvar_epi32": 32,
+        "_mm512_permutexvar_epi32": 32,
+        "_mm256_permutevar_ps": 32,
+        "_mm512_permutevar_ps": 32,
+        "_mm512_permutex2var_epi32": 32,
+        # 64-bit control vectors
+        "_mm256_permutexvar_epi64": 64,
+        "_mm512_permutexvar_epi64": 64,
+        "_mm256_permutevar_pd": 64,
+        "_mm512_permutevar_pd": 64,
+        "_mm512_permutex2var_epi64": 64,
+    }
+
+    metadata = {
+        'shuffle_type': None,
+        'control_vector_width': None,
+    }
+
+    if intrinsic_name in shuffle2_instructions:
+        metadata['shuffle_type'] = 'shuffle2'
+    elif intrinsic_name in shuffle4_instructions:
+        metadata['shuffle_type'] = 'shuffle4'
+
+    if intrinsic_name in control_vector_instructions:
+        metadata['control_vector_width'] = control_vector_instructions[intrinsic_name]
+
+    return metadata
 
 
 def _intrinsic_to_asm_mnemonic(intrinsic_name: str) -> str:
@@ -126,12 +183,14 @@ def _format_instruction(
         other_reg: The other data register
     """
     mnemonic = _intrinsic_to_asm_mnemonic(inst.intrinsic_name)
+    metadata = _get_instruction_metadata(inst.intrinsic_name)
     args = inst.args
 
     # Build operand list - Intel syntax: dest, src1, [src2], [imm]
     operands = [dest_reg]  # Destination is always first
 
     ctrl_val = None
+    ctrl_element_width = None  # Track element width for control vectors
 
     # Handle different instruction patterns based on arguments
     if "a" in args and "b" in args:
@@ -143,6 +202,7 @@ def _format_instruction(
         if args["b"] not in ["top", "bottom"]:
             # It's a control vector - allocate a temp register for it
             ctrl_val = args["b"]
+            ctrl_element_width = metadata['control_vector_width']
             ctrl_reg = reg_allocator.allocate_temp()
             operands.append(src1)
             operands.append(ctrl_reg)
@@ -157,6 +217,7 @@ def _format_instruction(
         if "op_idx" in args:
             # Variable permute with control vector
             ctrl_val = args["op_idx"]
+            ctrl_element_width = metadata['control_vector_width']
             ctrl_reg = reg_allocator.allocate_temp()
             operands.append(ctrl_reg)
             operands.append(src)
@@ -173,7 +234,14 @@ def _format_instruction(
         imm_val = args["imm8"]
         if isinstance(imm_val, int):
             operands.append(f"0x{imm_val:02x}")
-            comment = mm_shuffle_str(imm_val)
+            # Use appropriate shuffle formatter based on instruction type
+            if metadata['shuffle_type'] == 'shuffle2':
+                comment = mm_shuffle2_str(imm_val)
+            elif metadata['shuffle_type'] == 'shuffle4':
+                comment = mm_shuffle_str(imm_val)
+            else:
+                # Default to 4-element for backward compatibility
+                comment = mm_shuffle_str(imm_val)
         else:
             operands.append(f"<{imm_val}>")  # Symbolic value
     elif "imm" in args:
@@ -196,9 +264,25 @@ def _format_instruction(
             operands.append(f"<{mask_val}>")
 
     if ctrl_val is not None:
-        comment = _format_control_vector(
-            ctrl_val, reg_allocator.vm, reg_allocator.dtype
-        )
+        # Format control vector with correct element width
+        if ctrl_element_width is not None:
+            # Use the instruction's element width instead of the data type's width
+            from utils import width_dict, primitive_type as prim_type
+
+            total_bits = width_dict[reg_allocator.vm] * 8
+            num_elements = total_bits // ctrl_element_width
+
+            elements = []
+            for i in range(num_elements):
+                element = (ctrl_val >> (i * ctrl_element_width)) & ((1 << ctrl_element_width) - 1)
+                elements.append(element)
+
+            comment = "[" + ", ".join(str(e) for e in elements) + "]"
+        else:
+            # Fall back to data type's element width
+            comment = _format_control_vector(
+                ctrl_val, reg_allocator.vm, reg_allocator.dtype
+            )
 
     asm_line = f"    {mnemonic:20s} {', '.join(operands)}"
     if comment:

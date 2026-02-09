@@ -1,7 +1,7 @@
 from z3 import Solver, main_ctx, unsat, sat, BitVec, BitVecVal, Concat, Extract
 
 # Assuming your z3s functions and registers are importable, e.g.:
-from z3_avx import _MM_SHUFFLE, _MM_SHUFFLE2, decode_shuffle_mask, mm_shuffle_str
+from z3_avx import _MM_SHUFFLE, _MM_SHUFFLE2, decode_shuffle_mask, mm_shuffle_str, decode_shuffle2_mask, mm_shuffle2_str
 from z3_avx import _mm256_permute_ps
 from z3_avx import _mm512_permute_ps
 from z3_avx import _mm256_permutexvar_epi32
@@ -5608,3 +5608,68 @@ class TestUnpackEpi64:
 
         s.add(result == expected)
         assert s.check() == sat
+
+
+class TestShuffle2MaskDecode:
+    """Tests for 2-element shuffle mask decoding (shuffle_pd)."""
+
+    def test_decode_shuffle2_mask_all_zeros(self):
+        """Test decoding all zeros"""
+        result = decode_shuffle2_mask(0x0)
+        assert result == (0, 0)
+
+    def test_decode_shuffle2_mask_identity(self):
+        """Test decoding identity pattern"""
+        result = decode_shuffle2_mask(0x5)
+        assert result == (1, 1)
+
+    def test_decode_shuffle2_mask_swap(self):
+        """Test decoding swap pattern"""
+        result = decode_shuffle2_mask(0xa)
+        assert result == (2, 2)
+
+    def test_decode_shuffle2_mask_all_ones(self):
+        """Test decoding all ones"""
+        result = decode_shuffle2_mask(0xf)
+        assert result == (3, 3)
+
+    def test_decode_shuffle2_mask_mixed(self):
+        """Test decoding mixed patterns"""
+        assert decode_shuffle2_mask(0x1) == (0, 1)
+        assert decode_shuffle2_mask(0x2) == (0, 2)
+        assert decode_shuffle2_mask(0x3) == (0, 3)
+        assert decode_shuffle2_mask(0x4) == (1, 0)
+        assert decode_shuffle2_mask(0x9) == (2, 1)
+
+    def test_mm_shuffle2_str_all_zeros(self):
+        """Test string representation of all zeros"""
+        result = mm_shuffle2_str(0x0)
+        assert result == "_MM_SHUFFLE2(0, 0)"
+
+    def test_mm_shuffle2_str_identity(self):
+        """Test string representation of identity"""
+        result = mm_shuffle2_str(0x5)
+        assert result == "_MM_SHUFFLE2(1, 1)"
+
+    def test_mm_shuffle2_str_swap(self):
+        """Test string representation of swap"""
+        result = mm_shuffle2_str(0xa)
+        assert result == "_MM_SHUFFLE2(2, 2)"
+
+    def test_mm_shuffle2_str_all_ones(self):
+        """Test string representation of all ones"""
+        result = mm_shuffle2_str(0xf)
+        assert result == "_MM_SHUFFLE2(3, 3)"
+
+    def test_mm_shuffle2_str_format(self):
+        """Test that all strings have correct format"""
+        for imm8 in [0x00, 0x05, 0x0a, 0x0f, 0x01, 0x09]:
+            result = mm_shuffle2_str(imm8)
+            # Check it starts with _MM_SHUFFLE2(
+            assert result.startswith("_MM_SHUFFLE2("), (
+                f"Bad format for 0x{imm8:02x}: {result}"
+            )
+            # Check it ends with )
+            assert result.endswith(")"), f"Bad format for 0x{imm8:02x}: {result}"
+            # Check it contains the right number of commas
+            assert result.count(",") == 1, f"Bad format for 0x{imm8:02x}: {result}"

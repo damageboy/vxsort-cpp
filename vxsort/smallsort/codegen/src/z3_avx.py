@@ -293,6 +293,54 @@ def mm_shuffle_str(imm8: int) -> str:
     return f"_MM_SHUFFLE({z}, {y}, {x}, {w})"
 
 
+def decode_shuffle2_mask(imm8: int) -> tuple[int, int]:
+    """
+    Decode an imm8 shuffle mask for 2-element operations (e.g., shuffle_pd).
+
+    For shuffle_pd with 256-bit registers:
+    - Bit 0: selects element from first 128-bit lane (0 or 1)
+    - Bit 1: selects element from first 128-bit lane (0 or 1)
+    - Bit 2: selects element from second 128-bit lane (0 or 1)
+    - Bit 3: selects element from second 128-bit lane (0 or 1)
+
+    Returns the high and low bits as a tuple (y, x) where:
+    - x = bits [1:0] (first lane selection)
+    - y = bits [3:2] (second lane selection)
+
+    Args:
+        imm8: 8-bit immediate value (only lowest 4 bits used)
+
+    Returns:
+        Tuple of (y, x) where each is a 2-bit value (0-3)
+    """
+    x = imm8 & 0b11  # Bits [1:0]
+    y = (imm8 >> 2) & 0b11  # Bits [3:2]
+    return (y, x)
+
+
+def mm_shuffle2_str(imm8: int) -> str:
+    """
+    Returns a string representation of a shuffle mask in _MM_SHUFFLE2 format
+    for 2-element operations like shuffle_pd.
+
+    Args:
+        imm8: 8-bit shuffle mask immediate value (only lowest 4 bits used)
+
+    Returns:
+        String in format "_MM_SHUFFLE2(y, x)"
+
+    Example:
+        >>> mm_shuffle2_str(0x0)
+        '_MM_SHUFFLE2(0, 0)'
+        >>> mm_shuffle2_str(0x5)
+        '_MM_SHUFFLE2(1, 1)'
+        >>> mm_shuffle2_str(0xa)
+        '_MM_SHUFFLE2(2, 2)'
+    """
+    y, x = decode_shuffle2_mask(imm8)
+    return f"_MM_SHUFFLE2({y}, {x})"
+
+
 ##
 # Single vector variable permutes
 
