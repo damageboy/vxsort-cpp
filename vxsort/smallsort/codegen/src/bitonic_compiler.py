@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 import argparse
-import heapq
 import tempfile
 
 from json_exporter import export_solutions_to_json
@@ -12,12 +11,14 @@ try:
     from .bitonic_super_optimizer import BitonicSuperVectorizer
     from .utils import vector_machine, primitive_type, width_dict
     from .asm_exporter import export_solutions_to_asm
+    from .path_selector import PathSelector
 
 except ImportError:
     from cost_model import CostModel
     from bitonic_super_optimizer import BitonicSuperVectorizer
     from utils import vector_machine, primitive_type, width_dict
     from asm_exporter import export_solutions_to_asm
+    from path_selector import PathSelector
 
 
 def _count_dag_paths(roots):
@@ -42,130 +43,6 @@ def _count_dag_paths(roots):
     return sum(_count(root) for root in roots)
 
 
-def _count_control_vectors_in_path(path):
-    """Count instructions that use YMM/ZMM control vectors instead of immediates.
-
-    Control vector instructions (less preferred):
-    - Use 'op_idx' key (e.g., _mm256_permutexvar_epi32)
-    - Use 'mask' key for variable masks (e.g., _mm256_blendv_ps)
-    - Use 'b' as control in permutevar instructions
-
-    Immediate-based instructions (preferred):
-    - Use 'imm8' key (e.g., _mm256_permute_ps, _mm256_shuffle_ps)
-    """
-    count = 0
-    for node in path:
-        gadget = node.best_gadget()
-        for inst in gadget.top_instructions + gadget.bottom_instructions:
-            # Check if instruction uses a control vector
-            if "op_idx" in inst.args:
-                # permutexvar family - uses control vector
-                count += 1
-            elif "mask" in inst.args and inst.intrinsic_name.endswith("v_ps"):
-                # blendv_ps - uses variable mask (256-bit control)
-                count += 1
-            elif "b" in inst.args and "permutevar" in inst.intrinsic_name:
-                # permutevar_ps - 'b' is control vector
-                count += 1
-    return count
-
-
-def _select_top_k_paths(solutions, top_k):
-    """Find the top K cheapest root-to-leaf paths using A* search.
-
-    Instead of materializing every path (exponential for DAGs with shared
-    children), this uses a priority queue with an admissible heuristic
-    (minimum remaining cost to any leaf).  Only the cheapest *top_k*
-    complete paths are ever held in memory.
-    """
-    # Phase 1: compute admissible heuristic — min remaining cost to a leaf
-    min_remaining: dict[int, float] = {}
-
-    def _compute_h(node):
-        nid = id(node)
-        if nid in min_remaining:
-            return min_remaining[nid]
-        if not node.children:
-            min_remaining[nid] = 0.0
-            return 0.0
-        best = min(child.cost + _compute_h(child) for child in node.children)
-        min_remaining[nid] = best
-        return best
-
-    for root in solutions:
-        _compute_h(root)
-
-    # Phase 2: A* priority queue
-    # Heap entries: (estimated_total, tiebreaker, cumulative_cost, path)
-    counter = 0
-    heap: list[tuple[float, int, float, list]] = []
-    for root in solutions:
-        est = root.cost + min_remaining.get(id(root), 0.0)
-        heapq.heappush(heap, (est, counter, root.cost, [root]))
-        counter += 1
-
-    selected: list[tuple[float, list]] = []
-    while heap and len(selected) < top_k:
-        _est, _tie, cost, path = heapq.heappop(heap)
-        node = path[-1]
-
-        if not node.children:
-            # Complete path
-            selected.append((cost, path))
-        else:
-            for child in node.children:
-                new_cost = cost + child.cost
-                new_est = new_cost + min_remaining.get(id(child), 0.0)
-                heapq.heappush(heap, (new_est, counter, new_cost, path + [child]))
-                counter += 1
-
-    return selected
-
-
-def _prune_to_top_k_paths(solutions, top_k):
-    """Keep only the top K cheapest root-to-leaf paths, preferring immediate-based instructions.
-
-    Uses A* search to find the cheapest paths without materializing all
-    paths (which is exponential for DAGs with shared children).
-
-    Among equal-cost paths, prefers those with fewer control vector
-    instructions (YMM/ZMM control inputs).
-
-    Modifies the tree in place by removing children not on any selected path.
-    Returns the filtered list of roots.
-    """
-    selected_paths = _select_top_k_paths(solutions, top_k)
-
-    # Sort by (cost, control_vector_count) for stable ordering
-    selected_paths.sort(
-        key=lambda x: (x[0], _count_control_vectors_in_path(x[1]))
-    )
-
-    # Build set of kept edges (parent_id, child_id) and kept root ids
-    kept_edges = set()
-    kept_roots = set()
-    for _, path in selected_paths:
-        kept_roots.add(id(path[0]))
-        for i in range(len(path) - 1):
-            kept_edges.add((id(path[i]), id(path[i + 1])))
-
-    def prune_node(node, visited=None):
-        if visited is None:
-            visited = set()
-        if id(node) in visited:
-            return
-        visited.add(id(node))
-        node.children = [
-            child for child in node.children if (id(node), id(child)) in kept_edges
-        ]
-        for child in node.children:
-            prune_node(child, visited)
-
-    solutions = [root for root in solutions if id(root) in kept_roots]
-    for root in solutions:
-        prune_node(root)
-
-    return solutions
 
 
 def generate_bitonic_sorter(
@@ -213,26 +90,25 @@ def generate_bitonic_sorter(
 
     print(f"Found {len(solutions)} root solutions")
 
-    # Compute costs
-    print("Computing costs...")
-    cost_model = CostModel("generic")
-    cost_model.compute_costs(solutions)
-
     # Filter to top K cheapest root-to-leaf paths if requested
+    selected_paths = None
     if top_k is not None:
         total_paths = _count_dag_paths(solutions)
         if total_paths > top_k:
             print(
                 f"Filtering to top {top_k} cheapest paths (out of {total_paths} total)..."
             )
-            solutions = _prune_to_top_k_paths(solutions, top_k)
+            # Use PathSelector for unified scoring
+            cost_model = CostModel("generic")
+            path_selector = PathSelector(cost_model)
+            solutions, selected_paths = path_selector.prune_to_top_k_paths(solutions, top_k)
             print(f"Kept {len(solutions)} roots after pruning")
 
     # Export solutions in the requested format(s)
     for output_format in output_formats:
         if output_format == "asm":
             output_path = f"bitonic_solutions_{num_vecs}x{vm.name}_{type.name}.asm"
-            export_solutions_to_asm(solutions, num_vecs, type, vm, output_path)
+            export_solutions_to_asm(solutions, num_vecs, type, vm, output_path, selected_paths=selected_paths)
         elif output_format == "json":
             output_path = f"bitonic_solutions_{num_vecs}x{vm.name}_{type.name}.json"
             export_solutions_to_json(solutions, output_path)

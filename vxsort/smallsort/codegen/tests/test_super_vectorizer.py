@@ -240,13 +240,16 @@ def test_first_stage_requires_no_permutation(vm, dt):
 
     # Verify that the first gadget is a null (0-instruction) gadget
     assert len(solutions) > 0, "Should find at least one valid solution"
-    null_solutions = [s for s in solutions if s.best_gadget().instruction_count() == 0]
+    # Find solutions that have at least one gadget with 0 instructions
+    null_solutions = [s for s in solutions if any(g.instruction_count() == 0 for g in s.gadgets)]
     assert len(null_solutions) > 0, (
         "Should find at least one solution with null (0-instruction) gadget for first stage"
     )
 
+    # Get minimum instruction count from first solution's gadgets
+    min_instructions = min(g.instruction_count() for g in solutions[0].gadgets)
     print(
-        f"  ✓ First gadget requires {solutions[0].best_gadget().instruction_count()} instructions (as expected)"
+        f"  ✓ First gadget requires {min_instructions} instructions (as expected)"
     )
     print("✓ First stage null permutation test passed\n")
 

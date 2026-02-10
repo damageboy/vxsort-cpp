@@ -33,7 +33,6 @@ def export_solutions_to_json(roots: list[SolutionNode], output_path: str):
                 {"name": inst.intrinsic_name, "args": inst.args}
                 for inst in gadget.bottom_instructions
             ],
-            "instruction_count": gadget.instruction_count(),
         }
 
     # Assign stable ids and serialize each node exactly once.
@@ -63,7 +62,6 @@ def export_solutions_to_json(roots: list[SolutionNode], output_path: str):
             },
             "gadgets": [gadget_to_dict(g) for g in node.gadgets],
             "gadget_count": len(node.gadgets),
-            "cost": node.cost,
             "children": child_ids,
         }
         return stable_id
