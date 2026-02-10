@@ -400,7 +400,7 @@ def test_admissible_heuristic():
         children=[child]
     )
     # Compute heuristic
-    min_remaining = selector._compute_admissible_heuristic([root])
+    min_remaining = selector._compute_admissible_heuristic([root], max_stage=2)
     # At child, heuristic should be min(1.0, 3.5) = 1.0 (leaf1 latency)
     # (leaf2 has CV penalty: 3.0 + 0.5 = 3.5)
     assert min_remaining[id(child)] == 1.0

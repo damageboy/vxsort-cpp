@@ -4296,6 +4296,37 @@ class TestBlendPd:
             f"Z3 found unexpected mask: got 0x{model_imm8:02x}, expected 0x{expected_mask:02x}"
         )
 
+    def test_mm256_blend_pd_n3_stage_bottom_imm0(self):
+        """Test blend_pd with imm8=0 against n3 stage from i64 solution.
+
+        n3 stage: input top=[1,3,5,7] bottom=[2,4,6,8]
+                  output bottom=[8,6,5,7]
+
+        The solution JSON claims blend_pd(a=top, b=bottom, imm8=0) produces
+        the bottom output. imm8=0 selects all from a (=top=[1,3,5,7]),
+        which cannot produce [8,6,5,7].
+        """
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+
+        # Create registers with the concrete input values from n3 stage
+        top = ymm_reg_with_64b_values("top", s, [1, 3, 5, 7], ctx=ctx)
+        bottom = ymm_reg_with_64b_values("bottom", s, [2, 4, 6, 8], ctx=ctx)
+
+        # Apply blend_pd with imm8=0 (all from a=top)
+        output = _mm256_blend_pd(top, bottom, 0)
+
+        # Expected bottom output from the n3 stage
+        expected = ymm_reg_with_64b_values("expected", s, [8, 6, 5, 7], ctx=ctx)
+
+        # Check if the blend output matches the expected output
+        s.add(output == expected)
+        result = s.check()
+        assert result == unsat, (
+            "blend_pd(top, bottom, imm8=0) should NOT produce [8,6,5,7] — "
+            "imm8=0 selects all elements from 'a' (top=[1,3,5,7])"
+        )
+
 
 class TestBlendPs:
     """Tests for _mm256_blend_ps (immediate blend for single-precision)"""

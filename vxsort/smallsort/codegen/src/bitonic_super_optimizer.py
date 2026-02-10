@@ -17,6 +17,8 @@ from z3 import (
     sat,
     BitVec,
     Distinct,
+    Or,
+    And,
 )
 
 try:
@@ -280,15 +282,14 @@ class GadgetSynthesizer:
             pair_id_reverse_map[pair_id] = (min(elem1, elem2), max(elem1, elem2))
         return pair_id_map, pair_id_reverse_map
 
-    def _create_input_registers_with_pair_ids(
+    def _create_input_registers(
         self,
         solver: Solver,
         ctx: Context,
         input_state: VectorState,
-        pair_id_map: dict[int, int],
     ) -> tuple:
         """
-        Create Z3 symbolic registers with pair IDs as values.
+        Create Z3 symbolic registers with actual element values.
         Returns (top_reg, bottom_reg).
         """
         # Create registers based on VM type
@@ -303,24 +304,20 @@ class GadgetSynthesizer:
                 f"Register creation not implemented for VM: {self.vm}"
             )
 
-        # Set up constraints: each lane should have the pair_id of the element at that position
+        # Set up constraints: each lane contains the actual element value
         for lane_idx in range(self.elements_per_vector):
             top_elem = input_state.top[lane_idx]
             bottom_elem = input_state.bottom[lane_idx]
 
-            top_pair_id = pair_id_map.get(top_elem, 0)
-            bottom_pair_id = pair_id_map.get(bottom_elem, 0)
-
-            # Extract the lane from the register and constrain it to the pair_id
             lane_start = lane_idx * self.lane_width
             lane_end = lane_start + self.lane_width - 1
 
             top_lane = Extract(lane_end, lane_start, top_reg)
             bottom_lane = Extract(lane_end, lane_start, bottom_reg)
 
-            solver.add(top_lane == BitVecVal(top_pair_id, self.lane_width, ctx=ctx))
+            solver.add(top_lane == BitVecVal(top_elem, self.lane_width, ctx=ctx))
             solver.add(
-                bottom_lane == BitVecVal(bottom_pair_id, self.lane_width, ctx=ctx)
+                bottom_lane == BitVecVal(bottom_elem, self.lane_width, ctx=ctx)
             )
 
         return top_reg, bottom_reg
@@ -359,14 +356,9 @@ class GadgetSynthesizer:
         ctx = main_ctx()
         solver = Solver(ctx=ctx)
 
-        # Create pair_id mappings:
-        # - pair_id_map: element index -> pair_id
-        # - pair_id_reverse_map: pair_id -> (low_elem, high_elem) in canonical order
-        pair_id_map, pair_id_reverse_map = self._create_pair_id_mapping(target_pairs)
-
-        # Create input registers with pair IDs
-        top_reg, bottom_reg = self._create_input_registers_with_pair_ids(
-            solver, ctx, input_state, pair_id_map
+        # Create input registers with actual element values
+        top_reg, bottom_reg = self._create_input_registers(
+            solver, ctx, input_state
         )
 
         # Collect all symbolic variables from instruction templates and resolve them
@@ -420,8 +412,9 @@ class GadgetSynthesizer:
             symbolic_vars=None,
         )
 
-        # Add constraints: for each lane, top_output[lane] == bottom_output[lane] (same pair_id)
-        output_lanes = []
+        # Add constraints: for each output lane, the top/bottom elements must
+        # form a valid target pair (in either orientation).
+        all_output_lanes = []
         for lane_idx in range(self.elements_per_vector):
             lane_start = lane_idx * self.lane_width
             lane_end = lane_start + self.lane_width - 1
@@ -429,13 +422,25 @@ class GadgetSynthesizer:
             top_lane = Extract(lane_end, lane_start, top_output)
             bottom_lane = Extract(lane_end, lane_start, bottom_output)
 
-            solver.add(top_lane == bottom_lane)
-            output_lanes.append(top_lane)
+            all_output_lanes.append(top_lane)
+            all_output_lanes.append(bottom_lane)
 
-        # Add constraint: all lanes must have distinct pair_ids (no duplicate pairs)
-        # Without this, the solver could find degenerate solutions where multiple lanes
-        # have the same pair_id, losing elements in the process.
-        solver.add(Distinct(*output_lanes))
+            # This lane must contain two elements from the same target pair
+            pair_options = []
+            for (elem_a, elem_b) in target_pairs:
+                val_a = BitVecVal(elem_a, self.lane_width, ctx=ctx)
+                val_b = BitVecVal(elem_b, self.lane_width, ctx=ctx)
+                pair_options.append(
+                    Or(
+                        And(top_lane == val_a, bottom_lane == val_b),
+                        And(top_lane == val_b, bottom_lane == val_a),
+                    )
+                )
+            solver.add(Or(*pair_options))
+
+        # All output elements must be distinct — prevents element duplication
+        # where an instruction copies the same element to both top and bottom.
+        solver.add(Distinct(*all_output_lanes))
 
         if solver_callback:
             solver_callback(solver)
@@ -455,7 +460,6 @@ class GadgetSynthesizer:
                 model,
                 top_output,
                 bottom_output,
-                pair_id_reverse_map,
                 symbolic_vars,
                 top_instructions_template,
                 bottom_instructions_template,
@@ -470,7 +474,6 @@ class GadgetSynthesizer:
                 model,
                 top_output,
                 bottom_output,
-                pair_id_reverse_map,
                 symbolic_vars,
                 top_instructions_template,
                 bottom_instructions_template,
@@ -484,18 +487,18 @@ class GadgetSynthesizer:
         model,
         top_output,
         bottom_output,
-        pair_id_reverse_map: dict[int, tuple[int, int]],
         symbolic_vars: dict,
         top_instructions_template: list[InstructionSpec],
         bottom_instructions_template: list[InstructionSpec],
     ) -> tuple[PermutationGadget, VectorState]:
         """Extract a concrete gadget and output state from a Z3 model.
 
-        Reads pair IDs from the symbolic output registers, builds the
-        canonical output state, and concretizes all symbolic variables
-        in the instruction templates using the model's assignments.
+        Reads element values from the symbolic output registers, builds the
+        canonical output state (min to top, max to bottom per lane), and
+        concretizes all symbolic variables in the instruction templates
+        using the model's assignments.
         """
-        # Extract pair ordering from output registers to build canonical output state
+        # Extract element values from output registers to build canonical output state
         output_top = []
         output_bottom = []
         for lane_idx in range(self.elements_per_vector):
@@ -503,20 +506,23 @@ class GadgetSynthesizer:
             lane_end = lane_start + self.lane_width - 1
 
             top_lane = Extract(lane_end, lane_start, top_output)
-            pair_id_val = model.evaluate(top_lane, model_completion=True)
-            pair_id = (
-                pair_id_val.as_long()
-                if hasattr(pair_id_val, "as_long")
-                else pair_id_val
+            bottom_lane = Extract(lane_end, lane_start, bottom_output)
+
+            top_val = model.evaluate(top_lane, model_completion=True)
+            bottom_val = model.evaluate(bottom_lane, model_completion=True)
+
+            top_elem = (
+                top_val.as_long() if hasattr(top_val, "as_long") else top_val
+            )
+            bottom_elem = (
+                bottom_val.as_long()
+                if hasattr(bottom_val, "as_long")
+                else bottom_val
             )
 
-            if pair_id not in pair_id_reverse_map:
-                raise ValueError(
-                    f"Invalid pair_id {pair_id} at lane {lane_idx} not found in reverse map"
-                )
-            low_elem, high_elem = pair_id_reverse_map[pair_id]
-            output_top.append(low_elem)
-            output_bottom.append(high_elem)
+            # Canonical ordering: lower element index to top, higher to bottom
+            output_top.append(min(top_elem, bottom_elem))
+            output_bottom.append(max(top_elem, bottom_elem))
 
         output_state = VectorState(top=output_top, bottom=output_bottom)
 

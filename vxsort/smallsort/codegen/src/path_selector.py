@@ -141,6 +141,26 @@ class PathSelector:
         self.cost_model = cost_model
         self.config = config or PathSelectorConfig()
 
+    @staticmethod
+    def _find_max_stage(roots: list["SolutionNode"]) -> int:
+        """Find the maximum stage number across all reachable nodes."""
+        max_stage = 0
+        visited: set[int] = set()
+
+        def _traverse(node: "SolutionNode"):
+            nonlocal max_stage
+            nid = id(node)
+            if nid in visited:
+                return
+            visited.add(nid)
+            max_stage = max(max_stage, node.stage)
+            for child in node.children:
+                _traverse(child)
+
+        for root in roots:
+            _traverse(root)
+        return max_stage
+
     def score_gadget(self, gadget: "PermutationGadget") -> GadgetScore:
         """Compute unified score for a gadget.
 
@@ -160,15 +180,22 @@ class PathSelector:
             total_score=total_score
         )
 
-    def _compute_admissible_heuristic(self, roots: list["SolutionNode"]) -> dict[int, float]:
+    def _compute_admissible_heuristic(
+        self, roots: list["SolutionNode"], max_stage: int
+    ) -> dict[int, float]:
         """Compute h(n) = minimum cost from node to any leaf.
 
         For each node, computes the minimum score across all possible
         gadget choices at children. This ensures the heuristic is admissible
         (never overestimates), maintaining A* optimality.
 
+        Dead-end nodes (no children, but not at max_stage) get infinity cost
+        so A* never selects paths through them.
+
         Args:
             roots: List of root nodes to process
+            max_stage: The final stage number; only childless nodes at this
+                stage are valid leaves
 
         Returns:
             Dictionary mapping node id -> minimum remaining cost
@@ -181,9 +208,14 @@ class PathSelector:
                 return min_remaining[nid]
 
             if not node.children:
-                # Leaf node - no remaining cost
-                min_remaining[nid] = 0.0
-                return 0.0
+                if node.stage == max_stage:
+                    # True leaf node - no remaining cost
+                    min_remaining[nid] = 0.0
+                    return 0.0
+                else:
+                    # Dead-end at intermediate stage - unreachable
+                    min_remaining[nid] = float('inf')
+                    return float('inf')
 
             # For each child, consider all gadgets and find minimum path
             best_cost = float('inf')
@@ -213,6 +245,9 @@ class PathSelector:
         of just nodes. This allows the search to discover that a more expensive
         gadget at one node might lead to cheaper overall paths.
 
+        Only paths that reach the final stage are considered complete.
+        Dead-end nodes at intermediate stages are skipped.
+
         Args:
             roots: List of root SolutionNode objects
             top_k: Maximum number of paths to return
@@ -220,8 +255,11 @@ class PathSelector:
         Returns:
             List of CompletePath objects, sorted by total_score (best first)
         """
-        # Phase 1: Compute admissible heuristic
-        min_remaining = self._compute_admissible_heuristic(roots)
+        # Phase 0: Determine the final stage
+        max_stage = self._find_max_stage(roots)
+
+        # Phase 1: Compute admissible heuristic (dead-end intermediates get inf)
+        min_remaining = self._compute_admissible_heuristic(roots, max_stage)
 
         # Phase 2: A* priority queue
         # Heap entries: (estimated_total, tiebreaker, cumulative_score, cumulative_latency, cumulative_cv, path_steps)
@@ -229,6 +267,10 @@ class PathSelector:
         heap: list[tuple[float, int, float, float, int, list[PathStep]]] = []
 
         for root in roots:
+            # Skip roots that can't reach the final stage
+            if min_remaining.get(id(root), float('inf')) == float('inf'):
+                continue
+
             # Try all gadgets at root
             for gadget_idx, gadget in enumerate(root.gadgets):
                 score = self.score_gadget(gadget)
@@ -254,17 +296,23 @@ class PathSelector:
             current_node = path_steps[-1].node
 
             if not current_node.children:
-                # Complete path found
-                complete_path = CompletePath(
-                    steps=path_steps,
-                    total_latency=cumulative_lat,
-                    total_cv_count=cumulative_cv,
-                    total_score=cumulative_score
-                )
-                selected.append(complete_path)
+                if current_node.stage == max_stage:
+                    # True complete path reaching the final stage
+                    complete_path = CompletePath(
+                        steps=path_steps,
+                        total_latency=cumulative_lat,
+                        total_cv_count=cumulative_cv,
+                        total_score=cumulative_score
+                    )
+                    selected.append(complete_path)
+                # else: dead-end at intermediate stage, discard
             else:
                 # Expand to children
                 for child in current_node.children:
+                    # Skip children that can't reach the final stage
+                    if min_remaining.get(id(child), float('inf')) == float('inf'):
+                        continue
+
                     # Try all gadgets at child
                     for gadget_idx, gadget in enumerate(child.gadgets):
                         score = self.score_gadget(gadget)
