@@ -263,25 +263,6 @@ class GadgetSynthesizer:
 
         return intrinsics
 
-    def _create_pair_id_mapping(
-        self, target_pairs: list[tuple[int, int]]
-    ) -> tuple[dict[int, int], dict[int, tuple[int, int]]]:
-        """
-        Create mappings for pair IDs.
-
-        Returns:
-            pair_id_map: element index -> pair_id (both elements in a pair map to same ID)
-            pair_id_reverse_map: pair_id -> (low_elem, high_elem) in canonical order
-        """
-        pair_id_map = {}
-        pair_id_reverse_map = {}
-        for pair_id, (elem1, elem2) in enumerate(target_pairs, start=1):
-            pair_id_map[elem1] = pair_id
-            pair_id_map[elem2] = pair_id
-            # Canonical ordering: lower index in top, higher in bottom
-            pair_id_reverse_map[pair_id] = (min(elem1, elem2), max(elem1, elem2))
-        return pair_id_map, pair_id_reverse_map
-
     def _create_input_registers(
         self,
         solver: Solver,
@@ -330,6 +311,7 @@ class GadgetSynthesizer:
         target_pairs: list[tuple[int, int]],
         max_solutions: int | None = None,
         solver_callback: callable | None = None,
+        allow_any_lane_order: bool = True,
     ) -> tuple[list[tuple[PermutationGadget, VectorState]], float, float]:
         """
         Synthesize gadgets using symbolic immediates in Z3.
@@ -351,6 +333,10 @@ class GadgetSynthesizer:
             max_solutions: Optional cap on the number of solutions returned.
                 When ``None`` (the default) all solutions are enumerated.
             solver_callback: Optional callback receiving the Solver instance.
+            allow_any_lane_order: When True (default), any target pair can land
+                in any lane and the output state is canonicalized (min to top,
+                max to bottom). When False, pair[i] is pinned to lane i with
+                strict top/bottom assignment and no canonicalization.
         """
         start_construction = time.perf_counter()
         ctx = main_ctx()
@@ -425,18 +411,24 @@ class GadgetSynthesizer:
             all_output_lanes.append(top_lane)
             all_output_lanes.append(bottom_lane)
 
-            # This lane must contain two elements from the same target pair
-            pair_options = []
-            for (elem_a, elem_b) in target_pairs:
-                val_a = BitVecVal(elem_a, self.lane_width, ctx=ctx)
-                val_b = BitVecVal(elem_b, self.lane_width, ctx=ctx)
-                pair_options.append(
-                    Or(
-                        And(top_lane == val_a, bottom_lane == val_b),
-                        And(top_lane == val_b, bottom_lane == val_a),
+            if allow_any_lane_order:
+                # Any target pair can land in any lane (existing behavior)
+                pair_options = []
+                for (elem_a, elem_b) in target_pairs:
+                    val_a = BitVecVal(elem_a, self.lane_width, ctx=ctx)
+                    val_b = BitVecVal(elem_b, self.lane_width, ctx=ctx)
+                    pair_options.append(
+                        Or(
+                            And(top_lane == val_a, bottom_lane == val_b),
+                            And(top_lane == val_b, bottom_lane == val_a),
+                        )
                     )
-                )
-            solver.add(Or(*pair_options))
+                solver.add(Or(*pair_options))
+            else:
+                # Strict: pair[lane_idx] pinned to this lane, first->top, second->bottom
+                elem_a, elem_b = target_pairs[lane_idx]
+                solver.add(top_lane == BitVecVal(elem_a, self.lane_width, ctx=ctx))
+                solver.add(bottom_lane == BitVecVal(elem_b, self.lane_width, ctx=ctx))
 
         # All output elements must be distinct — prevents element duplication
         # where an instruction copies the same element to both top and bottom.
@@ -444,6 +436,14 @@ class GadgetSynthesizer:
 
         if solver_callback:
             solver_callback(solver)
+
+        # When strict lane order, the output state is deterministic from pairs
+        fixed_output_state = None
+        if not allow_any_lane_order:
+            fixed_output_state = VectorState(
+                top=[p[0] for p in target_pairs],
+                bottom=[p[1] for p in target_pairs],
+            )
 
         # Collect symbolic variable terms for enumeration
         terms = list(symbolic_vars.values())
@@ -463,6 +463,7 @@ class GadgetSynthesizer:
                 symbolic_vars,
                 top_instructions_template,
                 bottom_instructions_template,
+                fixed_output_state=fixed_output_state,
             )
             solver_time = time.perf_counter() - solver_start
             return [(gadget, output_state)], construction_time, solver_time
@@ -477,6 +478,7 @@ class GadgetSynthesizer:
                 symbolic_vars,
                 top_instructions_template,
                 bottom_instructions_template,
+                fixed_output_state=fixed_output_state,
             )
             results.append((gadget, output_state))
         solver_time = time.perf_counter() - solver_start
@@ -490,6 +492,7 @@ class GadgetSynthesizer:
         symbolic_vars: dict,
         top_instructions_template: list[InstructionSpec],
         bottom_instructions_template: list[InstructionSpec],
+        fixed_output_state: VectorState | None = None,
     ) -> tuple[PermutationGadget, VectorState]:
         """Extract a concrete gadget and output state from a Z3 model.
 
@@ -497,34 +500,41 @@ class GadgetSynthesizer:
         canonical output state (min to top, max to bottom per lane), and
         concretizes all symbolic variables in the instruction templates
         using the model's assignments.
+
+        When ``fixed_output_state`` is provided (strict lane order mode), the
+        output state is used directly without reading from the model or
+        applying min/max canonicalization.
         """
-        # Extract element values from output registers to build canonical output state
-        output_top = []
-        output_bottom = []
-        for lane_idx in range(self.elements_per_vector):
-            lane_start = lane_idx * self.lane_width
-            lane_end = lane_start + self.lane_width - 1
+        if fixed_output_state is not None:
+            output_state = fixed_output_state
+        else:
+            # Extract element values from output registers to build canonical output state
+            output_top = []
+            output_bottom = []
+            for lane_idx in range(self.elements_per_vector):
+                lane_start = lane_idx * self.lane_width
+                lane_end = lane_start + self.lane_width - 1
 
-            top_lane = Extract(lane_end, lane_start, top_output)
-            bottom_lane = Extract(lane_end, lane_start, bottom_output)
+                top_lane = Extract(lane_end, lane_start, top_output)
+                bottom_lane = Extract(lane_end, lane_start, bottom_output)
 
-            top_val = model.evaluate(top_lane, model_completion=True)
-            bottom_val = model.evaluate(bottom_lane, model_completion=True)
+                top_val = model.evaluate(top_lane, model_completion=True)
+                bottom_val = model.evaluate(bottom_lane, model_completion=True)
 
-            top_elem = (
-                top_val.as_long() if hasattr(top_val, "as_long") else top_val
-            )
-            bottom_elem = (
-                bottom_val.as_long()
-                if hasattr(bottom_val, "as_long")
-                else bottom_val
-            )
+                top_elem = (
+                    top_val.as_long() if hasattr(top_val, "as_long") else top_val
+                )
+                bottom_elem = (
+                    bottom_val.as_long()
+                    if hasattr(bottom_val, "as_long")
+                    else bottom_val
+                )
 
-            # Canonical ordering: lower element index to top, higher to bottom
-            output_top.append(min(top_elem, bottom_elem))
-            output_bottom.append(max(top_elem, bottom_elem))
+                # Canonical ordering: lower element index to top, higher to bottom
+                output_top.append(min(top_elem, bottom_elem))
+                output_bottom.append(max(top_elem, bottom_elem))
 
-        output_state = VectorState(top=output_top, bottom=output_bottom)
+            output_state = VectorState(top=output_top, bottom=output_bottom)
 
         # Create concrete instructions by substituting symbolic values
         def concretize_instructions(
@@ -1224,17 +1234,38 @@ class BitonicSuperVectorizer:
         depth_limit: int | None = None,
         gadget_depth: int = 3,
         max_solutions_per_gadget: int | None = None,
-    ) -> list[SolutionNode]:
+        natural_order: bool = False,
+    ) -> tuple[list[SolutionNode], bool]:
         """
         Recursively explore all stage transitions to build solution tree.
-        Returns root nodes (first stage solutions).
+        Returns (root_nodes, all_stages_complete).
 
         Args:
             depth_limit: Maximum stage depth to explore (inclusive). If None, all stages are explored.
             gadget_depth: Maximum instruction depth per gadget (1-3, default 3).
             max_solutions_per_gadget: Optional cap on solutions per gadget template.
                 When ``None`` all solutions are enumerated.
+            natural_order: If True, append a final stage that restores natural
+                element order (1..N in top, N+1..2N in bottom) for memory writeback.
+
+        Returns:
+            Tuple of (root nodes, all_stages_complete) where all_stages_complete
+            is True if every expected stage was solved successfully.
         """
+        # Inject natural-order stage if requested
+        self._natural_order_stage = None
+        if natural_order:
+            natural_pairs = [
+                (i + 1, self.elements_per_vector + i + 1)
+                for i in range(self.elements_per_vector)
+            ]
+            new_stage = max(self.bitonic_sorter.stages.keys()) + 1
+            self.bitonic_sorter.stages[new_stage] = natural_pairs
+            self._natural_order_stage = new_stage
+
+        # Track which stages produce at least one valid gadget
+        self._stages_completed: set[int] = set()
+
         initial_state = self._create_initial_state()
         # Pre-compute all candidates once - they're independent of stage/input state
         all_candidates = self.synthesizer.precompute_all_candidates(gadget_depth)
@@ -1248,8 +1279,16 @@ class BitonicSuperVectorizer:
             max_solutions_per_gadget=max_solutions_per_gadget,
         )
 
+        # Determine expected stages
+        total_stages = len(self.bitonic_sorter.stages)
+        expected_stages = total_stages
+        if depth_limit is not None:
+            expected_stages = min(depth_limit, total_stages)
+
+        all_stages_complete = self._stages_completed == set(range(expected_stages))
+
         # Return root nodes (those with empty parent path)
-        return nodes_by_path.get((), [])
+        return nodes_by_path.get((), []), all_stages_complete
 
     def _build_tree_recursive(
         self,
@@ -1296,6 +1335,11 @@ class BitonicSuperVectorizer:
                 "parent_path": parent_path,
                 "stage_idx": stage_idx,
             }
+            if (
+                self._natural_order_stage is not None
+                and stage_idx == self._natural_order_stage
+            ):
+                metadata["allow_any_lane_order"] = False
             if self.smt2_dump_dir:
                 metadata["smt2_dump_dir"] = self.smt2_dump_dir
 
@@ -1326,6 +1370,9 @@ class BitonicSuperVectorizer:
         print(
             f"Stage {stage_idx}: Validated {len(validated_gadgets)}/{len(all_jobs)} gadgets"
         )
+
+        if validated_gadgets:
+            self._stages_completed.add(stage_idx)
 
         # Early bailout: Check if next stage would exceed depth limit or total stages
         # No point building nodes if there are no more stages to process
@@ -1442,18 +1489,25 @@ class BitonicSuperVectorizer:
         depth_limit: int | None = None,
         gadget_depth: int = 3,
         max_solutions_per_gadget: int | None = None,
-    ) -> list[SolutionNode]:
+        natural_order: bool = False,
+    ) -> tuple[list[SolutionNode], bool]:
         """Entry point: builds solution tree for all stages.
 
         Args:
             depth_limit: Maximum stage depth to explore (inclusive). If None, all stages are explored.
             gadget_depth: Maximum instruction depth per gadget (1-3, default 3).
             max_solutions_per_gadget: Optional cap on solutions per gadget template.
+            natural_order: If True, append a final stage restoring natural element order.
+
+        Returns:
+            Tuple of (root nodes, all_stages_complete) where all_stages_complete
+            is True if every expected stage was solved successfully.
         """
         return self.build_solution_tree(
             depth_limit=depth_limit,
             gadget_depth=gadget_depth,
             max_solutions_per_gadget=max_solutions_per_gadget,
+            natural_order=natural_order,
         )
 
 _worker_tar = None
@@ -1504,6 +1558,8 @@ def _validate_gadget_worker(job):
         # Ensure it's written to disk
         _worker_tar.fileobj.flush()
 
+    allow_any_lane_order = metadata.get("allow_any_lane_order", True)
+
     gadget_results, construction_time, solver_time = (
         synthesizer.synthesize_gadget_with_symbolic(
             top_seq_clone,
@@ -1512,6 +1568,7 @@ def _validate_gadget_worker(job):
             target_pairs,
             max_solutions=max_solutions,
             solver_callback=dump_smt2_to_tar,
+            allow_any_lane_order=allow_any_lane_order,
         )
     )
 

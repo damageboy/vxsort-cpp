@@ -96,46 +96,6 @@ def test_gadget_synthesizer_init():
 
     print("✓ GadgetSynthesizer initialization test passed\n")
 
-
-def test_pair_id_mapping():
-    """Test pair ID mapping creation."""
-    print("Testing pair ID mapping...")
-
-    synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i32)
-
-    target_pairs = [
-        (0, 8),
-        (1, 9),
-        (2, 10),
-        (3, 11),
-        (4, 12),
-        (5, 13),
-        (6, 14),
-        (7, 15),
-    ]
-    pair_id_map, pair_id_reverse_map = synthesizer._create_pair_id_mapping(target_pairs)
-
-    print(f"  Pair ID map: {pair_id_map}")
-    print(f"  Pair ID reverse map: {pair_id_reverse_map}")
-
-    # Check that both elements in each pair have the same pair_id
-    for pair_id, (elem1, elem2) in enumerate(target_pairs, start=1):
-        assert pair_id_map[elem1] == pair_id_map[elem2], (
-            f"Elements {elem1} and {elem2} should have the same pair_id"
-        )
-        assert pair_id_map[elem1] == pair_id, (
-            f"Pair ({elem1}, {elem2}) should have pair_id {pair_id}"
-        )
-        # Check reverse map has canonical ordering (low, high)
-        low, high = pair_id_reverse_map[pair_id]
-        assert low == min(elem1, elem2), f"Low element should be min({elem1}, {elem2})"
-        assert high == max(elem1, elem2), (
-            f"High element should be max({elem1}, {elem2})"
-        )
-
-    print("✓ Pair ID mapping test passed\n")
-
-
 def test_bitonicsupervectorizer_init():
     """Test BitonicSuperVectorizer initialization."""
     print("Testing BitonicSuperVectorizer initialization...")
@@ -234,7 +194,7 @@ def test_first_stage_requires_no_permutation(vm, dt):
         )
 
     # Build solution tree for just the first stage
-    solutions = super_opt.build_solution_tree(depth_limit=1)
+    solutions, _ = super_opt.build_solution_tree(depth_limit=1)
 
     print(f"  Found {len(solutions)} valid solution tree root(s)")
 
@@ -252,6 +212,161 @@ def test_first_stage_requires_no_permutation(vm, dt):
         f"  ✓ First gadget requires {min_instructions} instructions (as expected)"
     )
     print("✓ First stage null permutation test passed\n")
+
+
+def test_natural_order_identity():
+    """When input state IS already natural order, the stage should find a 0-instruction gadget."""
+    print("Testing natural order identity (already in natural order)...")
+
+    synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i64)
+    n = synthesizer.elements_per_vector  # 4 for AVX2 i64
+
+    # Input is already in natural order
+    input_state = VectorState(
+        top=list(range(1, n + 1)),
+        bottom=list(range(n + 1, 2 * n + 1)),
+    )
+    # Target pairs: (1, 5), (2, 6), (3, 7), (4, 8)
+    target_pairs = [(i + 1, n + i + 1) for i in range(n)]
+
+    # Empty gadget (0 instructions) should satisfy strict constraints
+    results, _, _ = synthesizer.synthesize_gadget_with_symbolic(
+        top_instructions_template=[],
+        bottom_instructions_template=[],
+        input_state=input_state,
+        target_pairs=target_pairs,
+        allow_any_lane_order=False,
+    )
+
+    assert len(results) == 1, f"Expected 1 result, got {len(results)}"
+    gadget, output_state = results[0]
+    assert gadget.instruction_count() == 0, "Should be a 0-instruction gadget"
+    assert output_state.top == list(range(1, n + 1))
+    assert output_state.bottom == list(range(n + 1, 2 * n + 1))
+    print("  Output state:", output_state)
+    print("✓ Natural order identity test passed\n")
+
+
+def test_natural_order_strict_constraints():
+    """Strict constraints pin pair[i] to lane i with exact top/bottom assignment."""
+    print("Testing natural order strict constraints...")
+
+    synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i64)
+    n = synthesizer.elements_per_vector  # 4
+
+    # Scrambled input: top=[3,1,4,2], bottom=[7,5,8,6]
+    input_state = VectorState(top=[3, 1, 4, 2], bottom=[7, 5, 8, 6])
+    target_pairs = [(i + 1, n + i + 1) for i in range(n)]
+
+    # Build InstructionSpec templates with symbolic placeholders
+    from bitonic_super_optimizer import InstructionSpec, SymbolicPlaceholder
+
+    top_template = [
+        InstructionSpec(
+            "_mm256_permutexvar_epi64",
+            {"a": "top", "op_idx": SymbolicPlaceholder("ctrl_top", 256)},
+        )
+    ]
+    bottom_template = [
+        InstructionSpec(
+            "_mm256_permutexvar_epi64",
+            {"a": "bottom", "op_idx": SymbolicPlaceholder("ctrl_bottom", 256)},
+        )
+    ]
+
+    results, _, _ = synthesizer.synthesize_gadget_with_symbolic(
+        top_instructions_template=top_template,
+        bottom_instructions_template=bottom_template,
+        input_state=input_state,
+        target_pairs=target_pairs,
+        max_solutions=1,
+        allow_any_lane_order=False,
+    )
+
+    assert len(results) >= 1, "Should find at least one solution"
+    gadget, output_state = results[0]
+    assert output_state.top == [1, 2, 3, 4], f"Expected [1,2,3,4], got {output_state.top}"
+    assert output_state.bottom == [5, 6, 7, 8], f"Expected [5,6,7,8], got {output_state.bottom}"
+    print(f"  Found gadget: {gadget}")
+    print(f"  Output state: {output_state}")
+    print("✓ Natural order strict constraints test passed\n")
+
+
+def test_natural_order_integration():
+    """Verify natural_order=True injects a stage and sets metadata correctly."""
+    print("Testing natural order integration (AVX2 i64)...")
+
+    super_opt = BitonicSuperVectorizer(2, primitive_type.i64, vector_machine.AVX2)
+    n = super_opt.elements_per_vector  # 4
+    num_bitonic_stages = len(super_opt.bitonic_sorter.stages)
+
+    # Call build_solution_tree with natural_order=True but depth_limit=1
+    # to verify the stage was injected without running the full tree
+    _, _ = super_opt.build_solution_tree(
+        natural_order=True, depth_limit=1, gadget_depth=2
+    )
+
+    # Verify the natural order stage was injected
+    assert super_opt._natural_order_stage is not None, (
+        "Natural order stage should be set"
+    )
+    assert super_opt._natural_order_stage == num_bitonic_stages, (
+        f"Natural order stage should be {num_bitonic_stages}, "
+        f"got {super_opt._natural_order_stage}"
+    )
+
+    # Verify the injected stage has the correct pairs
+    nat_stage = super_opt._natural_order_stage
+    expected_pairs = [(i + 1, n + i + 1) for i in range(n)]
+    assert super_opt.bitonic_sorter.stages[nat_stage] == expected_pairs, (
+        f"Expected pairs {expected_pairs}, "
+        f"got {super_opt.bitonic_sorter.stages[nat_stage]}"
+    )
+
+    # Verify the total number of stages increased by 1
+    assert len(super_opt.bitonic_sorter.stages) == num_bitonic_stages + 1, (
+        f"Expected {num_bitonic_stages + 1} stages, "
+        f"got {len(super_opt.bitonic_sorter.stages)}"
+    )
+
+    print(f"  Injected natural order stage {nat_stage} with pairs {expected_pairs}")
+
+    # Now test the natural order stage directly with a known input
+    # Simulate a post-sort scrambled state and synthesize just the natural order gadget
+    scrambled_input = VectorState(top=[3, 1, 4, 2], bottom=[7, 5, 8, 6])
+    synthesizer = super_opt.synthesizer
+
+    from bitonic_super_optimizer import InstructionSpec, SymbolicPlaceholder
+
+    top_template = [
+        InstructionSpec(
+            "_mm256_permutexvar_epi64",
+            {"a": "top", "op_idx": SymbolicPlaceholder("ctrl_top", 256)},
+        )
+    ]
+    bottom_template = [
+        InstructionSpec(
+            "_mm256_permutexvar_epi64",
+            {"a": "bottom", "op_idx": SymbolicPlaceholder("ctrl_bottom", 256)},
+        )
+    ]
+
+    results, _, _ = synthesizer.synthesize_gadget_with_symbolic(
+        top_instructions_template=top_template,
+        bottom_instructions_template=bottom_template,
+        input_state=scrambled_input,
+        target_pairs=expected_pairs,
+        max_solutions=1,
+        allow_any_lane_order=False,
+    )
+
+    assert len(results) >= 1, "Should find at least one solution for natural order"
+    _, output_state = results[0]
+    assert output_state.top == [1, 2, 3, 4], f"Expected [1,2,3,4], got {output_state.top}"
+    assert output_state.bottom == [5, 6, 7, 8], f"Expected [5,6,7,8], got {output_state.bottom}"
+
+    print(f"  Natural order gadget output: {output_state}")
+    print("✓ Natural order integration test passed\n")
 
 
 def run_all_tests():

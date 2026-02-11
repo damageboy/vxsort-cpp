@@ -54,6 +54,7 @@ def generate_bitonic_sorter(
     output_formats: list[str] = None,
     gadget_depth: int = 3,
     smt2_dump_dir: str | None = None,
+    natural_order: bool = False,
 ):
     """
     Generate bitonic sorter with super-optimized permutation sequences.
@@ -67,6 +68,7 @@ def generate_bitonic_sorter(
         output_formats: List of output formats (e.g., ["json", "asm"]). Default is ["json"].
         gadget_depth: Maximum instruction depth per gadget (1-3, default 3)
         smt2_dump_dir: Directory to dump SMT2 files if requested
+        natural_order: If True, add final stage restoring natural element order for memory writeback
 
     Returns:
         List of SolutionNode trees representing different optimized solutions
@@ -84,11 +86,17 @@ def generate_bitonic_sorter(
 
     # Synthesize all stages to build solution tree
     print("Synthesizing permutation gadgets...")
-    solutions = super_opt.synthesize_all_stages(
-        depth_limit=depth_limit, gadget_depth=gadget_depth
+    solutions, all_stages_complete = super_opt.synthesize_all_stages(
+        depth_limit=depth_limit, gadget_depth=gadget_depth, natural_order=natural_order
     )
 
     print(f"Found {len(solutions)} root solutions")
+
+    if not all_stages_complete:
+        print(
+            "\nWARNING: The super-optimizer did not find solutions for all stages.\n"
+            "The output will be incomplete. Consider increasing --gadget-depth.\n"
+        )
 
     # Filter to top K cheapest root-to-leaf paths if requested
     selected_paths = None
@@ -174,6 +182,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Dump SMT2 files from Z3 into compressed tar files in /tmp",
     )
+    parser.add_argument(
+        "--natural-order",
+        action="store_true",
+        default=False,
+        help="Add final permutation stage to restore natural element order for memory writeback",
+    )
 
     args = parser.parse_args()
 
@@ -195,4 +209,5 @@ if __name__ == "__main__":
         output_formats=args.output_format,  # Will be None if not specified, handled by function default
         gadget_depth=args.gadget_depth + 1,  # +1 because range is exclusive
         smt2_dump_dir=smt2_dump_dir,
+        natural_order=args.natural_order,
     )
