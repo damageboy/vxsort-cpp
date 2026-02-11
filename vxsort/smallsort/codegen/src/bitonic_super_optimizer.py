@@ -10,6 +10,7 @@ from tabulate import tabulate
 from multiprocessing import Pool
 from z3 import (
     Solver,
+    Optimize,
     Context,
     main_ctx,
     Extract,
@@ -151,6 +152,13 @@ class InstructionSpec:
     intrinsic_name: str
     args: dict  # operands, immediates, masks, etc.
 
+    def sort_key(self) -> tuple:
+        """Return a deterministic sort key for canonical ordering."""
+        return (
+            self.intrinsic_name,
+            tuple(sorted((k, str(v)) for k, v in self.args.items())),
+        )
+
     def __repr__(self):
         return f"{self.intrinsic_name}({self.args})"
 
@@ -166,6 +174,13 @@ class PermutationGadget:
     def instruction_count(self) -> int:
         """Total number of instructions in this gadget."""
         return len(self.top_instructions) + len(self.bottom_instructions)
+
+    def sort_key(self) -> tuple:
+        """Return a deterministic sort key for canonical ordering."""
+        return (
+            tuple(i.sort_key() for i in self.top_instructions),
+            tuple(i.sort_key() for i in self.bottom_instructions),
+        )
 
     def __repr__(self):
         return f"Gadget(top={len(self.top_instructions)}, bottom={len(self.bottom_instructions)}, validated={self.validated})"
@@ -306,7 +321,7 @@ class GadgetSynthesizer:
         bottom_instructions_template: list[InstructionSpec],
         input_state: VectorState,
         target_pairs: list[tuple[int, int]],
-        max_solutions: int | None = None,
+        max_solutions: int = 1,
         solver_callback: callable | None = None,
         allow_any_lane_order: bool = True,
     ) -> tuple[list[tuple[PermutationGadget, VectorState]], float, float]:
@@ -327,8 +342,9 @@ class GadgetSynthesizer:
         compare-and-exchange operation.
 
         Args:
-            max_solutions: Optional cap on the number of solutions returned.
-                When ``None`` (the default) all solutions are enumerated.
+            max_solutions: Maximum number of solutions to return. Defaults to 1,
+                which uses Z3 Optimize with minimize for deterministic results.
+                Values > 1 use Z3 Solver with enumeration (non-deterministic ordering).
             solver_callback: Optional callback receiving the Solver instance.
             allow_any_lane_order: When True (default), any target pair can land
                 in any lane and the output state is canonicalized (min to top,
@@ -463,7 +479,35 @@ class GadgetSynthesizer:
             solver_time = time.perf_counter() - solver_start
             return [(gadget, output_state)], construction_time, solver_time
 
-        # Enumerate all solutions over symbolic variables
+        if max_solutions == 1:
+            # Use Optimize with minimize to get a deterministic (minimum)
+            # solution. Z3's Solver is non-deterministic across process
+            # invocations due to ASLR affecting internal pointer-based
+            # hashing. Optimize with minimize always returns the unique
+            # lexicographic minimum, making results reproducible.
+            opt = Optimize(ctx=ctx)
+            for assertion in solver.assertions():
+                opt.add(assertion)
+            for term in terms:
+                opt.minimize(term)
+            result = opt.check()
+            if result != sat:
+                solver_time = time.perf_counter() - solver_start
+                return [], construction_time, solver_time
+            model = opt.model()
+            gadget, output_state = self._extract_solution_from_model(
+                model,
+                top_output,
+                bottom_output,
+                symbolic_vars,
+                top_instructions_template,
+                bottom_instructions_template,
+                fixed_output_state=fixed_output_state,
+            )
+            solver_time = time.perf_counter() - solver_start
+            return [(gadget, output_state)], construction_time, solver_time
+
+        # Enumerate multiple solutions over symbolic variables
         results = []
         for model in _all_smt(solver, terms, max_results=max_solutions):
             gadget, output_state = self._extract_solution_from_model(
@@ -932,6 +976,16 @@ class GadgetSynthesizer:
             if progress:
                 progress.stop()
 
+        # Sort validated gadgets by a deterministic key to ensure consistent
+        # dict insertion order downstream, regardless of imap_unordered return order.
+        validated_gadgets.sort(
+            key=lambda x: (
+                x[3]["parent_path"],
+                x[1].as_tuple(),
+                x[2].as_tuple(),
+            )
+        )
+
         return validated_gadgets
 
     def _enumerate_single_input_instructions(
@@ -1226,7 +1280,6 @@ class BitonicSuperVectorizer:
         self,
         depth_limit: int | None = None,
         gadget_depth: int = 3,
-        max_solutions_per_gadget: int | None = None,
         natural_order: bool = False,
     ) -> tuple[list[SolutionNode], bool]:
         """
@@ -1236,8 +1289,6 @@ class BitonicSuperVectorizer:
         Args:
             depth_limit: Maximum stage depth to explore (inclusive). If None, all stages are explored.
             gadget_depth: Maximum instruction depth per gadget (1-3, default 3).
-            max_solutions_per_gadget: Optional cap on solutions per gadget template.
-                When ``None`` all solutions are enumerated.
             natural_order: If True, append a final stage that restores natural
                 element order (1..N in top, N+1..2N in bottom) for memory writeback.
 
@@ -1269,7 +1320,6 @@ class BitonicSuperVectorizer:
             0,
             depth_limit,
             all_candidates,
-            max_solutions_per_gadget=max_solutions_per_gadget,
         )
 
         # Determine expected stages
@@ -1289,7 +1339,6 @@ class BitonicSuperVectorizer:
         stage_idx: int,
         depth_limit: int | None = None,
         all_candidates: list[tuple] | None = None,
-        max_solutions_per_gadget: int | None = None,
     ) -> dict[tuple, list[SolutionNode]]:
         """
         Build solution tree collecting all candidates for entire stage before validation.
@@ -1301,7 +1350,6 @@ class BitonicSuperVectorizer:
             depth_limit: Maximum stage depth to explore
             all_candidates: Pre-computed list of (top_seq, bottom_seq) instruction templates,
                            independent of stage/input state
-            max_solutions_per_gadget: Optional cap forwarded to each worker.
 
         Returns:
             Dictionary mapping parent_path to list of SolutionNodes for that path
@@ -1335,9 +1383,6 @@ class BitonicSuperVectorizer:
                 metadata["allow_any_lane_order"] = False
             if self.smt2_dump_dir:
                 metadata["smt2_dump_dir"] = self.smt2_dump_dir
-
-            if max_solutions_per_gadget is not None:
-                metadata["max_solutions"] = max_solutions_per_gadget
 
             # Enrich pre-computed candidates with per-state metadata
             for top_seq, bottom_seq in all_candidates:
@@ -1403,11 +1448,14 @@ class BitonicSuperVectorizer:
         # Deduplicate: track one representative per unique output_state
         unique_outputs: dict[tuple, VectorState] = {}
 
+        # Sort transition keys for deterministic iteration order
+        sorted_transitions = sorted(gadgets_by_transition.items(), key=lambda x: x[0])
+
         for (
             parent_path,
             input_tuple,
             output_tuple,
-        ), gadgets in gadgets_by_transition.items():
+        ), gadgets in sorted_transitions:
             # Reconstruct VectorState from tuples
             input_state = VectorState(
                 top=list(input_tuple[0]), bottom=list(input_tuple[1])
@@ -1415,6 +1463,9 @@ class BitonicSuperVectorizer:
             output_state = VectorState(
                 top=list(output_tuple[0]), bottom=list(output_tuple[1])
             )
+
+            # Sort gadgets within each group for deterministic ordering
+            gadgets.sort(key=lambda g: g.sort_key())
 
             # Create node with all equivalent gadgets
             node = SolutionNode(
@@ -1451,7 +1502,6 @@ class BitonicSuperVectorizer:
                 stage_idx + 1,
                 depth_limit,
                 all_candidates,
-                max_solutions_per_gadget=max_solutions_per_gadget,
             )
 
             # Build lookup from output_state_tuple -> shared children list
@@ -1474,7 +1524,6 @@ class BitonicSuperVectorizer:
         self,
         depth_limit: int | None = None,
         gadget_depth: int = 3,
-        max_solutions_per_gadget: int | None = None,
         natural_order: bool = False,
     ) -> tuple[list[SolutionNode], bool]:
         """Entry point: builds solution tree for all stages.
@@ -1482,7 +1531,6 @@ class BitonicSuperVectorizer:
         Args:
             depth_limit: Maximum stage depth to explore (inclusive). If None, all stages are explored.
             gadget_depth: Maximum instruction depth per gadget (1-3, default 3).
-            max_solutions_per_gadget: Optional cap on solutions per gadget template.
             natural_order: If True, append a final stage restoring natural element order.
 
         Returns:
@@ -1492,7 +1540,6 @@ class BitonicSuperVectorizer:
         return self.build_solution_tree(
             depth_limit=depth_limit,
             gadget_depth=gadget_depth,
-            max_solutions_per_gadget=max_solutions_per_gadget,
             natural_order=natural_order,
         )
 
@@ -1516,9 +1563,6 @@ def _validate_gadget_worker(job):
 
     # Create a local synthesizer and synthesis in its own Z3 context
     synthesizer = GadgetSynthesizer(vm, prim_type)
-    # Default to 1 for backward compatibility; callers opt in to more via
-    # build_solution_tree(max_solutions_per_gadget=N).
-    max_solutions = metadata.get("max_solutions", 1)
 
     smt2_dump_dir = metadata.get("smt2_dump_dir")
     stage_idx = metadata.get("stage_idx")
@@ -1553,7 +1597,7 @@ def _validate_gadget_worker(job):
             bottom_seq_clone,
             input_state,
             target_pairs,
-            max_solutions=max_solutions,
+            max_solutions=1,
             solver_callback=dump_smt2_to_tar,
             allow_any_lane_order=allow_any_lane_order,
         )
