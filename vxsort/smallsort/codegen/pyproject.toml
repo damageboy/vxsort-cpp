@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["ruff>=0.14.0", "setuptools>=80.9.0"]
+dev = ["ruff>=0.14.0", "setuptools>=80.9.0", "vulture>=2.14"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -22,3 +22,7 @@ pythonpath = ["src"]
 
 [tool.pyrefly]
 project-includes = ["**/*.py*", "**/*.ipynb"]
+
+[tool.vulture]
+paths = ["."]
+exclude = [".venv", "build", "dist"]
