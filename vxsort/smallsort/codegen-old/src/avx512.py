@@ -42,7 +42,9 @@ class AVX512BitonicISA(BitonicISA):
             self.bitonic_size_map[t] = int(self.vector_size_in_bytes / s)
 
     def clean_print(self, s: str):
-        clean_lines = str.join("\n", [l for l in s.splitlines() if not AVX512BitonicISA.REMOVE_ME in l])
+        clean_lines = str.join(
+            "\n", [l for l in s.splitlines() if AVX512BitonicISA.REMOVE_ME not in l]
+        )
         print(clean_lines, file=self.f_header)
 
     def max_bitonic_sort_vectors(self):
@@ -94,11 +96,15 @@ class AVX512BitonicISA(BitonicISA):
         return v
 
     def generate_param_list(self, start, numParams):
-        return str.join(", ", list(map(lambda p: f"d{p:02d}", range(start, start + numParams))))
+        return str.join(
+            ", ", list(map(lambda p: f"d{p:02d}", range(start, start + numParams)))
+        )
 
     def generate_param_def_list(self, numParams):
         t = self.type
-        return str.join(", ", list(map(lambda p: f"TV& d{p:02d}", range(1, numParams + 1))))
+        return str.join(
+            ", ", list(map(lambda p: f"TV& d{p:02d}", range(1, numParams + 1)))
+        )
 
     def generate_shuffle_X1(self, v):
         t = self.type
@@ -106,45 +112,69 @@ class AVX512BitonicISA(BitonicISA):
         if size == 32:
             return self.i2t(f"_mm512_shuffle_epi8({self.s2i(v)}, x1)")
         if size == 16:
-            return self.i2t(f"_mm512_shuffle_epi32({self.s2i(v)}, (_MM_PERM_ENUM)  0b10'11'00'01)")
+            return self.i2t(
+                f"_mm512_shuffle_epi32({self.s2i(v)}, (_MM_PERM_ENUM)  0b10'11'00'01)"
+            )
         elif size == 8:
-            return self.d2i(f"_mm512_permute_pd({self.t2d(v)}, (_MM_PERM_ENUM) 0b0'1'0'1'0'1'0'1)")
+            return self.d2i(
+                f"_mm512_permute_pd({self.t2d(v)}, (_MM_PERM_ENUM) 0b0'1'0'1'0'1'0'1)"
+            )
 
     def generate_shuffle_X2(self, v):
         t = self.type
         size = self.bitonic_size_map[t]
         if size == 32:
-            return self.i2t(f"_mm512_shuffle_epi32({self.s2i(v)}, (_MM_PERM_ENUM)  0b10'11'00'01)")
+            return self.i2t(
+                f"_mm512_shuffle_epi32({self.s2i(v)}, (_MM_PERM_ENUM)  0b10'11'00'01)"
+            )
         if size == 16:
-            return self.i2t(f"_mm512_shuffle_epi32({self.s2i(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)")
+            return self.i2t(
+                f"_mm512_shuffle_epi32({self.s2i(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)"
+            )
         elif size == 8:
-            return self.d2i(f"_mm512_permutex_pd({self.t2d(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)")
+            return self.d2i(
+                f"_mm512_permutex_pd({self.t2d(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)"
+            )
 
     def generate_shuffle_X4(self, v):
         t = self.type
         size = self.bitonic_size_map[t]
         if size == 32:
-            return self.i2t(f"_mm512_shuffle_epi32({self.s2i(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)")
+            return self.i2t(
+                f"_mm512_shuffle_epi32({self.s2i(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)"
+            )
         if size == 16:
-            return self.i2t(f"_mm512_permutex_epi64({self.s2i(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)")
+            return self.i2t(
+                f"_mm512_permutex_epi64({self.s2i(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)"
+            )
         elif size == 8:
-            return self.d2i(f"_mm512_shuffle_f64x2({self.t2d(v)}, {self.t2d(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)")
+            return self.d2i(
+                f"_mm512_shuffle_f64x2({self.t2d(v)}, {self.t2d(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)"
+            )
 
     def generate_shuffle_X8(self, v):
         t = self.type
         size = self.bitonic_size_map[t]
         if size == 32:
-            return self.i2t(f"_mm512_permutex_epi64({self.s2i(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)")
+            return self.i2t(
+                f"_mm512_permutex_epi64({self.s2i(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)"
+            )
         if size == 16:
-            return self.i2t(f"_mm512_shuffle_i64x2({self.s2i(v)}, {self.s2i(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)")
+            return self.i2t(
+                f"_mm512_shuffle_i64x2({self.s2i(v)}, {self.s2i(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)"
+            )
         elif size == 8:
-            return self.d2i(f"_mm512_shuffle_pd({self.t2d(v)}, {self.t2d(v)}, (_MM_PERM_ENUM) 0xB1)")
+            return self.d2i(
+                f"_mm512_shuffle_pd({self.t2d(v)}, {self.t2d(v)}, (_MM_PERM_ENUM) 0xB1)"
+            )
 
     def generate_shuffle_X16(self, v):
         t = self.type
         size = self.bitonic_size_map[t]
         if size == 32:
-            return self.i2t(f"_mm512_shuffle_i64x2({self.s2i(v)}, {self.s2i(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)")
+            return self.i2t(
+                f"_mm512_shuffle_i64x2({self.s2i(v)}, {self.s2i(v)}, (_MM_PERM_ENUM) 0b01'00'11'10)"
+            )
         raise Exception("WTF")
 
     def generate_min(self, v1, v2):
@@ -200,7 +230,9 @@ class AVX512BitonicISA(BitonicISA):
         mask = mask & ((1 << size) - 1)
         return mask
 
-    def generate_blended_max(self, src, v1, v2, blend: int, width: int, ascending: bool):
+    def generate_blended_max(
+        self, src, v1, v2, blend: int, width: int, ascending: bool
+    ):
         mask = self.generate_mask(blend, width, ascending)
         t = self.type
         if t == "i16":
@@ -235,13 +267,13 @@ class AVX512BitonicISA(BitonicISA):
         max_value = "bugbugbug"
         if self.vector_size() == 8:
             int_suffix = "epi64"
-            max_value = f"_mm512_set1_epi64(MAX)"
+            max_value = "_mm512_set1_epi64(MAX)"
         elif self.vector_size() == 16:
             int_suffix = "epi32"
-            max_value = f"_mm512_set1_epi32(MAX)"
+            max_value = "_mm512_set1_epi32(MAX)"
         elif self.vector_size() == 32:
             int_suffix = "epi16"
-            max_value = f"_mm512_set1_epi16(MAX)"
+            max_value = "_mm512_set1_epi16(MAX)"
 
         if t == "f64":
             return f"""_mm512_mask_loadu_pd(_mm512_set1_pd(MAX),
@@ -334,10 +366,10 @@ public:
 """)
 
     def generate_epilogue(self):
-        self.clean_print(f"""
-}};
-}}
-}}
+        self.clean_print("""
+};
+}
+}
 
 #undef i2d
 #undef d2i
@@ -520,13 +552,19 @@ public:
         if size == 32:
             s1 = f"_mm512_shuffle_epi8({self.s2i(v)}, x1)"
             s1 = f"_mm512_shuffle_epi32({s1}, (_MM_PERM_ENUM) 0b00'01'10'11)"
-            return self.i2t(f"_mm512_shuffle_i64x2({s1}, {s1}, (_MM_PERM_ENUM) 0b00'01'10'11)")
+            return self.i2t(
+                f"_mm512_shuffle_i64x2({s1}, {s1}, (_MM_PERM_ENUM) 0b00'01'10'11)"
+            )
         elif size == 16:
             s1 = f"_mm512_shuffle_epi32({self.s2i(v)}, (_MM_PERM_ENUM) 0b00'01'10'11)"
-            return self.i2t(f"_mm512_shuffle_i64x2({s1}, {s1}, (_MM_PERM_ENUM) 0b00'01'10'11)")
+            return self.i2t(
+                f"_mm512_shuffle_i64x2({s1}, {s1}, (_MM_PERM_ENUM) 0b00'01'10'11)"
+            )
         elif size == 8:
             s1 = f"d2i(_mm512_permute_pd({self.t2d(v)}, (_MM_PERM_ENUM) 0b0'1'0'1'0'1'0'1))"
-            return self.i2t(f"_mm512_shuffle_i64x2({s1}, {s1}, (_MM_PERM_ENUM) 0b00'01'10'11)")
+            return self.i2t(
+                f"_mm512_shuffle_i64x2({s1}, {s1}, (_MM_PERM_ENUM) 0b00'01'10'11)"
+            )
 
     def generate_cross_min_max(self):
         g = self
@@ -561,12 +599,18 @@ public:
     static NOINLINE void sort_{m:02d}v_full_{sfx}({type} *ptr) {{""")
 
             for l in range(0, m):
-                g.clean_print(f"        TV d{l + 1:02d} = {g.get_load_intrinsic('ptr', l)};")
+                g.clean_print(
+                    f"        TV d{l + 1:02d} = {g.get_load_intrinsic('ptr', l)};"
+                )
 
-            g.clean_print(f"        sort_{m:02d}v_{sfx}({g.generate_param_list(1, m)});")
+            g.clean_print(
+                f"        sort_{m:02d}v_{sfx}({g.generate_param_list(1, m)});"
+            )
 
             for l in range(0, m):
-                g.clean_print(f"        {g.get_store_intrinsic('ptr', l, f'd{l + 1:02d}')};")
+                g.clean_print(
+                    f"        {g.get_store_intrinsic('ptr', l, f'd{l + 1:02d}')};"
+                )
 
             g.clean_print("    }")
 
@@ -580,16 +624,26 @@ public:
 """)
 
             for l in range(0, m - 1):
-                g.clean_print(f"        TV d{l + 1:02d} = {g.get_load_intrinsic('ptr', l)};")
+                g.clean_print(
+                    f"        TV d{l + 1:02d} = {g.get_load_intrinsic('ptr', l)};"
+                )
 
-            g.clean_print(f"        TV d{m:02d} = {g.get_mask_load_intrinsic('ptr', m - 1, 'mask')};")
+            g.clean_print(
+                f"        TV d{m:02d} = {g.get_mask_load_intrinsic('ptr', m - 1, 'mask')};"
+            )
 
-            g.clean_print(f"        sort_{m:02d}v_ascending({g.generate_param_list(1, m)});")
+            g.clean_print(
+                f"        sort_{m:02d}v_ascending({g.generate_param_list(1, m)});"
+            )
 
             for l in range(0, m - 1):
-                g.clean_print(f"        {g.get_store_intrinsic('ptr', l, f'd{l + 1:02d}')};")
+                g.clean_print(
+                    f"        {g.get_store_intrinsic('ptr', l, f'd{l + 1:02d}')};"
+                )
 
-            g.clean_print(f"        {g.get_mask_store_intrinsic('ptr', m - 1, f'd{m:02d}', 'mask')};")
+            g.clean_print(
+                f"        {g.get_mask_store_intrinsic('ptr', m - 1, f'd{m:02d}', 'mask')};"
+            )
 
             g.clean_print("    }")
 
@@ -605,7 +659,9 @@ public:
         switch(length / N) {{""")
 
         for m in range(1, self.max_bitonic_sort_vectors() + 1):
-            g.clean_print(f"            case {m}: sort_{m:02d}v_full_{sfx}(ptr); break;")
+            g.clean_print(
+                f"            case {m}: sort_{m:02d}v_full_{sfx}(ptr); break;"
+            )
         g.clean_print("        }")
         g.clean_print("    }")
 

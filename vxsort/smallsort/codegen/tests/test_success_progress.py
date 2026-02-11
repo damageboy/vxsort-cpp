@@ -41,9 +41,9 @@ def test_dual_bar_column_edge_cases():
         task.fields = {"successes": successes}
 
         rendered = column.render(task)
-        assert len(rendered) == bar_width, (
-            f"Failed for total={total}, completed={completed}, successes={successes}"
-        )
+        assert (
+            len(rendered) == bar_width
+        ), f"Failed for total={total}, completed={completed}, successes={successes}"
 
 
 def test_dual_bar_column_division_by_zero():
@@ -78,6 +78,6 @@ def test_dual_bar_column_large_numbers():
         task.fields = {"successes": successes}
 
         rendered = column.render(task)
-        assert len(rendered) == bar_width, (
-            f"Failed for large numbers: total={total}, completed={completed}, successes={successes}"
-        )
+        assert (
+            len(rendered) == bar_width
+        ), f"Failed for large numbers: total={total}, completed={completed}, successes={successes}"

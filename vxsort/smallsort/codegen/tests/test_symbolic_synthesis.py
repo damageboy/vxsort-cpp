@@ -183,7 +183,10 @@ def test_multi_solution_enumeration():
     # Bottom: blend(top, bottom, sym_bot)
     # For each lane, exactly one blend selects top and the other selects bottom.
     results, _, _ = synthesizer.synthesize_gadget_with_symbolic(
-        [blend_top], [blend_bottom], input_state, target_pairs,
+        [blend_top],
+        [blend_bottom],
+        input_state,
+        target_pairs,
         max_solutions=20,
     )
 
@@ -195,9 +198,9 @@ def test_multi_solution_enumeration():
         assert gadget.validated
         output_states.add(output_state.as_tuple())
 
-    assert len(output_states) == 1, (
-        f"Expected 1 unique output state, got {len(output_states)}"
-    )
+    assert (
+        len(output_states) == 1
+    ), f"Expected 1 unique output state, got {len(output_states)}"
 
 
 if __name__ == "__main__":

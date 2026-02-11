@@ -1,7 +1,14 @@
 from z3 import Solver, main_ctx, unsat, sat, BitVec, BitVecVal, Concat, Extract
 
 # Assuming your z3s functions and registers are importable, e.g.:
-from z3_avx import _MM_SHUFFLE, _MM_SHUFFLE2, decode_shuffle_mask, mm_shuffle_str, decode_shuffle2_mask, mm_shuffle2_str
+from z3_avx import (
+    _MM_SHUFFLE,
+    _MM_SHUFFLE2,
+    decode_shuffle_mask,
+    mm_shuffle_str,
+    decode_shuffle2_mask,
+    mm_shuffle2_str,
+)
 from z3_avx import _mm256_permute_ps
 from z3_avx import _mm512_permute_ps
 from z3_avx import _mm256_permutexvar_epi32
@@ -135,9 +142,9 @@ class TestPermutePs:
 
         s.add(input != output_vector)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_permute_epi32_null_permute_found(self):
         ctx = main_ctx()
@@ -151,9 +158,9 @@ class TestPermutePs:
 
         assert result == sat, "Z3 failed to find null permute"
         model_imm8 = s.model().evaluate(imm8).as_long()
-        assert model_imm8 == null_permute_epi32_imm8, (
-            "Z3 found unexpected null permute: got 0x{model_imm8:08x}, expected 0x{null_permute_epi32_imm8:08x}"
-        )
+        assert (
+            model_imm8 == null_permute_epi32_imm8
+        ), "Z3 found unexpected null permute: got 0x{model_imm8:08x}, expected 0x{null_permute_epi32_imm8:08x}"
 
     def test_mm512_permute_epi32_null_permute(self):
         ctx = main_ctx()
@@ -164,9 +171,9 @@ class TestPermutePs:
 
         s.add(input != output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_permute_epi32_null_permute_found(self):
         ctx = main_ctx()
@@ -180,9 +187,9 @@ class TestPermutePs:
 
         assert result == sat, "Z3 failed to find null permute failed"
         model_imm8 = s.model().evaluate(imm8).as_long()
-        assert model_imm8 == null_permute_epi32_imm8, (
-            "Z3 found unexpected null permute: got 0x{model_imm8:08x}, expected 0x{null_permute_epi32_imm8:08x}"
-        )
+        assert (
+            model_imm8 == null_permute_epi32_imm8
+        ), "Z3 found unexpected null permute: got 0x{model_imm8:08x}, expected 0x{null_permute_epi32_imm8:08x}"
 
 
 class TestPermutePd:
@@ -196,9 +203,9 @@ class TestPermutePd:
 
         s.add(input != output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_permute_epi64_null_permute_found(self):
         ctx = main_ctx()
@@ -212,9 +219,9 @@ class TestPermutePd:
 
         assert result == sat, "Z3 failed to find null permute"
         model_imm8 = s.model().evaluate(imm8).as_long()
-        assert model_imm8 == null_permute_pd_imm8, (
-            "Z3 found unexpected null permute: got 0x{model_imm8:08x}, expected 0x{null_permute_pd_imm8:08x}"
-        )
+        assert (
+            model_imm8 == null_permute_pd_imm8
+        ), "Z3 found unexpected null permute: got 0x{model_imm8:08x}, expected 0x{null_permute_pd_imm8:08x}"
 
     def test_mm512_permute_epi64_null_permute_works(self):
         ctx = main_ctx()
@@ -225,9 +232,9 @@ class TestPermutePd:
 
         s.add(input != output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_permute_epi64_null_permute_found(self):
         ctx = main_ctx()
@@ -241,9 +248,9 @@ class TestPermutePd:
 
         assert result == sat, "Z3 failed to find null permute"
         model_imm8 = s.model().evaluate(imm8).as_long()
-        assert model_imm8 == null_permute_pd_imm8, (
-            "Z3 found unexpected null permute: got 0x{model_imm8:08x}, expected 0x{null_permute_pd_imm8:08x}"
-        )
+        assert (
+            model_imm8 == null_permute_pd_imm8
+        ), "Z3 found unexpected null permute: got 0x{model_imm8:08x}, expected 0x{null_permute_pd_imm8:08x}"
 
 
 class TestPermutexvarEpi32:
@@ -261,9 +268,9 @@ class TestPermutexvarEpi32:
         s.add(input != output)
         result = s.check()
 
-        assert result == unsat, (
-            f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_permutexvar_epi32_null_permute_found(self):
         ctx = main_ctx()
@@ -278,9 +285,9 @@ class TestPermutexvarEpi32:
         assert result == sat, "Z3 failed to find null permute"
         model_indices = s.model().evaluate(indices).as_long()
         expected_long = array_to_long(null_permute_vector_epi32_avx2, bits=32)
-        assert model_indices == expected_long, (
-            f"Z3 found unexpected null permute: got 0x{model_indices:064x}, expected 0x{expected_long:064x}"
-        )
+        assert (
+            model_indices == expected_long
+        ), f"Z3 found unexpected null permute: got 0x{model_indices:064x}, expected 0x{expected_long:064x}"
 
     def test_mm256_permutexvar_epi32_reverse_permute_found(self):
         ctx = main_ctx()
@@ -297,9 +304,9 @@ class TestPermutexvarEpi32:
         assert result == sat, "Z3 failed to find reverse permute"
         model_indices = s.model().evaluate(indices).as_long()
         expected_long = array_to_long(reverse_permute_vector_epi32_avx2, bits=32)
-        assert model_indices == expected_long, (
-            f"Z3 found unexpected reverse permute: got 0x{model_indices:064x}, expected 0x{expected_long:064x}"
-        )
+        assert (
+            model_indices == expected_long
+        ), f"Z3 found unexpected reverse permute: got 0x{model_indices:064x}, expected 0x{expected_long:064x}"
 
     def test_mm512_permutexvar_epi32_null_permute_works(self):
         ctx = main_ctx()
@@ -318,9 +325,9 @@ class TestPermutexvarEpi32:
         # and that the null permute vector can only lead to an identity permutation
         s.add(input != output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_permutexvar_epi32_null_permute_found(self):
         ctx = main_ctx()
@@ -336,9 +343,9 @@ class TestPermutexvarEpi32:
         assert result == sat, "Z3 failed to find null permute"
         model_indices = s.model().evaluate(indices).as_long()
         expected_long = array_to_long(null_permute_vector_epi32_avx512, bits=32)
-        assert model_indices == expected_long, (
-            "Z3 found unexpected null permute: got 0x{model_indices:0128x}, expected 0x{expected_long:0128x}"
-        )
+        assert (
+            model_indices == expected_long
+        ), "Z3 found unexpected null permute: got 0x{model_indices:0128x}, expected 0x{expected_long:0128x}"
 
     def test_mm512_permutexvar_epi32_reverse_permute_found(self):
         ctx = main_ctx()
@@ -357,9 +364,9 @@ class TestPermutexvarEpi32:
         assert result == sat, "Z3 failed to find reverse permute"
         model_indices = s.model().evaluate(indices).as_long()
         expected_long = array_to_long(reverse_permute_vector_epi32_avx512, bits=32)
-        assert model_indices == expected_long, (
-            "Z3 found unexpected reverse permute: got 0x{model_indices:0128x}, expected 0x{expected_long:0128x}"
-        )
+        assert (
+            model_indices == expected_long
+        ), "Z3 found unexpected reverse permute: got 0x{model_indices:0128x}, expected 0x{expected_long:0128x}"
 
 
 class TestPermutexvarEpi64:
@@ -376,9 +383,9 @@ class TestPermutexvarEpi64:
 
         s.add(input != output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_permutexvar_epi64_null_permute_found(self):
         ctx = main_ctx()
@@ -393,9 +400,9 @@ class TestPermutexvarEpi64:
         assert result == sat, "Z3 failed to find null permute"
         model_indices = s.model().evaluate(indices).as_long()
         expected_long = array_to_long(null_permute_vector_epi64_avx2, bits=64)
-        assert model_indices == expected_long, (
-            "Z3 found unexpected null permute: got 0x{model_indices:064x}, expected 0x{expected_long:064x}"
-        )
+        assert (
+            model_indices == expected_long
+        ), "Z3 found unexpected null permute: got 0x{model_indices:064x}, expected 0x{expected_long:064x}"
 
     def test_mm256_permutexvar_epi64_reverse_permute_found(self):
         ctx = main_ctx()
@@ -412,9 +419,9 @@ class TestPermutexvarEpi64:
         assert result == sat, "Z3 failed to find reverse permute"
         model_indices = s.model().evaluate(indices).as_long()
         expected_long = array_to_long(reverse_permute_vector_epi64_avx2, bits=64)
-        assert model_indices == expected_long, (
-            "Z3 found unexpected reverse permute: got 0x{model_indices:064x}, expected 0x{expected_long:064x}"
-        )
+        assert (
+            model_indices == expected_long
+        ), "Z3 found unexpected reverse permute: got 0x{model_indices:064x}, expected 0x{expected_long:064x}"
 
     def test_mm512_permutexvar_epi64_null_permute_works(self):
         ctx = main_ctx()
@@ -430,9 +437,9 @@ class TestPermutexvarEpi64:
 
         s.add(input != output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_permutexvar_epi64_null_permute_found(self):
         ctx = main_ctx()
@@ -447,9 +454,9 @@ class TestPermutexvarEpi64:
         assert result == sat, "Z3 failed to find null permute"
         model_indices = s.model().evaluate(indices).as_long()
         expected_long = array_to_long(null_permute_vector_epi64_avx512, bits=64)
-        assert model_indices == expected_long, (
-            "Z3 found unexpected null permute: got 0x{model_indices:0128x}, expected 0x{expected_long:0128x}"
-        )
+        assert (
+            model_indices == expected_long
+        ), "Z3 found unexpected null permute: got 0x{model_indices:0128x}, expected 0x{expected_long:0128x}"
 
     def test_mm512_permutexvar_epi64_reverse_permute_found(self):
         ctx = main_ctx()
@@ -466,9 +473,9 @@ class TestPermutexvarEpi64:
         assert result == sat, "Z3 failed to find reverse permute"
         model_indices = s.model().evaluate(indices).as_long()
         expected_long = array_to_long(reverse_permute_vector_epi64_avx512, bits=64)
-        assert model_indices == expected_long, (
-            "Z3 found unexpected reverse permute: got 0x{model_indices:0128x}, expected 0x{expected_long:0128x}"
-        )
+        assert (
+            model_indices == expected_long
+        ), "Z3 found unexpected reverse permute: got 0x{model_indices:0128x}, expected 0x{expected_long:0128x}"
 
 
 class TestMaskPermutexvarEpi32:
@@ -493,9 +500,9 @@ class TestMaskPermutexvarEpi32:
 
         s.add(output != src)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutexvar_epi32_mask_all_ones(self):
         """Test with mask all ones (should equal unmasked operation)"""
@@ -517,9 +524,9 @@ class TestMaskPermutexvarEpi32:
 
         s.add(masked_output != unmasked_output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutexvar_epi32_alternating_mask(self):
         """Test with alternating mask pattern"""
@@ -551,9 +558,9 @@ class TestMaskPermutexvarEpi32:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for alternating mask: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for alternating mask: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutexvar_epi32_single_bit_mask(self):
         """Test with only one bit set in mask"""
@@ -585,9 +592,9 @@ class TestMaskPermutexvarEpi32:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for single bit mask: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for single bit mask: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutexvar_epi32_partial_mask(self):
         """Test with lower half masked"""
@@ -620,9 +627,9 @@ class TestMaskPermutexvarEpi32:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for partial mask: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for partial mask: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutexvar_epi32_find_mask_for_identity(self):
         """Test that Z3 can find mask to preserve src (mask all zeros)"""
@@ -646,9 +653,9 @@ class TestMaskPermutexvarEpi32:
 
         assert result == sat, "Z3 failed to find mask for identity"
         model_mask = s.model().evaluate(mask).as_long()
-        assert model_mask == 0, (
-            f"Z3 found unexpected mask for identity: got 0x{model_mask:04x}, expected 0x0000"
-        )
+        assert (
+            model_mask == 0
+        ), f"Z3 found unexpected mask for identity: got 0x{model_mask:04x}, expected 0x0000"
 
     def test_mm512_mask_permutexvar_epi32_find_mask_for_full_permute(self):
         """Test that Z3 can find mask for full permutation (mask all ones)"""
@@ -672,9 +679,9 @@ class TestMaskPermutexvarEpi32:
 
         assert result == sat, "Z3 failed to find mask for full permutation"
         model_mask = s.model().evaluate(mask).as_long()
-        assert model_mask == 0xFFFF, (
-            f"Z3 found unexpected mask for full permutation: got 0x{model_mask:04x}, expected 0xFFFF"
-        )
+        assert (
+            model_mask == 0xFFFF
+        ), f"Z3 found unexpected mask for full permutation: got 0x{model_mask:04x}, expected 0xFFFF"
 
 
 class TestMaskPermutexvarEpi64:
@@ -699,9 +706,9 @@ class TestMaskPermutexvarEpi64:
 
         s.add(output != src)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutexvar_epi64_mask_all_ones(self):
         """Test with mask all ones (should equal unmasked operation)"""
@@ -723,9 +730,9 @@ class TestMaskPermutexvarEpi64:
 
         s.add(masked_output != unmasked_output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutexvar_epi64_alternating_mask(self):
         """Test with alternating mask pattern"""
@@ -757,9 +764,9 @@ class TestMaskPermutexvarEpi64:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for alternating mask: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for alternating mask: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutexvar_epi64_single_bit_mask(self):
         """Test with only one bit set in mask"""
@@ -791,9 +798,9 @@ class TestMaskPermutexvarEpi64:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for single bit mask: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for single bit mask: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutexvar_epi64_partial_mask(self):
         """Test with lower half masked"""
@@ -826,9 +833,9 @@ class TestMaskPermutexvarEpi64:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for partial mask: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for partial mask: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutexvar_epi64_find_mask_for_identity(self):
         """Test that Z3 can find mask to preserve src (mask all zeros)"""
@@ -852,9 +859,9 @@ class TestMaskPermutexvarEpi64:
 
         assert result == sat, "Z3 failed to find mask for identity"
         model_mask = s.model().evaluate(mask).as_long()
-        assert model_mask == 0, (
-            f"Z3 found unexpected mask for identity: got 0x{model_mask:02x}, expected 0x00"
-        )
+        assert (
+            model_mask == 0
+        ), f"Z3 found unexpected mask for identity: got 0x{model_mask:02x}, expected 0x00"
 
     def test_mm512_mask_permutexvar_epi64_find_mask_for_full_permute(self):
         """Test that Z3 can find mask for full permutation (mask all ones)"""
@@ -878,9 +885,9 @@ class TestMaskPermutexvarEpi64:
 
         assert result == sat, "Z3 failed to find mask for full permutation"
         model_mask = s.model().evaluate(mask).as_long()
-        assert model_mask == 0xFF, (
-            f"Z3 found unexpected mask for full permutation: got 0x{model_mask:02x}, expected 0xFF"
-        )
+        assert (
+            model_mask == 0xFF
+        ), f"Z3 found unexpected mask for full permutation: got 0x{model_mask:02x}, expected 0xFF"
 
     def test_mm512_mask_permutexvar_epi64_find_indices_and_mask(self):
         """Test that Z3 can find both indices and mask to achieve a specific pattern"""
@@ -917,9 +924,9 @@ class TestMaskPermutexvarEpi64:
         assert result == sat, "Z3 failed to find indices and mask for pattern"
         model_mask = s.model().evaluate(mask).as_long()
         # Lower 4 bits should be set (positions 0-3 use permuted values)
-        assert model_mask == 0x0F, (
-            f"Z3 found unexpected mask: got 0x{model_mask:02x}, expected 0x0F"
-        )
+        assert (
+            model_mask == 0x0F
+        ), f"Z3 found unexpected mask: got 0x{model_mask:02x}, expected 0x0F"
 
 
 class TestPermutex2varEpi32:
@@ -941,9 +948,9 @@ class TestPermutex2varEpi32:
         # If this is unsatisfiable, it means the output MUST be equal to source a
         s.add(a != output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_permutex2var_epi32_null_permute_found(self):
         ctx = main_ctx()
@@ -958,9 +965,9 @@ class TestPermutex2varEpi32:
         assert result == sat, "Z3 failed to find null permute"
         model_indices = s.model().evaluate(indices).as_long()
         expected_long = array_to_long(null_permutex2var_vector_epi32_avx512, bits=32)
-        assert model_indices == expected_long, (
-            f"Z3 found unexpected null permute: got 0x{model_indices:0128x}, expected 0x{expected_long:0128x}"
-        )
+        assert (
+            model_indices == expected_long
+        ), f"Z3 found unexpected null permute: got 0x{model_indices:0128x}, expected 0x{expected_long:0128x}"
 
     def test_mm512_permutex2var_epi32_select_from_b(self):
         ctx = main_ctx()
@@ -974,9 +981,9 @@ class TestPermutex2varEpi32:
 
         s.add(b != output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where select from b failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where select from b failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_permutex2var_epi32_reverse_permute_from_a(self):
         ctx = main_ctx()
@@ -995,9 +1002,9 @@ class TestPermutex2varEpi32:
         # If this is unsatisfiable, it means the output MUST equal the reversed source a
         s.add(reversed_a != output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where reverse permute from a failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where reverse permute from a failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_permutex2var_epi32_mixed_sources(self):
         ctx = main_ctx()
@@ -1031,9 +1038,9 @@ class TestPermutex2varEpi32:
         # If this is unsatisfiable, it means the output MUST equal the expected result
         s.add(expected != output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where mixed sources failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where mixed sources failed: {s.model() if result == sat else 'No model'}"
 
 
 class TestPermutex2varEpi64:
@@ -1053,9 +1060,9 @@ class TestPermutex2varEpi64:
         output = _mm512_permutex2var_epi64(a, indices, b)
         s.add(a != output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_permutex2var_epi64_null_permute_found(self):
         ctx = main_ctx()
@@ -1070,9 +1077,9 @@ class TestPermutex2varEpi64:
         assert result == sat, "Z3 failed to find null permute"
         model_indices = s.model().evaluate(indices).as_long()
         expected_long = array_to_long(null_permutex2var_vector_epi64_avx512, bits=64)
-        assert model_indices == expected_long, (
-            f"Z3 found unexpected null permute: got 0x{model_indices:0128x}, expected 0x{expected_long:0128x}"
-        )
+        assert (
+            model_indices == expected_long
+        ), f"Z3 found unexpected null permute: got 0x{model_indices:0128x}, expected 0x{expected_long:0128x}"
 
     def test_mm512_permutex2var_epi64_select_from_b(self):
         ctx = main_ctx()
@@ -1085,9 +1092,9 @@ class TestPermutex2varEpi64:
         output = _mm512_permutex2var_epi64(a, indices, b)
         s.add(b != output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where select from b failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where select from b failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_permutex2var_epi64_reverse_permute_from_a(self):
         ctx = main_ctx()
@@ -1104,9 +1111,9 @@ class TestPermutex2varEpi64:
 
         s.add(reversed_a != output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where reverse permute from a failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where reverse permute from a failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_permutex2var_epi64_mixed_sources(self):
         ctx = main_ctx()
@@ -1135,9 +1142,9 @@ class TestPermutex2varEpi64:
 
         s.add(expected != output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where mixed sources failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where mixed sources failed: {s.model() if result == sat else 'No model'}"
 
 
 class TestShufflePs:
@@ -1152,9 +1159,9 @@ class TestShufflePs:
 
         s.add(output != input)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where null shuffle failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where null shuffle failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_shuffle_ps_null_permute_found(self):
         ctx = main_ctx()
@@ -1169,9 +1176,9 @@ class TestShufflePs:
 
         assert result == sat, "Z3 failed to find null shuffle"
         model_imm8 = s.model().evaluate(imm8).as_long()
-        assert model_imm8 == null_shuffle_ps_imm8, (
-            f"Z3 found unexpected null shuffle: got 0x{model_imm8:02x}, expected 0x{null_shuffle_ps_2vec_imm8:02x}"
-        )
+        assert (
+            model_imm8 == null_shuffle_ps_imm8
+        ), f"Z3 found unexpected null shuffle: got 0x{model_imm8:02x}, expected 0x{null_shuffle_ps_2vec_imm8:02x}"
 
     def test_mm256_shuffle_ps_null_permute_2vec_works(self):
         ctx = main_ctx()
@@ -1197,9 +1204,9 @@ class TestShufflePs:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where null shuffle failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where null shuffle failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_shuffle_ps_null_permute_2vec_found(self):
         ctx = main_ctx()
@@ -1229,9 +1236,9 @@ class TestShufflePs:
 
         assert result == sat, "Z3 failed to find null shuffle"
         model_imm8 = s.model().evaluate(imm8).as_long()
-        assert model_imm8 == null_shuffle_ps_2vec_imm8, (
-            f"Z3 found unexpected null shuffle: got 0x{model_imm8:02x}, expected 0x{null_shuffle_ps_2vec_imm8:02x}"
-        )
+        assert (
+            model_imm8 == null_shuffle_ps_2vec_imm8
+        ), f"Z3 found unexpected null shuffle: got 0x{model_imm8:02x}, expected 0x{null_shuffle_ps_2vec_imm8:02x}"
 
     def test_mm512_shuffle_ps_null_permute_works(self):
         ctx = main_ctx()
@@ -1266,9 +1273,9 @@ class TestShufflePs:
 
         s.add(output_vector != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where null shuffle failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where null shuffle failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_shuffle_ps_null_permute_found(self):
         ctx = main_ctx()
@@ -1305,9 +1312,9 @@ class TestShufflePs:
 
         assert result == sat, "Z3 failed to find null shuffle"
         model_imm8 = s.model().evaluate(imm8).as_long()
-        assert model_imm8 == null_shuffle_ps_2vec_imm8, (
-            f"Z3 found unexpected null shuffle: got 0x{model_imm8:02x}, expected 0x{null_shuffle_ps_2vec_imm8:02x}"
-        )
+        assert (
+            model_imm8 == null_shuffle_ps_2vec_imm8
+        ), f"Z3 found unexpected null shuffle: got 0x{model_imm8:02x}, expected 0x{null_shuffle_ps_2vec_imm8:02x}"
 
     def test_mm512_shuffle_ps_null_permute_2vec_works(self):
         ctx = main_ctx()
@@ -1341,9 +1348,9 @@ class TestShufflePs:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where null shuffle failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where null shuffle failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_shuffle_ps_null_permute_2vec_found(self):
         ctx = main_ctx()
@@ -1381,9 +1388,9 @@ class TestShufflePs:
 
         assert result == sat, "Z3 failed to find null shuffle"
         model_imm8 = s.model().evaluate(imm8).as_long()
-        assert model_imm8 == null_shuffle_ps_2vec_imm8, (
-            f"Z3 found unexpected null shuffle: got 0x{model_imm8:02x}, expected 0x{null_shuffle_ps_2vec_imm8:02x}"
-        )
+        assert (
+            model_imm8 == null_shuffle_ps_2vec_imm8
+        ), f"Z3 found unexpected null shuffle: got 0x{model_imm8:02x}, expected 0x{null_shuffle_ps_2vec_imm8:02x}"
 
     def test_mm256_shuffle_ps_bitonic_stage_masks(self):
         """
@@ -1523,9 +1530,9 @@ class TestShufflePd:
         output_vector = _mm256_shuffle_pd(input, input, null_shuffle_pd_avx2_imm8)
         s.add(output_vector != input)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where null shuffle failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where null shuffle failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_shuffle_pd_null_permute_found(self):
         ctx = main_ctx()
@@ -1540,9 +1547,9 @@ class TestShufflePd:
 
         assert result == sat, "Z3 failed to find null shuffle"
         model_imm8 = s.model().evaluate(imm8).as_long()
-        assert model_imm8 == null_shuffle_pd_avx2_imm8, (
-            f"Z3 found unexpected null shuffle: got 0x{model_imm8:02x}, expected 0x{null_shuffle_pd_avx2_imm8:02x}"
-        )
+        assert (
+            model_imm8 == null_shuffle_pd_avx2_imm8
+        ), f"Z3 found unexpected null shuffle: got 0x{model_imm8:02x}, expected 0x{null_shuffle_pd_avx2_imm8:02x}"
 
     def test_mm256_shuffle_pd_null_permute_2vec_works(self):
         ctx = main_ctx()
@@ -1556,9 +1563,9 @@ class TestShufflePd:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where null shuffle failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where null shuffle failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_shuffle_pd_null_permute_2vec_found(self):
         ctx = main_ctx()
@@ -1576,9 +1583,9 @@ class TestShufflePd:
 
         assert result == sat, "Z3 failed to find null shuffle"
         model_imm8 = s.model().evaluate(imm8).as_long()
-        assert model_imm8 == null_shuffle_pd_avx2_imm8, (
-            f"Z3 found unexpected null shuffle: got 0x{model_imm8:02x}, expected 0x{null_shuffle_pd_avx2_imm8:02x}"
-        )
+        assert (
+            model_imm8 == null_shuffle_pd_avx2_imm8
+        ), f"Z3 found unexpected null shuffle: got 0x{model_imm8:02x}, expected 0x{null_shuffle_pd_avx2_imm8:02x}"
 
     def test_mm512_shuffle_pd_null_permute_works(self):
         ctx = main_ctx()
@@ -1589,9 +1596,9 @@ class TestShufflePd:
 
         s.add(output_vector != input)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where null shuffle failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where null shuffle failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_shuffle_pd_null_permute_found(self):
         ctx = main_ctx()
@@ -1606,9 +1613,9 @@ class TestShufflePd:
 
         assert result == sat, "Z3 failed to find null shuffle"
         model_imm8 = s.model().evaluate(imm8).as_long()
-        assert model_imm8 == null_shuffle_pd_avx512_imm8, (
-            f"Z3 found unexpected null shuffle: got 0x{model_imm8:02x}, expected 0x{null_shuffle_pd_avx512_imm8:02x}"
-        )
+        assert (
+            model_imm8 == null_shuffle_pd_avx512_imm8
+        ), f"Z3 found unexpected null shuffle: got 0x{model_imm8:02x}, expected 0x{null_shuffle_pd_avx512_imm8:02x}"
 
     def test_mm512_shuffle_pd_null_permute_2vec_works(self):
         ctx = main_ctx()
@@ -1634,9 +1641,9 @@ class TestShufflePd:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where null shuffle failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where null shuffle failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_shuffle_pd_null_permute_2vec_found(self):
         ctx = main_ctx()
@@ -1666,9 +1673,9 @@ class TestShufflePd:
 
         assert result == sat, "Z3 failed to find null shuffle"
         model_imm8 = s.model().evaluate(imm8).as_long()
-        assert model_imm8 == null_shuffle_pd_avx512_imm8, (
-            f"Z3 found unexpected null shuffle: got 0x{model_imm8:02x}, expected 0x{null_shuffle_pd_avx512_imm8:02x}"
-        )
+        assert (
+            model_imm8 == null_shuffle_pd_avx512_imm8
+        ), f"Z3 found unexpected null shuffle: got 0x{model_imm8:02x}, expected 0x{null_shuffle_pd_avx512_imm8:02x}"
 
 
 class TestPermute2x128Si256:
@@ -1685,9 +1692,9 @@ class TestPermute2x128Si256:
 
         s.add(input_vector != output_vector)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_permute2x128_si256_null_permute_found(self):
         ctx = main_ctx()
@@ -1711,9 +1718,9 @@ class TestPermute2x128Si256:
         # 0x30: low=a[127:0], high=b[255:128] (same as 0x10 when a==b)
         # 0x32: low=b[127:0], high=b[255:128] (same as 0x10 when a==b)
         valid_identity_permutes = {0x10, 0x12, 0x30, 0x32}
-        assert model_imm8 in valid_identity_permutes, (
-            f"Z3 found invalid null permute: got 0x{model_imm8:02x}, expected one of {[hex(x) for x in valid_identity_permutes]}"
-        )
+        assert (
+            model_imm8 in valid_identity_permutes
+        ), f"Z3 found invalid null permute: got 0x{model_imm8:02x}, expected one of {[hex(x) for x in valid_identity_permutes]}"
 
     def test_mm256_permute2x128_si256_null_permute_2vec_works(self):
         ctx = main_ctx()
@@ -1733,9 +1740,9 @@ class TestPermute2x128Si256:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where null permute failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_permute2x128_si256_null_permute_2vec_found(self):
         ctx = main_ctx()
@@ -1761,9 +1768,9 @@ class TestPermute2x128Si256:
 
         assert result == sat, "Z3 failed to find null permute"
         model_imm8 = s.model().evaluate(imm8).as_long()
-        assert model_imm8 == null_permute2x128_imm8, (
-            f"Z3 found unexpected null permute: got 0x{model_imm8:02x}, expected 0x{null_permute2x128_imm8:02x}"
-        )
+        assert (
+            model_imm8 == null_permute2x128_imm8
+        ), f"Z3 found unexpected null permute: got 0x{model_imm8:02x}, expected 0x{null_permute2x128_imm8:02x}"
 
     def test_mm256_permute2x128_si256_swap_lanes(self):
         ctx = main_ctx()
@@ -1784,9 +1791,9 @@ class TestPermute2x128Si256:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where lane swap failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where lane swap failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_permute2x128_si256_cross_vector(self):
         ctx = main_ctx()
@@ -1807,9 +1814,9 @@ class TestPermute2x128Si256:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where cross-vector permute failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where cross-vector permute failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_permute2x128_si256_zero_lanes(self):
         ctx = main_ctx()
@@ -1826,9 +1833,9 @@ class TestPermute2x128Si256:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where zero lane failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where zero lane failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_permute2x128_si256_zero_both_lanes(self):
         ctx = main_ctx()
@@ -1843,9 +1850,9 @@ class TestPermute2x128Si256:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where zero both lanes failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where zero both lanes failed: {s.model() if result == sat else 'No model'}"
 
 
 class TestShuffleI32x4:
@@ -1862,9 +1869,9 @@ class TestShuffleI32x4:
 
         s.add(input_vector != output_vector)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where null shuffle failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where null shuffle failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_shuffle_i32x4_null_permute_found(self):
         ctx = main_ctx()
@@ -1879,9 +1886,9 @@ class TestShuffleI32x4:
 
         assert result == sat, "Z3 failed to find null shuffle"
         model_imm8 = s.model().evaluate(imm8).as_long()
-        assert model_imm8 == null_shuffle_i32x4_imm8, (
-            f"Z3 found unexpected null shuffle: got 0x{model_imm8:02x}, expected 0x{null_shuffle_i32x4_imm8:02x}"
-        )
+        assert (
+            model_imm8 == null_shuffle_i32x4_imm8
+        ), f"Z3 found unexpected null shuffle: got 0x{model_imm8:02x}, expected 0x{null_shuffle_i32x4_imm8:02x}"
 
     def test_mm512_shuffle_i32x4_null_permute_2vec_works(self):
         ctx = main_ctx()
@@ -1903,9 +1910,9 @@ class TestShuffleI32x4:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where null shuffle failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where null shuffle failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_shuffle_i32x4_null_permute_2vec_found(self):
         ctx = main_ctx()
@@ -1931,9 +1938,9 @@ class TestShuffleI32x4:
 
         assert result == sat, "Z3 failed to find null shuffle"
         model_imm8 = s.model().evaluate(imm8).as_long()
-        assert model_imm8 == null_shuffle_i32x4_imm8, (
-            f"Z3 found unexpected null shuffle: got 0x{model_imm8:02x}, expected 0x{null_shuffle_i32x4_imm8:02x}"
-        )
+        assert (
+            model_imm8 == null_shuffle_i32x4_imm8
+        ), f"Z3 found unexpected null shuffle: got 0x{model_imm8:02x}, expected 0x{null_shuffle_i32x4_imm8:02x}"
 
     def test_mm512_shuffle_i32x4_cross_lanes(self):
         ctx = main_ctx()
@@ -1956,9 +1963,9 @@ class TestShuffleI32x4:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where cross-lane shuffle failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where cross-lane shuffle failed: {s.model() if result == sat else 'No model'}"
 
 
 class TestMaskPermutex2varEpi32:
@@ -1980,9 +1987,9 @@ class TestMaskPermutex2varEpi32:
 
         s.add(a != output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where mask all zeros failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where mask all zeros failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutex2var_epi32_mask_all_ones(self):
         ctx = main_ctx()
@@ -2002,9 +2009,9 @@ class TestMaskPermutex2varEpi32:
 
         s.add(masked_output != unmasked_output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where mask all ones failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where mask all ones failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutex2var_epi32_alternating_mask(self):
         ctx = main_ctx()
@@ -2024,9 +2031,9 @@ class TestMaskPermutex2varEpi32:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where alternating mask failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where alternating mask failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutex2var_epi32_reverse_with_partial_mask(self):
         ctx = main_ctx()
@@ -2050,9 +2057,9 @@ class TestMaskPermutex2varEpi32:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where reverse with partial mask failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where reverse with partial mask failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutex2var_epi32_mixed_sources_with_mask(self):
         ctx = main_ctx()
@@ -2075,9 +2082,9 @@ class TestMaskPermutex2varEpi32:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where mixed sources with mask failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where mixed sources with mask failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutex2var_epi32_single_bit_mask(self):
         ctx = main_ctx()
@@ -2099,9 +2106,9 @@ class TestMaskPermutex2varEpi32:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample where single bit mask failed: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample where single bit mask failed: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutex2var_epi32_find_identity_mask(self):
         ctx = main_ctx()
@@ -2122,9 +2129,9 @@ class TestMaskPermutex2varEpi32:
 
         assert result == sat, "Z3 failed to find a mask for identity"
         model_mask = s.model().evaluate(mask).as_long()
-        assert model_mask == 0, (
-            f"Z3 found unexpected mask for identity: got 0x{model_mask:04x}, expected 0x0000"
-        )
+        assert (
+            model_mask == 0
+        ), f"Z3 found unexpected mask for identity: got 0x{model_mask:04x}, expected 0x0000"
 
     def test_mm512_mask_permutex2var_epi32_find_full_permute_mask(self):
         ctx = main_ctx()
@@ -2145,9 +2152,9 @@ class TestMaskPermutex2varEpi32:
 
         assert result == sat, "Z3 failed to find a mask for full permutation"
         model_mask = s.model().evaluate(mask).as_long()
-        assert model_mask == 0xFFFF, (
-            f"Z3 found unexpected mask for full permutation: got 0x{model_mask:04x}, expected 0xFFFF"
-        )
+        assert (
+            model_mask == 0xFFFF
+        ), f"Z3 found unexpected mask for full permutation: got 0x{model_mask:04x}, expected 0xFFFF"
 
     def test_mm512_mask_permutex2var_epi32_find_partial_mask(self):
         ctx = main_ctx()
@@ -2177,9 +2184,9 @@ class TestMaskPermutex2varEpi32:
 
         assert result == sat, "Z3 failed to find a mask for partial permutation"
         model_mask = s.model().evaluate(mask).as_long()
-        assert model_mask == 0x000F, (
-            f"Z3 found unexpected mask for partial permutation: got 0x{model_mask:04x}, expected 0x000F"
-        )
+        assert (
+            model_mask == 0x000F
+        ), f"Z3 found unexpected mask for partial permutation: got 0x{model_mask:04x}, expected 0x000F"
 
     def test_mm512_mask_permutex2var_epi32_find_indices_with_mask(self):
         ctx = main_ctx()
@@ -2208,9 +2215,9 @@ class TestMaskPermutex2varEpi32:
         # For even positions, should have: source_selector=1 (b), offset=0
         # We'll check position 0: should be (1 << 4) | 0 = 16
         pos0_index = (model_indices >> (0 * 32)) & 0x1F  # Extract 5 bits for position 0
-        assert pos0_index == 16, (
-            f"Position 0 index should be 16 (select b[0]), got {pos0_index}"
-        )
+        assert (
+            pos0_index == 16
+        ), f"Position 0 index should be 16 (select b[0]), got {pos0_index}"
 
     def test_mm512_mask_permutex2var_epi32_find_reverse_partial(self):
         ctx = main_ctx()
@@ -2233,9 +2240,9 @@ class TestMaskPermutex2varEpi32:
         result = s.check()
         assert result == sat, "Z3 failed to find mask+indices for partial reverse"
         model_mask = s.model().evaluate(mask).as_long()
-        assert model_mask == 0x00FF, (
-            f"Expected mask 0x00FF for first 8 elements, got 0x{model_mask:04x}"
-        )
+        assert (
+            model_mask == 0x00FF
+        ), f"Expected mask 0x00FF for first 8 elements, got 0x{model_mask:04x}"
 
 
 class TestMaskPermutex2varEpi64:
@@ -2258,9 +2265,9 @@ class TestMaskPermutex2varEpi64:
 
         s.add(a != output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutex2var_epi64_mask_all_ones(self):
         """Test with mask all ones (should equal unmasked)"""
@@ -2281,9 +2288,9 @@ class TestMaskPermutex2varEpi64:
 
         s.add(masked_output != unmasked_output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutex2var_epi64_alternating_mask(self):
         """Test with alternating mask pattern"""
@@ -2310,9 +2317,9 @@ class TestMaskPermutex2varEpi64:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for alternating mask: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for alternating mask: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutex2var_epi64_single_bit_mask(self):
         """Test with only one bit set in mask"""
@@ -2335,9 +2342,9 @@ class TestMaskPermutex2varEpi64:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for single bit mask: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for single bit mask: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutex2var_epi64_partial_mask(self):
         """Test with lower half masked"""
@@ -2364,9 +2371,9 @@ class TestMaskPermutex2varEpi64:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for partial mask: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for partial mask: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutex2var_epi64_mixed_sources_with_mask(self):
         """Test with mixed sources and selective masking"""
@@ -2390,9 +2397,9 @@ class TestMaskPermutex2varEpi64:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for mixed sources with mask: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for mixed sources with mask: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutex2var_epi64_find_identity_mask(self):
         """Test that Z3 can find mask to preserve a (mask all zeros)"""
@@ -2409,9 +2416,9 @@ class TestMaskPermutex2varEpi64:
 
         assert result == sat, "Z3 failed to find mask for identity"
         model_mask = s.model().evaluate(mask).as_long()
-        assert model_mask == 0, (
-            f"Z3 found unexpected mask for identity: got 0x{model_mask:02x}, expected 0x00"
-        )
+        assert (
+            model_mask == 0
+        ), f"Z3 found unexpected mask for identity: got 0x{model_mask:02x}, expected 0x00"
 
     def test_mm512_mask_permutex2var_epi64_find_full_permute_mask(self):
         """Test that Z3 can find mask for full permutation (mask all ones)"""
@@ -2433,9 +2440,9 @@ class TestMaskPermutex2varEpi64:
 
         assert result == sat, "Z3 failed to find mask for full permutation"
         model_mask = s.model().evaluate(mask).as_long()
-        assert model_mask == 0xFF, (
-            f"Z3 found unexpected mask for full permutation: got 0x{model_mask:02x}, expected 0xFF"
-        )
+        assert (
+            model_mask == 0xFF
+        ), f"Z3 found unexpected mask for full permutation: got 0x{model_mask:02x}, expected 0xFF"
 
     def test_mm512_mask_permutex2var_epi64_find_partial_mask(self):
         """Test that Z3 can find mask for partial permutation"""
@@ -2466,9 +2473,9 @@ class TestMaskPermutex2varEpi64:
 
         assert result == sat, "Z3 failed to find mask for partial permutation"
         model_mask = s.model().evaluate(mask).as_long()
-        assert model_mask == 0x07, (
-            f"Z3 found unexpected mask for partial permutation: got 0x{model_mask:02x}, expected 0x07"
-        )
+        assert (
+            model_mask == 0x07
+        ), f"Z3 found unexpected mask for partial permutation: got 0x{model_mask:02x}, expected 0x07"
 
     def test_mm512_mask_permutex2var_epi64_find_indices_with_mask(self):
         """Test that Z3 can find indices to achieve pattern with fixed mask"""
@@ -2497,9 +2504,9 @@ class TestMaskPermutex2varEpi64:
         # For even positions, should have: source_selector=1 (b), offset=0
         # Check position 0: should be (1 << 3) | 0 = 8
         pos0_index = (model_indices >> (0 * 64)) & 0xF  # Extract 4 bits for position 0
-        assert pos0_index == 8, (
-            f"Position 0 index should be 8 (select b[0]), got {pos0_index}"
-        )
+        assert (
+            pos0_index == 8
+        ), f"Position 0 index should be 8 (select b[0]), got {pos0_index}"
 
     def test_mm512_mask_permutex2var_epi64_cross_source_reverse(self):
         """Test reversing elements with cross-source selection"""
@@ -2533,9 +2540,9 @@ class TestMaskPermutex2varEpi64:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for cross-source reverse: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for cross-source reverse: {s.model() if result == sat else 'No model'}"
 
 
 class TestUnpackEpi32:
@@ -2581,9 +2588,9 @@ class TestUnpackEpi32:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for unpacklo: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for unpacklo: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_unpackhi_epi32_basic(self):
         """Test _mm256_unpackhi_epi32 with known values"""
@@ -2623,9 +2630,9 @@ class TestUnpackEpi32:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for unpackhi: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for unpackhi: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_unpacklo_epi32_basic(self):
         """Test _mm512_unpacklo_epi32 with known values"""
@@ -2700,9 +2707,9 @@ class TestUnpackEpi32:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for 512-bit unpacklo: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for 512-bit unpacklo: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_unpackhi_epi32_basic(self):
         """Test _mm512_unpackhi_epi32 with known values"""
@@ -2777,9 +2784,9 @@ class TestUnpackEpi32:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for 512-bit unpackhi: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for 512-bit unpackhi: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_unpacklo_epi32_identity_check(self):
         """Test that _mm256_unpacklo_epi32 with identical inputs gives expected pattern"""
@@ -2806,9 +2813,9 @@ class TestUnpackEpi32:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for identity unpacklo: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for identity unpacklo: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_unpackhi_epi32_identity_check(self):
         """Test that _mm256_unpackhi_epi32 with identical inputs gives expected pattern"""
@@ -2835,9 +2842,9 @@ class TestUnpackEpi32:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for identity unpackhi: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for identity unpackhi: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_unpacklo_epi32_mask_all_zeros(self):
         """Test _mm512_mask_unpacklo_epi32 with mask all zeros (should preserve src)"""
@@ -2852,9 +2859,9 @@ class TestUnpackEpi32:
 
         s.add(output != src)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_unpacklo_epi32_mask_all_ones(self):
         """Test _mm512_mask_unpacklo_epi32 with mask all ones (should equal unmasked)"""
@@ -2870,9 +2877,9 @@ class TestUnpackEpi32:
 
         s.add(masked_output != unmasked_output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_unpackhi_epi32_alternating_mask(self):
         """Test _mm512_mask_unpackhi_epi32 with alternating mask pattern"""
@@ -2900,9 +2907,9 @@ class TestUnpackEpi32:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for alternating mask: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for alternating mask: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_unpacklo_epi32_single_bit_mask(self):
         """Test _mm512_mask_unpacklo_epi32 with only one bit set in mask"""
@@ -2928,9 +2935,9 @@ class TestUnpackEpi32:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for single bit mask: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for single bit mask: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_unpacklo_epi32_reconstruct_pattern(self):
         """Test that Z3 can find inputs that produce a specific output pattern"""
@@ -2994,9 +3001,9 @@ class TestUnpackEpi32:
 
         assert result == sat, "Z3 should find a mask for the target pattern"
         model_mask = s.model().evaluate(mask).as_long()
-        assert model_mask == 0x000F, (
-            f"Expected mask 0x000F (first 4 bits), got 0x{model_mask:04x}"
-        )
+        assert (
+            model_mask == 0x000F
+        ), f"Expected mask 0x000F (first 4 bits), got 0x{model_mask:04x}"
 
     def test_mm256_unpack_combo_lo_hi(self):
         """Test combining unpacklo and unpackhi operations"""
@@ -3103,9 +3110,9 @@ class TestUnpackEpi32:
 
         s.add(lo_result != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for lane independence: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for lane independence: {s.model() if result == sat else 'No model'}"
 
 
 class TestMaskPermutePs:
@@ -3124,9 +3131,9 @@ class TestMaskPermutePs:
 
         s.add(output != src)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permute_ps_mask_all_ones(self):
         """Test with mask all ones (should equal unmasked)"""
@@ -3142,9 +3149,9 @@ class TestMaskPermutePs:
 
         s.add(masked_output != unmasked_output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permute_ps_alternating_mask(self):
         """Test with alternating mask pattern"""
@@ -3171,9 +3178,9 @@ class TestMaskPermutePs:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for alternating mask: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for alternating mask: {s.model() if result == sat else 'No model'}"
 
 
 class TestMaskPermutePd:
@@ -3192,9 +3199,9 @@ class TestMaskPermutePd:
 
         s.add(output != src)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permute_pd_mask_all_ones(self):
         """Test with mask all ones (should equal unmasked)"""
@@ -3210,9 +3217,9 @@ class TestMaskPermutePd:
 
         s.add(masked_output != unmasked_output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permute_pd_single_bit_mask(self):
         """Test with only one bit set in mask"""
@@ -3239,9 +3246,9 @@ class TestMaskPermutePd:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for single bit mask: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for single bit mask: {s.model() if result == sat else 'No model'}"
 
 
 class TestMaskShufflePs:
@@ -3260,9 +3267,9 @@ class TestMaskShufflePs:
 
         s.add(output != src)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_shuffle_ps_mask_all_ones(self):
         """Test with mask all ones (should equal unmasked)"""
@@ -3280,9 +3287,9 @@ class TestMaskShufflePs:
 
         s.add(masked_output != unmasked_output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_shuffle_ps_partial_mask(self):
         """Test with partial mask (lower half only)"""
@@ -3308,9 +3315,9 @@ class TestMaskShufflePs:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for partial mask: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for partial mask: {s.model() if result == sat else 'No model'}"
 
 
 class TestMaskShufflePd:
@@ -3329,9 +3336,9 @@ class TestMaskShufflePd:
 
         s.add(output != src)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_shuffle_pd_mask_all_ones(self):
         """Test with mask all ones (should equal unmasked)"""
@@ -3349,9 +3356,9 @@ class TestMaskShufflePd:
 
         s.add(masked_output != unmasked_output)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for mask all ones: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_shuffle_pd_alternating_mask(self):
         """Test with alternating mask pattern"""
@@ -3377,9 +3384,9 @@ class TestMaskShufflePd:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for alternating mask: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for alternating mask: {s.model() if result == sat else 'No model'}"
 
 
 class TestMaskPermutevarPs:
@@ -3400,9 +3407,9 @@ class TestMaskPermutevarPs:
 
         s.add(output != src)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutevar_ps_identity_permute(self):
         """Test identity permutation within lanes"""
@@ -3420,9 +3427,9 @@ class TestMaskPermutevarPs:
 
         s.add(output != a)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for identity permute: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for identity permute: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutevar_ps_reverse_within_lanes(self):
         """Test reversing elements within each 128-bit lane"""
@@ -3464,9 +3471,9 @@ class TestMaskPermutevarPs:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for reverse within lanes: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for reverse within lanes: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutevar_ps_broadcast_within_lanes(self):
         """Test broadcasting first element within each lane"""
@@ -3506,9 +3513,9 @@ class TestMaskPermutevarPs:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for broadcast within lanes: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for broadcast within lanes: {s.model() if result == sat else 'No model'}"
 
 
 class TestMaskPermutevarPd:
@@ -3529,9 +3536,9 @@ class TestMaskPermutevarPd:
 
         s.add(output != src)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for mask all zeros: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutevar_pd_identity_permute(self):
         """Test identity permutation within lanes"""
@@ -3558,9 +3565,9 @@ class TestMaskPermutevarPd:
 
         s.add(output != a)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for identity permute: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for identity permute: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutevar_pd_swap_within_lanes(self):
         """Test swapping elements within each 128-bit lane"""
@@ -3601,9 +3608,9 @@ class TestMaskPermutevarPd:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for swap within lanes: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for swap within lanes: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_mask_permutevar_pd_broadcast_within_lanes(self):
         """Test broadcasting first element within each lane"""
@@ -3643,9 +3650,9 @@ class TestMaskPermutevarPd:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for broadcast within lanes: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for broadcast within lanes: {s.model() if result == sat else 'No model'}"
 
 
 class TestPermutevarPs:
@@ -3665,9 +3672,9 @@ class TestPermutevarPs:
 
         s.add(output != a)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for 256-bit identity permute: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for 256-bit identity permute: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_permutevar_ps_reverse_within_lanes(self):
         """Test reversing elements within each 128-bit lane for 256-bit"""
@@ -3699,9 +3706,9 @@ class TestPermutevarPs:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for 256-bit reverse within lanes: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for 256-bit reverse within lanes: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_permutevar_ps_broadcast_within_lanes(self):
         """Test broadcasting first element within each lane for 256-bit"""
@@ -3731,9 +3738,9 @@ class TestPermutevarPs:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for 256-bit broadcast within lanes: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for 256-bit broadcast within lanes: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_permutevar_ps_mixed_permute(self):
         """Test mixed permutation pattern for 256-bit"""
@@ -3763,9 +3770,9 @@ class TestPermutevarPs:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for 256-bit mixed permute: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for 256-bit mixed permute: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_permutevar_ps_identity_permute(self):
         """Test identity permutation within lanes for 512-bit"""
@@ -3780,9 +3787,9 @@ class TestPermutevarPs:
 
         s.add(output != a)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for 512-bit identity permute: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for 512-bit identity permute: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_permutevar_ps_reverse_within_lanes(self):
         """Test reversing elements within each 128-bit lane for 512-bit"""
@@ -3822,9 +3829,9 @@ class TestPermutevarPs:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for 512-bit reverse within lanes: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for 512-bit reverse within lanes: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_permutevar_ps_broadcast_within_lanes(self):
         """Test broadcasting last element within each lane for 512-bit"""
@@ -3862,9 +3869,9 @@ class TestPermutevarPs:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for 512-bit broadcast within lanes: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for 512-bit broadcast within lanes: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_permutevar_ps_alternating_pattern(self):
         """Test alternating permutation pattern for 512-bit"""
@@ -3907,9 +3914,9 @@ class TestPermutevarPs:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for 512-bit alternating pattern: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for 512-bit alternating pattern: {s.model() if result == sat else 'No model'}"
 
 
 class TestPermutevarPd:
@@ -3932,9 +3939,9 @@ class TestPermutevarPd:
 
         s.add(output != a)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for 256-bit identity permute: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for 256-bit identity permute: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_permutevar_pd_swap_within_lanes(self):
         """Test swapping elements within each 128-bit lane for 256-bit"""
@@ -3964,9 +3971,9 @@ class TestPermutevarPd:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for 256-bit swap within lanes: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for 256-bit swap within lanes: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_permutevar_pd_broadcast_first_within_lanes(self):
         """Test broadcasting first element within each lane for 256-bit"""
@@ -3996,9 +4003,9 @@ class TestPermutevarPd:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for 256-bit broadcast first within lanes: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for 256-bit broadcast first within lanes: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_permutevar_pd_broadcast_second_within_lanes(self):
         """Test broadcasting second element within each lane for 256-bit"""
@@ -4028,9 +4035,9 @@ class TestPermutevarPd:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for 256-bit broadcast second within lanes: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for 256-bit broadcast second within lanes: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_permutevar_pd_identity_permute(self):
         """Test identity permutation within lanes for 512-bit"""
@@ -4053,9 +4060,9 @@ class TestPermutevarPd:
 
         s.add(output != a)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for 512-bit identity permute: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for 512-bit identity permute: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_permutevar_pd_swap_within_lanes(self):
         """Test swapping elements within each 128-bit lane for 512-bit"""
@@ -4093,9 +4100,9 @@ class TestPermutevarPd:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for 512-bit swap within lanes: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for 512-bit swap within lanes: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_permutevar_pd_broadcast_first_within_lanes(self):
         """Test broadcasting first element within each lane for 512-bit"""
@@ -4133,9 +4140,9 @@ class TestPermutevarPd:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for 512-bit broadcast first within lanes: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for 512-bit broadcast first within lanes: {s.model() if result == sat else 'No model'}"
 
     def test_mm512_permutevar_pd_broadcast_second_within_lanes(self):
         """Test broadcasting second element within each lane for 512-bit"""
@@ -4173,9 +4180,9 @@ class TestPermutevarPd:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for 512-bit broadcast second within lanes: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for 512-bit broadcast second within lanes: {s.model() if result == sat else 'No model'}"
 
 
 class TestBlendPd:
@@ -4194,9 +4201,9 @@ class TestBlendPd:
         # Output should equal a
         s.add(output != a)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for all-from-a blend: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for all-from-a blend: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_blend_pd_all_from_b(self):
         """Test blend_pd with all elements from b (imm8 = 0b1111)"""
@@ -4211,9 +4218,9 @@ class TestBlendPd:
         # Output should equal b
         s.add(output != b)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for all-from-b blend: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for all-from-b blend: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_blend_pd_alternating(self):
         """Test blend_pd with alternating pattern (imm8 = 0b1010)"""
@@ -4237,9 +4244,9 @@ class TestBlendPd:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for alternating blend: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for alternating blend: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_blend_pd_first_two_from_b(self):
         """Test blend_pd with first two elements from b (imm8 = 0b0011)"""
@@ -4262,9 +4269,9 @@ class TestBlendPd:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for first-two-from-b blend: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for first-two-from-b blend: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_blend_pd_symbolic_mask(self):
         """Test that Z3 can find the correct mask to produce a specific blend"""
@@ -4292,9 +4299,9 @@ class TestBlendPd:
         assert result == sat, "Z3 failed to find blend mask"
         model_imm8 = s.model().evaluate(imm8).as_long()
         expected_mask = 0b1010
-        assert (model_imm8 & 0xF) == expected_mask, (
-            f"Z3 found unexpected mask: got 0x{model_imm8:02x}, expected 0x{expected_mask:02x}"
-        )
+        assert (
+            (model_imm8 & 0xF) == expected_mask
+        ), f"Z3 found unexpected mask: got 0x{model_imm8:02x}, expected 0x{expected_mask:02x}"
 
     def test_mm256_blend_pd_n3_stage_bottom_imm0(self):
         """Test blend_pd with imm8=0 against n3 stage from i64 solution.
@@ -4344,9 +4351,9 @@ class TestBlendPs:
         # Output should equal a
         s.add(output != a)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for all-from-a blend: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for all-from-a blend: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_blend_ps_all_from_b(self):
         """Test blend_ps with all elements from b (imm8 = 0b11111111)"""
@@ -4361,9 +4368,9 @@ class TestBlendPs:
         # Output should equal b
         s.add(output != b)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for all-from-b blend: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for all-from-b blend: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_blend_ps_alternating(self):
         """Test blend_ps with alternating pattern (imm8 = 0b10101010)"""
@@ -4391,9 +4398,9 @@ class TestBlendPs:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for alternating blend: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for alternating blend: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_blend_ps_first_four_from_b(self):
         """Test blend_ps with first four elements from b (imm8 = 0b00001111)"""
@@ -4420,9 +4427,9 @@ class TestBlendPs:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for first-four-from-b blend: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for first-four-from-b blend: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_blend_ps_symbolic_mask(self):
         """Test that Z3 can find the correct mask to produce a specific blend"""
@@ -4454,9 +4461,9 @@ class TestBlendPs:
         assert result == sat, "Z3 failed to find blend mask"
         model_imm8 = s.model().evaluate(imm8).as_long()
         expected_mask = 0b01010101
-        assert model_imm8 == expected_mask, (
-            f"Z3 found unexpected mask: got 0x{model_imm8:02x}, expected 0x{expected_mask:02x}"
-        )
+        assert (
+            model_imm8 == expected_mask
+        ), f"Z3 found unexpected mask: got 0x{model_imm8:02x}, expected 0x{expected_mask:02x}"
 
 
 class TestBlendvPd:
@@ -4479,9 +4486,9 @@ class TestBlendvPd:
         # Output should equal a
         s.add(output != a)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for all-from-a blend: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for all-from-a blend: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_blendv_pd_all_from_b(self):
         """Test blendv_pd with all sign bits 1 (select all from b)"""
@@ -4500,9 +4507,9 @@ class TestBlendvPd:
         # Output should equal b
         s.add(output != b)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for all-from-b blend: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for all-from-b blend: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_blendv_pd_alternating(self):
         """Test blendv_pd with alternating sign bits"""
@@ -4531,9 +4538,9 @@ class TestBlendvPd:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for alternating blend: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for alternating blend: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_blendv_pd_symbolic_mask(self):
         """Test that Z3 can find the correct mask to produce a specific blend"""
@@ -4593,9 +4600,9 @@ class TestBlendvPs:
         # Output should equal a
         s.add(output != a)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for all-from-a blend: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for all-from-a blend: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_blendv_ps_all_from_b(self):
         """Test blendv_ps with all sign bits 1 (select all from b)"""
@@ -4614,9 +4621,9 @@ class TestBlendvPs:
         # Output should equal b
         s.add(output != b)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for all-from-b blend: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for all-from-b blend: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_blendv_ps_alternating(self):
         """Test blendv_ps with alternating sign bits"""
@@ -4649,9 +4656,9 @@ class TestBlendvPs:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for alternating blend: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for alternating blend: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_blendv_ps_first_four_from_b(self):
         """Test blendv_ps with first four elements from b"""
@@ -4684,9 +4691,9 @@ class TestBlendvPs:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for first-four-from-b blend: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for first-four-from-b blend: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_blendv_ps_symbolic_mask(self):
         """Test that Z3 can find the correct mask to produce a specific blend"""
@@ -4724,9 +4731,9 @@ class TestBlendvPs:
             i = j * 32
             sign_bit = model.evaluate(Extract(i + 31, i + 31, mask_val)).as_long()
             expected_bit = 1 if j % 2 == 0 else 0
-            assert sign_bit == expected_bit, (
-                f"Expected sign bit {j} to be {expected_bit}, got {sign_bit}"
-            )
+            assert (
+                sign_bit == expected_bit
+            ), f"Expected sign bit {j} to be {expected_bit}, got {sign_bit}"
 
 
 class TestPermute4x64Epi64:
@@ -4747,9 +4754,9 @@ class TestPermute4x64Epi64:
         # Output should equal input
         s.add(output != input)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for identity permute: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for identity permute: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_permute4x64_epi64_reverse(self):
         """Test reverse permutation"""
@@ -4769,9 +4776,9 @@ class TestPermute4x64Epi64:
         # Output should equal reversed input
         s.add(output != reversed_input)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for reverse permute: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for reverse permute: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_permute4x64_epi64_broadcast_first(self):
         """Test broadcasting first element"""
@@ -4796,9 +4803,9 @@ class TestPermute4x64Epi64:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for broadcast first: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for broadcast first: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_permute4x64_epi64_broadcast_last(self):
         """Test broadcasting last element"""
@@ -4823,9 +4830,9 @@ class TestPermute4x64Epi64:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for broadcast last: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for broadcast last: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_permute4x64_epi64_swap_pairs(self):
         """Test swapping adjacent pairs"""
@@ -4851,9 +4858,9 @@ class TestPermute4x64Epi64:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for swap pairs: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for swap pairs: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_permute4x64_epi64_swap_halves(self):
         """Test swapping halves"""
@@ -4879,9 +4886,9 @@ class TestPermute4x64Epi64:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for swap halves: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for swap halves: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_permute4x64_epi64_custom_pattern(self):
         """Test custom pattern [1, 3, 2, 0]"""
@@ -4907,9 +4914,9 @@ class TestPermute4x64Epi64:
 
         s.add(output != expected)
         result = s.check()
-        assert result == unsat, (
-            f"Z3 found a counterexample for custom pattern: {s.model() if result == sat else 'No model'}"
-        )
+        assert (
+            result == unsat
+        ), f"Z3 found a counterexample for custom pattern: {s.model() if result == sat else 'No model'}"
 
     def test_mm256_permute4x64_epi64_symbolic_imm(self):
         """Test that Z3 can find the imm8 value to produce a specific permutation"""
@@ -4938,9 +4945,9 @@ class TestPermute4x64Epi64:
         model_imm8 = s.model().evaluate(imm8).as_long()
         # Expected imm8: [1, 3, 0, 2] = 0b01110010 = 0x72
         expected_mask = _MM_SHUFFLE(1, 3, 0, 2)
-        assert model_imm8 == expected_mask, (
-            f"Z3 found unexpected mask: got 0x{model_imm8:02x}, expected 0x{expected_mask:02x}"
-        )
+        assert (
+            model_imm8 == expected_mask
+        ), f"Z3 found unexpected mask: got 0x{model_imm8:02x}, expected 0x{expected_mask:02x}"
 
 
 class TestAlignrEpi32:
@@ -5524,9 +5531,9 @@ class TestShuffleMaskDecode:
         for imm8 in [0x00, 0x88, 0xDD, 0xE4, 0xFF, 0x1B, 0x4E, 0xB1]:
             result = mm_shuffle_str(imm8)
             # Check it starts with _MM_SHUFFLE(
-            assert result.startswith("_MM_SHUFFLE("), (
-                f"Bad format for 0x{imm8:02x}: {result}"
-            )
+            assert result.startswith(
+                "_MM_SHUFFLE("
+            ), f"Bad format for 0x{imm8:02x}: {result}"
             # Check it ends with )
             assert result.endswith(")"), f"Bad format for 0x{imm8:02x}: {result}"
             # Check it contains the right number of commas
@@ -5601,7 +5608,9 @@ class TestUnpackEpi64:
         s = Solver()
         ctx = s.ctx
 
-        src = zmm_reg_with_64b_values("src", s, [100, 101, 102, 103, 104, 105, 106, 107], ctx=ctx)
+        src = zmm_reg_with_64b_values(
+            "src", s, [100, 101, 102, 103, 104, 105, 106, 107], ctx=ctx
+        )
         a = zmm_reg_with_64b_values("a", s, [10, 11, 12, 13, 14, 15, 16, 17], ctx=ctx)
         b = zmm_reg_with_64b_values("b", s, [20, 21, 22, 23, 24, 25, 26, 27], ctx=ctx)
 
@@ -5623,7 +5632,9 @@ class TestUnpackEpi64:
         s = Solver()
         ctx = s.ctx
 
-        src = zmm_reg_with_64b_values("src", s, [100, 101, 102, 103, 104, 105, 106, 107], ctx=ctx)
+        src = zmm_reg_with_64b_values(
+            "src", s, [100, 101, 102, 103, 104, 105, 106, 107], ctx=ctx
+        )
         a = zmm_reg_with_64b_values("a", s, [10, 11, 12, 13, 14, 15, 16, 17], ctx=ctx)
         b = zmm_reg_with_64b_values("b", s, [20, 21, 22, 23, 24, 25, 26, 27], ctx=ctx)
 
@@ -5656,12 +5667,12 @@ class TestShuffle2MaskDecode:
 
     def test_decode_shuffle2_mask_swap(self):
         """Test decoding swap pattern"""
-        result = decode_shuffle2_mask(0xa)
+        result = decode_shuffle2_mask(0xA)
         assert result == (2, 2)
 
     def test_decode_shuffle2_mask_all_ones(self):
         """Test decoding all ones"""
-        result = decode_shuffle2_mask(0xf)
+        result = decode_shuffle2_mask(0xF)
         assert result == (3, 3)
 
     def test_decode_shuffle2_mask_mixed(self):
@@ -5684,22 +5695,22 @@ class TestShuffle2MaskDecode:
 
     def test_mm_shuffle2_str_swap(self):
         """Test string representation of swap"""
-        result = mm_shuffle2_str(0xa)
+        result = mm_shuffle2_str(0xA)
         assert result == "_MM_SHUFFLE2(2, 2)"
 
     def test_mm_shuffle2_str_all_ones(self):
         """Test string representation of all ones"""
-        result = mm_shuffle2_str(0xf)
+        result = mm_shuffle2_str(0xF)
         assert result == "_MM_SHUFFLE2(3, 3)"
 
     def test_mm_shuffle2_str_format(self):
         """Test that all strings have correct format"""
-        for imm8 in [0x00, 0x05, 0x0a, 0x0f, 0x01, 0x09]:
+        for imm8 in [0x00, 0x05, 0x0A, 0x0F, 0x01, 0x09]:
             result = mm_shuffle2_str(imm8)
             # Check it starts with _MM_SHUFFLE2(
-            assert result.startswith("_MM_SHUFFLE2("), (
-                f"Bad format for 0x{imm8:02x}: {result}"
-            )
+            assert result.startswith(
+                "_MM_SHUFFLE2("
+            ), f"Bad format for 0x{imm8:02x}: {result}"
             # Check it ends with )
             assert result.endswith(")"), f"Bad format for 0x{imm8:02x}: {result}"
             # Check it contains the right number of commas

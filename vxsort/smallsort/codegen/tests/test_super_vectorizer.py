@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """Tests for the BitonicSuperVectorizer."""
 
-import pytest
 import sys
 
-from utils import vector_machine, primitive_type
+import pytest
 from bitonic_sorter import BitonicSorter
 from bitonic_super_optimizer import (
-    GadgetSynthesizer,
     BitonicSuperVectorizer,
+    GadgetSynthesizer,
     PermutationGadget,
     VectorState,
 )
 from functional import seq
+from utils import primitive_type, vector_machine
 from z3 import And, If, Int, Not, Solver, unsat
 
 
@@ -54,9 +54,9 @@ def test_bitonic_sorter():
         seq(sorted(sorter.stages)).flat_map(lambda sid: sorter.stages[sid])
     )
 
-    assert verify_network(flat_pairs, N), (
-        f"Bitonic sorting network for N={N} failed verification!"
-    )
+    assert verify_network(
+        flat_pairs, N
+    ), f"Bitonic sorting network for N={N} failed verification!"
 
 
 def test_vector_state():
@@ -89,12 +89,13 @@ def test_gadget_synthesizer_init():
     for name in sorted(synthesizer.available_intrinsics.keys()):
         print(f"    - {name}")
 
-    assert synthesizer.elements_per_vector == 8, (
-        "AVX2 i32 should have 8 elements per vector"
-    )
+    assert (
+        synthesizer.elements_per_vector == 8
+    ), "AVX2 i32 should have 8 elements per vector"
     assert len(synthesizer.available_intrinsics) > 0, "Should have available intrinsics"
 
     print("✓ GadgetSynthesizer initialization test passed\n")
+
 
 def test_bitonicsupervectorizer_init():
     """Test BitonicSuperVectorizer initialization."""
@@ -186,12 +187,12 @@ def test_first_stage_requires_no_permutation(vm, dt):
 
     # Verify that initial state matches first stage pairs
     for i, (a, b) in enumerate(first_stage_pairs):
-        assert initial_state.top[i] == a, (
-            f"Top element at index {i} should be {a}, got {initial_state.top[i]}"
-        )
-        assert initial_state.bottom[i] == b, (
-            f"Bottom element at index {i} should be {b}, got {initial_state.bottom[i]}"
-        )
+        assert initial_state.top[i] == a, f"Top element at index {i} should be {
+            a
+        }, got {initial_state.top[i]}"
+        assert initial_state.bottom[i] == b, f"Bottom element at index {i} should be {
+            b
+        }, got {initial_state.bottom[i]}"
 
     # Build solution tree for just the first stage
     solutions, _ = super_opt.build_solution_tree(depth_limit=1)
@@ -201,16 +202,16 @@ def test_first_stage_requires_no_permutation(vm, dt):
     # Verify that the first gadget is a null (0-instruction) gadget
     assert len(solutions) > 0, "Should find at least one valid solution"
     # Find solutions that have at least one gadget with 0 instructions
-    null_solutions = [s for s in solutions if any(g.instruction_count() == 0 for g in s.gadgets)]
-    assert len(null_solutions) > 0, (
-        "Should find at least one solution with null (0-instruction) gadget for first stage"
-    )
+    null_solutions = [
+        s for s in solutions if any(g.instruction_count() == 0 for g in s.gadgets)
+    ]
+    assert (
+        len(null_solutions) > 0
+    ), "Should find at least one solution with null (0-instruction) gadget for first stage"
 
     # Get minimum instruction count from first solution's gadgets
     min_instructions = min(g.instruction_count() for g in solutions[0].gadgets)
-    print(
-        f"  ✓ First gadget requires {min_instructions} instructions (as expected)"
-    )
+    print(f"  ✓ First gadget requires {min_instructions} instructions (as expected)")
     print("✓ First stage null permutation test passed\n")
 
 
@@ -285,8 +286,18 @@ def test_natural_order_strict_constraints():
 
     assert len(results) >= 1, "Should find at least one solution"
     gadget, output_state = results[0]
-    assert output_state.top == [1, 2, 3, 4], f"Expected [1,2,3,4], got {output_state.top}"
-    assert output_state.bottom == [5, 6, 7, 8], f"Expected [5,6,7,8], got {output_state.bottom}"
+    assert output_state.top == [
+        1,
+        2,
+        3,
+        4,
+    ], f"Expected [1,2,3,4], got {output_state.top}"
+    assert output_state.bottom == [
+        5,
+        6,
+        7,
+        8,
+    ], f"Expected [5,6,7,8], got {output_state.bottom}"
     print(f"  Found gadget: {gadget}")
     print(f"  Output state: {output_state}")
     print("✓ Natural order strict constraints test passed\n")
@@ -307,9 +318,9 @@ def test_natural_order_integration():
     )
 
     # Verify the natural order stage was injected
-    assert super_opt._natural_order_stage is not None, (
-        "Natural order stage should be set"
-    )
+    assert (
+        super_opt._natural_order_stage is not None
+    ), "Natural order stage should be set"
     assert super_opt._natural_order_stage == num_bitonic_stages, (
         f"Natural order stage should be {num_bitonic_stages}, "
         f"got {super_opt._natural_order_stage}"
@@ -362,8 +373,18 @@ def test_natural_order_integration():
 
     assert len(results) >= 1, "Should find at least one solution for natural order"
     _, output_state = results[0]
-    assert output_state.top == [1, 2, 3, 4], f"Expected [1,2,3,4], got {output_state.top}"
-    assert output_state.bottom == [5, 6, 7, 8], f"Expected [5,6,7,8], got {output_state.bottom}"
+    assert output_state.top == [
+        1,
+        2,
+        3,
+        4,
+    ], f"Expected [1,2,3,4], got {output_state.top}"
+    assert output_state.bottom == [
+        5,
+        6,
+        7,
+        8,
+    ], f"Expected [5,6,7,8], got {output_state.bottom}"
 
     print(f"  Natural order gadget output: {output_state}")
     print("✓ Natural order integration test passed\n")
@@ -379,7 +400,6 @@ def run_all_tests():
         test_bitonic_sorter()
         test_vector_state()
         test_gadget_synthesizer_init()
-        test_pair_id_mapping()
         test_bitonicsupervectorizer_init()
         test_instruction_enumeration()
         test_output_state_computation()

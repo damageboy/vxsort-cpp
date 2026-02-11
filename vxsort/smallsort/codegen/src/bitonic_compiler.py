@@ -43,8 +43,6 @@ def _count_dag_paths(roots):
     return sum(_count(root) for root in roots)
 
 
-
-
 def generate_bitonic_sorter(
     num_vecs: int,
     type: primitive_type,
@@ -109,14 +107,23 @@ def generate_bitonic_sorter(
             # Use PathSelector for unified scoring
             cost_model = CostModel("generic")
             path_selector = PathSelector(cost_model)
-            solutions, selected_paths = path_selector.prune_to_top_k_paths(solutions, top_k)
+            solutions, selected_paths = path_selector.prune_to_top_k_paths(
+                solutions, top_k
+            )
             print(f"Kept {len(solutions)} roots after pruning")
 
     # Export solutions in the requested format(s)
     for output_format in output_formats:
         if output_format == "asm":
             output_path = f"bitonic_solutions_{num_vecs}x{vm.name}_{type.name}.asm"
-            export_solutions_to_asm(solutions, num_vecs, type, vm, output_path, selected_paths=selected_paths)
+            export_solutions_to_asm(
+                solutions,
+                num_vecs,
+                type,
+                vm,
+                output_path,
+                selected_paths=selected_paths,
+            )
         elif output_format == "json":
             output_path = f"bitonic_solutions_{num_vecs}x{vm.name}_{type.name}.json"
             export_solutions_to_json(solutions, output_path)

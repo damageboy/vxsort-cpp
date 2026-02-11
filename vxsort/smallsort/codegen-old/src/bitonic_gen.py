@@ -100,8 +100,16 @@ def generate_all_types():
     parser = argparse.ArgumentParser()
     # parser.add_argument("--language", type=Language, choices=list(Language),
     #                    help="select output language: csharp/cpp/rust")
-    parser.add_argument("--vector-isa", nargs="+", default="all", help="list of vector ISA to generate", choices=list(VectorISA).append("all"))
-    parser.add_argument("--break-inline", type=int, default=0, help="break inlining every N levels")
+    parser.add_argument(
+        "--vector-isa",
+        nargs="+",
+        default="all",
+        help="list of vector ISA to generate",
+        choices=list(VectorISA).append("all"),
+    )
+    parser.add_argument(
+        "--break-inline", type=int, default=0, help="break inlining every N levels"
+    )
 
     parser.add_argument("--output-dir", type=str, help="output directory")
 

@@ -6,6 +6,7 @@ This module provides a consistent approach to:
 3. Representing paths as explicit (node, gadget) selections
 4. Allowing A* search to explore different gadgets at each node
 """
+
 from __future__ import annotations
 
 import heapq
@@ -26,6 +27,7 @@ class GadgetScore:
         control_vector_count: Number of control vector instructions
         total_score: latency_cost + (control_vector_count * penalty_weight)
     """
+
     latency_cost: float
     control_vector_count: int
     total_score: float
@@ -43,6 +45,7 @@ class PathStep:
         gadget_index: Index into node.gadgets (which gadget was selected)
         score: The GadgetScore for the selected gadget
     """
+
     node: "SolutionNode"
     gadget_index: int
     score: GadgetScore
@@ -66,6 +69,7 @@ class CompletePath:
         total_cv_count: Total control vector instructions in path
         total_score: total_latency + (total_cv_count * penalty_weight)
     """
+
     steps: list[PathStep]
     total_latency: float
     total_cv_count: int
@@ -83,6 +87,7 @@ class PathSelectorConfig:
         cv_penalty_weight: Penalty cycles per control vector instruction
         max_paths: Maximum number of paths to explore/export
     """
+
     cv_penalty_weight: float = 0.5  # Cycles per CV instruction
     max_paths: int = 10_000  # ASM export limit
 
@@ -131,7 +136,9 @@ class PathSelector:
     on latency + control vector penalty.
     """
 
-    def __init__(self, cost_model: "CostModel", config: PathSelectorConfig | None = None):
+    def __init__(
+        self, cost_model: "CostModel", config: PathSelectorConfig | None = None
+    ):
         """Initialize path selector.
 
         Args:
@@ -177,7 +184,7 @@ class PathSelector:
         return GadgetScore(
             latency_cost=latency_cost,
             control_vector_count=cv_count,
-            total_score=total_score
+            total_score=total_score,
         )
 
     def _compute_admissible_heuristic(
@@ -214,11 +221,11 @@ class PathSelector:
                     return 0.0
                 else:
                     # Dead-end at intermediate stage - unreachable
-                    min_remaining[nid] = float('inf')
-                    return float('inf')
+                    min_remaining[nid] = float("inf")
+                    return float("inf")
 
             # For each child, consider all gadgets and find minimum path
-            best_cost = float('inf')
+            best_cost = float("inf")
             for child in node.children:
                 # Find best gadget at child
                 for gadget in child.gadgets:
@@ -235,9 +242,7 @@ class PathSelector:
         return min_remaining
 
     def select_top_k_paths(
-        self,
-        roots: list["SolutionNode"],
-        top_k: int
+        self, roots: list["SolutionNode"], top_k: int
     ) -> list[CompletePath]:
         """Select top K cheapest root-to-leaf paths using A* search.
 
@@ -268,7 +273,7 @@ class PathSelector:
 
         for root in roots:
             # Skip roots that can't reach the final stage
-            if min_remaining.get(id(root), float('inf')) == float('inf'):
+            if min_remaining.get(id(root), float("inf")) == float("inf"):
                 continue
 
             # Try all gadgets at root
@@ -279,20 +284,25 @@ class PathSelector:
                 # Estimated total = current score + heuristic
                 est = score.total_score + min_remaining.get(id(root), 0.0)
 
-                heapq.heappush(heap, (
-                    est,
-                    counter,
-                    score.total_score,
-                    score.latency_cost,
-                    score.control_vector_count,
-                    [step]
-                ))
+                heapq.heappush(
+                    heap,
+                    (
+                        est,
+                        counter,
+                        score.total_score,
+                        score.latency_cost,
+                        score.control_vector_count,
+                        [step],
+                    ),
+                )
                 counter += 1
 
         selected: list[CompletePath] = []
 
         while heap and len(selected) < top_k:
-            _est, _tie, cumulative_score, cumulative_lat, cumulative_cv, path_steps = heapq.heappop(heap)
+            _est, _tie, cumulative_score, cumulative_lat, cumulative_cv, path_steps = (
+                heapq.heappop(heap)
+            )
             current_node = path_steps[-1].node
 
             if not current_node.children:
@@ -302,7 +312,7 @@ class PathSelector:
                         steps=path_steps,
                         total_latency=cumulative_lat,
                         total_cv_count=cumulative_cv,
-                        total_score=cumulative_score
+                        total_score=cumulative_score,
                     )
                     selected.append(complete_path)
                 # else: dead-end at intermediate stage, discard
@@ -310,35 +320,38 @@ class PathSelector:
                 # Expand to children
                 for child in current_node.children:
                     # Skip children that can't reach the final stage
-                    if min_remaining.get(id(child), float('inf')) == float('inf'):
+                    if min_remaining.get(id(child), float("inf")) == float("inf"):
                         continue
 
                     # Try all gadgets at child
                     for gadget_idx, gadget in enumerate(child.gadgets):
                         score = self.score_gadget(gadget)
-                        step = PathStep(node=child, gadget_index=gadget_idx, score=score)
+                        step = PathStep(
+                            node=child, gadget_index=gadget_idx, score=score
+                        )
 
                         new_score = cumulative_score + score.total_score
                         new_lat = cumulative_lat + score.latency_cost
                         new_cv = cumulative_cv + score.control_vector_count
                         new_est = new_score + min_remaining.get(id(child), 0.0)
 
-                        heapq.heappush(heap, (
-                            new_est,
-                            counter,
-                            new_score,
-                            new_lat,
-                            new_cv,
-                            path_steps + [step]
-                        ))
+                        heapq.heappush(
+                            heap,
+                            (
+                                new_est,
+                                counter,
+                                new_score,
+                                new_lat,
+                                new_cv,
+                                path_steps + [step],
+                            ),
+                        )
                         counter += 1
 
         return selected
 
     def prune_to_top_k_paths(
-        self,
-        roots: list["SolutionNode"],
-        top_k: int
+        self, roots: list["SolutionNode"], top_k: int
     ) -> tuple[list["SolutionNode"], list[CompletePath]]:
         """Keep only nodes/edges on top K paths, modifying tree in place.
 
@@ -373,8 +386,7 @@ class PathSelector:
 
             # Keep only children that are on selected paths
             node.children = [
-                child for child in node.children
-                if (id(node), id(child)) in kept_edges
+                child for child in node.children if (id(node), id(child)) in kept_edges
             ]
 
             for child in node.children:

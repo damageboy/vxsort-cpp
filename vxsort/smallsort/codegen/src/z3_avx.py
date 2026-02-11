@@ -32,9 +32,9 @@ def reg_with_values(
     ctx: Context,
 ):
     lanes = total_bits // element_bits
-    assert len(raw_values) == lanes, (
-        f"Expected {lanes} values for {element_bits}-bit elements in {total_bits}-bit register, got {len(raw_values)}"
-    )
+    assert (
+        len(raw_values) == lanes
+    ), f"Expected {lanes} values for {element_bits}-bit elements in {total_bits}-bit register, got {len(raw_values)}"
 
     # Create BitVec elements for each lane
     bv_elements = [
@@ -68,9 +68,9 @@ def _reg_with_unique_values(name: str, s: Solver, lanes: int, bits: int, ctx: Co
     """
     Create a register with given number of lanes and element width, ensuring each lane is unique.
     """
-    assert lanes * bits == 256 or lanes * bits == 512, (
-        "Total register size can only be 256 or 512 bits"
-    )
+    assert (
+        lanes * bits == 256 or lanes * bits == 512
+    ), "Total register size can only be 256 or 512 bits"
 
     # Create a new register
     if lanes * bits == 256:
@@ -151,16 +151,16 @@ def construct_reg_from_elements(
     bits: int, element_specs: ElementSpecs, total_bits: int
 ):
     lanes = total_bits // bits
-    assert len(element_specs) == lanes, (
-        f"Expected {lanes} element specs for {bits}-bit elements in {total_bits}-bit register, got {len(element_specs)}"
-    )
+    assert (
+        len(element_specs) == lanes
+    ), f"Expected {lanes} element specs for {bits}-bit elements in {total_bits}-bit register, got {len(element_specs)}"
 
     # Extract each specified element
     elements: list[BitVecRef | SeqRef] = []
     for reg, elem_idx in element_specs:
-        assert 0 <= elem_idx < lanes, (
-            f"Element index {elem_idx} out of range for {bits}-bit elements (0-{lanes - 1})"
-        )
+        assert (
+            0 <= elem_idx < lanes
+        ), f"Element index {elem_idx} out of range for {bits}-bit elements (0-{lanes - 1})"
         start_bit = elem_idx * bits
         end_bit = start_bit + bits - 1
         elements.append(Extract(end_bit, start_bit, reg))
@@ -185,9 +185,9 @@ def _reg_reversed(
     bits: int,
     ctx: Context,
 ):
-    assert lanes * bits == 256 or lanes * bits == 512, (
-        "Total register size can only be 256 or 512 bits"
-    )
+    assert (
+        lanes * bits == 256 or lanes * bits == 512
+    ), "Total register size can only be 256 or 512 bits"
 
     # Create a new register
     if lanes * bits == 256:

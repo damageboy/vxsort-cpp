@@ -12,8 +12,18 @@ import math
 def make_vxsort_types_frame(df_orig):
     df = df_orig[df_orig["name"].str.startswith("BM_vxsort<")]
 
-    df = pd.concat([df, df["name"].str.extract(r"BM_vxsort<(?P<type>[^,]+), vm::(?P<vm>[^,]+), (?P<unroll>\d+)>.*/(?P<len>\d+)/")], axis="columns")
-    df = pd.concat([df, df["type"].str.extract(r"(?P<typecat>.)(?P<width>\d+)")], axis="columns")
+    df = pd.concat(
+        [
+            df,
+            df["name"].str.extract(
+                r"BM_vxsort<(?P<type>[^,]+), vm::(?P<vm>[^,]+), (?P<unroll>\d+)>.*/(?P<len>\d+)/"
+            ),
+        ],
+        axis="columns",
+    )
+    df = pd.concat(
+        [df, df["type"].str.extract(r"(?P<typecat>.)(?P<width>\d+)")], axis="columns"
+    )
     df = df.astype({"width": int}, errors="raise")
     df = df.astype({"unroll": int}, errors="raise")
     df = df.astype({"len": int}, errors="raise")
@@ -26,8 +36,18 @@ def make_vxsort_types_frame(df_orig):
 def make_bitonic_types_frame(df_orig):
     df = df_orig[df_orig["name"].str.startswith("BM_bitonic_sort<")]
 
-    df = pd.concat([df, df["name"].str.extract(r"BM_bitonic_sort<(?P<type>[^,]+), vm::(?P<vm>[^,]+)>.*/(?P<len>\d+)/")], axis="columns")
-    df = pd.concat([df, df["type"].str.extract(r"(?P<typecat>.)(?P<width>\d+)")], axis="columns")
+    df = pd.concat(
+        [
+            df,
+            df["name"].str.extract(
+                r"BM_bitonic_sort<(?P<type>[^,]+), vm::(?P<vm>[^,]+)>.*/(?P<len>\d+)/"
+            ),
+        ],
+        axis="columns",
+    )
+    df = pd.concat(
+        [df, df["type"].str.extract(r"(?P<typecat>.)(?P<width>\d+)")], axis="columns"
+    )
     df = df.astype({"width": int}, errors="raise")
     df = df.astype({"len": int}, errors="raise")
 
@@ -62,7 +82,9 @@ def make_log2_ticks(min, max):
     tick_labels = []
     while min <= max:
         ticks.append(min)
-        tick_labels.append(humanize.naturalsize(int(min), gnu=True, binary=True).replace("B", ""))
+        tick_labels.append(
+            humanize.naturalsize(int(min), gnu=True, binary=True).replace("B", "")
+        )
         min *= 2
     return ticks, tick_labels
 
@@ -90,7 +112,9 @@ def plot_sort_types_frame(df, title, args, caches):
     add_cache_vline(fig, caches[1], "L2", "gold", len_min, len_max)
     add_cache_vline(fig, caches[2], "L3", "red", len_min, len_max)
 
-    tick_values, tick_labels = make_log2_ticks(df["len_bytes"].min(), df["len_bytes"].max())
+    tick_values, tick_labels = make_log2_ticks(
+        df["len_bytes"].min(), df["len_bytes"].max()
+    )
 
     fig.update_xaxes(tickvals=tick_values, ticktext=tick_labels)
 
@@ -102,15 +126,33 @@ def plot_sort_types_frame(df, title, args, caches):
 def make_vxsort_vs_all_frame(df_orig):
     # df = df_orig[df_orig['name'].str.startswith('BM_vxsort<')]
 
-    df = pd.concat([df_orig, df_orig["name"].str.extract(r"BM_(?P<sorter>vxsort|pdqsort_branchless|stdsort)<(?P<type>[^,]+).*>/(?P<len>\d+)/")], axis="columns")
-    df = pd.concat([df, df["name"].str.extract(r"BM_vxsort<.*vm::(?P<vm>[^,]+), (?P<unroll>\d+)>/")], axis="columns")
-    df = pd.concat([df, df["type"].str.extract(r"(?P<typecat>.)(?P<width>\d+)")], axis="columns")
+    df = pd.concat(
+        [
+            df_orig,
+            df_orig["name"].str.extract(
+                r"BM_(?P<sorter>vxsort|pdqsort_branchless|stdsort)<(?P<type>[^,]+).*>/(?P<len>\d+)/"
+            ),
+        ],
+        axis="columns",
+    )
+    df = pd.concat(
+        [
+            df,
+            df["name"].str.extract(r"BM_vxsort<.*vm::(?P<vm>[^,]+), (?P<unroll>\d+)>/"),
+        ],
+        axis="columns",
+    )
+    df = pd.concat(
+        [df, df["type"].str.extract(r"(?P<typecat>.)(?P<width>\d+)")], axis="columns"
+    )
     df.fillna(0, inplace=True)
     df = df.astype({"width": int}, errors="raise")
     df = df.astype({"unroll": int}, errors="raise")
     df = df.astype({"len": int}, errors="raise")
 
-    df["sorter_title"] = df.apply(lambda x: f"{x['sorter']}{'/' + x['vm'] if x['vm'] != 0 else ''}", axis=1)
+    df["sorter_title"] = df.apply(
+        lambda x: f"{x['sorter']}{'/' + x['vm'] if x['vm'] != 0 else ''}", axis=1
+    )
 
     df.dropna(axis=0, subset=["sorter"], inplace=True)
 
@@ -118,7 +160,10 @@ def make_vxsort_vs_all_frame(df_orig):
 
 
 def plot_vxsort_vs_all_frame(df, args):
-    df["len_title"] = df.apply(lambda x: f"{humanize.naturalsize(x['len'], gnu=True, binary=True).replace('B', '')}", axis=1)
+    df["len_title"] = df.apply(
+        lambda x: f"{humanize.naturalsize(x['len'], gnu=True, binary=True).replace('B', '')}",
+        axis=1,
+    )
 
     cardinality = df[["len_title", "type", "sorter_title"]].nunique(dropna=True)
 
@@ -132,11 +177,18 @@ def plot_vxsort_vs_all_frame(df, args):
         title_suffix = f"({df['len_title'].unique()[0]} elements)"
         y_column = "type"
     else:
-        raise ValueError(f"Can't figure out the comparison axis for the plot: {cardinality}")
+        raise ValueError(
+            f"Can't figure out the comparison axis for the plot: {cardinality}"
+        )
 
     if args.speedup:
         baseline_df = df[df["sorter_title"] == args.speedup]
-        df["speedup"] = df.groupby(y_column)["rdtsc-cycles/N"].transform(lambda x: baseline_df[baseline_df[y_column] == x.name]["rdtsc-cycles/N"].values[0] / x)
+        df["speedup"] = df.groupby(y_column)["rdtsc-cycles/N"].transform(
+            lambda x: baseline_df[baseline_df[y_column] == x.name][
+                "rdtsc-cycles/N"
+            ].values[0]
+            / x
+        )
         x_column = "speedup"
     else:
         x_column = "rdtsc-cycles/N"
@@ -175,15 +227,33 @@ def plot_vxsort_vs_all_frame(df, args):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(prog="make-figure.py", description="Generate pretty figures for vxsort benchmarks")
+    parser = argparse.ArgumentParser(
+        prog="make-figure.py",
+        description="Generate pretty figures for vxsort benchmarks",
+    )
 
     parser.add_argument("filename")
-    parser.add_argument("--mode", choices=("vxsort-types", "vxsort-vs-all", "bitonic-types"), const="vxsort-types", default="vxsort-types", nargs="?", help="which figure to generate (default: %(const)s)")
+    parser.add_argument(
+        "--mode",
+        choices=("vxsort-types", "vxsort-vs-all", "bitonic-types"),
+        const="vxsort-types",
+        default="vxsort-types",
+        nargs="?",
+        help="which figure to generate (default: %(const)s)",
+    )
 
     parser.add_argument("--format", choices=["svg", "png", "html"], default="svg")
-    parser.add_argument("--query", action="append", help="pandas query to filter the data-frame with before plotting")
+    parser.add_argument(
+        "--query",
+        action="append",
+        help="pandas query to filter the data-frame with before plotting",
+    )
     parser.add_argument("--speedup", help="plot speedup vs. supplied baseline sorter")
-    parser.add_argument("--debug-df", action="store_true", help="just show the last data-frame before generating a figure and quit")
+    parser.add_argument(
+        "--debug-df",
+        action="store_true",
+        help="just show the last data-frame before generating a figure and quit",
+    )
     parser.add_argument("-o", "--output", default=sys.stdout.buffer)
     parser.add_argument("--template", default="plotly_dark")
     args = parser.parse_args()
@@ -215,7 +285,20 @@ def parse_csv_into_dataframe(filename):
         df = pd.read_csv(f)
 
     # drop some commonly useless columns
-    df.drop(["iterations", "real_time", "cpu_time", "time_unit", "label", "items_per_second", "error_occurred", "error_message"], axis=1, inplace=True)
+    df.drop(
+        [
+            "iterations",
+            "real_time",
+            "cpu_time",
+            "time_unit",
+            "label",
+            "items_per_second",
+            "error_occurred",
+            "error_message",
+        ],
+        axis=1,
+        inplace=True,
+    )
     return ((l1d_size, l2_size, l3_size), df)
 
 
@@ -236,14 +319,18 @@ def make_figures():
 
     if args.mode == "vxsort-types":
         if args.speedup:
-            raise argparse.ArgumentError("Speedup mode is not supported for vxsort-types mode")
+            raise argparse.ArgumentError(
+                "Speedup mode is not supported for vxsort-types mode"
+            )
         plot_df = make_vxsort_types_frame(df)
         plot_df = apply_queries(plot_df, args.query)
         fig = plot_sort_types_frame(plot_df, "vxsort full-sorting", args, caches)
     elif args.mode == "vxsort-vs-all":
         plot_df = make_vxsort_vs_all_frame(df)
         if not args.query or len(args.query) == 0:
-            args.query = ["len <= 1048576 & width == 32 & typecat == 'i' & (sorter != 'vxsort' | unroll == 8)"]
+            args.query = [
+                "len <= 1048576 & width == 32 & typecat == 'i' & (sorter != 'vxsort' | unroll == 8)"
+            ]
 
         plot_df = apply_queries(plot_df, args.query)
         fig = plot_vxsort_vs_all_frame(plot_df, args)

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Unit tests for PathSelector and unified gadget scoring."""
+
 import pytest
 from dataclasses import dataclass
 from path_selector import (
@@ -15,11 +16,16 @@ from bitonic_super_optimizer import (
     InstructionSpec,
 )
 from cost_model import CostModel
+
+
 @dataclass
 class MockInstruction:
     """Mock instruction for testing control vector detection."""
+
     intrinsic_name: str
     args: dict
+
+
 def test_is_control_vector_instruction():
     """Test detection of control vector instructions."""
     # Control vector instructions
@@ -45,32 +51,33 @@ def test_is_control_vector_instruction():
     assert not _is_control_vector_instruction(
         MockInstruction("_mm256_blend_ps", {"imm8": 0xF0})
     )
+
+
 def test_count_control_vectors():
     """Test counting control vectors in a gadget."""
     # Create gadget with mix of control vector and immediate instructions
     top_insts = [
         InstructionSpec(
             intrinsic_name="_mm256_permutexvar_epi32",
-            args={"a": "top", "op_idx": "idx"}
+            args={"a": "top", "op_idx": "idx"},
         ),
         InstructionSpec(
-            intrinsic_name="_mm256_permute_ps",
-            args={"a": "tmp1", "imm8": 0xD8}
+            intrinsic_name="_mm256_permute_ps", args={"a": "tmp1", "imm8": 0xD8}
         ),
     ]
     bottom_insts = [
         InstructionSpec(
             intrinsic_name="_mm256_blendv_ps",
-            args={"a": "bottom", "b": "top", "mask": "m"}
+            args={"a": "bottom", "b": "top", "mask": "m"},
         ),
     ]
     gadget = PermutationGadget(
-        top_instructions=top_insts,
-        bottom_instructions=bottom_insts,
-        validated=True
+        top_instructions=top_insts, bottom_instructions=bottom_insts, validated=True
     )
     # Should count 2 control vectors: permutexvar and blendv
     assert _count_control_vectors(gadget) == 2
+
+
 def test_gadget_score_computation():
     """Test GadgetScore computation with latency and CV penalty."""
     cost_model = CostModel("generic")
@@ -90,9 +97,7 @@ def test_gadget_score_computation():
         ),
     ]
     gadget = PermutationGadget(
-        top_instructions=top_insts,
-        bottom_instructions=bottom_insts,
-        validated=True
+        top_instructions=top_insts, bottom_instructions=bottom_insts, validated=True
     )
     score = selector.score_gadget(gadget)
     # Expected: latency 3.0 + 1.0 = 4.0, CV count = 1
@@ -100,6 +105,8 @@ def test_gadget_score_computation():
     assert score.latency_cost == 4.0
     assert score.control_vector_count == 1
     assert score.total_score == 4.5
+
+
 def test_path_selector_single_path():
     """Test PathSelector with a simple linear tree (no branching)."""
     cost_model = CostModel("generic")
@@ -120,10 +127,10 @@ def test_path_selector_single_path():
                     )
                 ],
                 bottom_instructions=[],
-                validated=True
+                validated=True,
             )
         ],
-        children=[]
+        children=[],
     )
     child1_state = VectorState(top=[0, 1, 2, 3], bottom=[4, 5, 6, 7])
     child1 = SolutionNode(
@@ -139,10 +146,10 @@ def test_path_selector_single_path():
                     )
                 ],
                 bottom_instructions=[],
-                validated=True
+                validated=True,
             )
         ],
-        children=[leaf]
+        children=[leaf],
     )
     root_state = VectorState(top=[0, 1, 2, 3], bottom=[4, 5, 6, 7])
     root = SolutionNode(
@@ -158,10 +165,10 @@ def test_path_selector_single_path():
                     )
                 ],
                 bottom_instructions=[],
-                validated=True
+                validated=True,
             )
         ],
-        children=[child1]
+        children=[child1],
     )
     # Select top 1 path
     paths = selector.select_top_k_paths([root], top_k=1)
@@ -174,6 +181,8 @@ def test_path_selector_single_path():
     # All are permute_ps (latency 1.0), no CVs
     assert path.total_latency == 3.0
     assert path.total_cv_count == 0
+
+
 def test_path_selector_multiple_gadgets_per_node():
     """Test that A* explores different gadget choices at same node."""
     cost_model = CostModel("generic")
@@ -187,12 +196,10 @@ def test_path_selector_multiple_gadgets_per_node():
         output_state=leaf_state,
         gadgets=[
             PermutationGadget(
-                top_instructions=[],
-                bottom_instructions=[],
-                validated=True
+                top_instructions=[], bottom_instructions=[], validated=True
             )
         ],
-        children=[]
+        children=[],
     )
     root_state = VectorState(top=[0, 1, 2, 3], bottom=[4, 5, 6, 7])
     root = SolutionNode(
@@ -209,7 +216,7 @@ def test_path_selector_multiple_gadgets_per_node():
                     )
                 ],
                 bottom_instructions=[],
-                validated=True
+                validated=True,
             ),
             # Gadget 1: High latency with CV (cost = 3.0 + 0.5 = 3.5)
             PermutationGadget(
@@ -220,10 +227,10 @@ def test_path_selector_multiple_gadgets_per_node():
                     )
                 ],
                 bottom_instructions=[],
-                validated=True
+                validated=True,
             ),
         ],
-        children=[leaf]
+        children=[leaf],
     )
     # Select top 2 paths
     paths = selector.select_top_k_paths([root], top_k=2)
@@ -234,6 +241,8 @@ def test_path_selector_multiple_gadgets_per_node():
     # Second path should use gadget 1 (higher cost)
     assert paths[1].steps[0].gadget_index == 1
     assert paths[1].total_score == 3.5
+
+
 def test_path_selector_dag_structure():
     """Test PathSelector with DAG (shared children)."""
     cost_model = CostModel("generic")
@@ -256,10 +265,10 @@ def test_path_selector_dag_structure():
                     )
                 ],
                 bottom_instructions=[],
-                validated=True
+                validated=True,
             )
         ],
-        children=[]
+        children=[],
     )
     shared_child = SolutionNode(
         stage=1,
@@ -274,10 +283,10 @@ def test_path_selector_dag_structure():
                     )
                 ],
                 bottom_instructions=[],
-                validated=True
+                validated=True,
             )
         ],
-        children=[leaf]
+        children=[leaf],
     )
     root1 = SolutionNode(
         stage=0,
@@ -292,10 +301,10 @@ def test_path_selector_dag_structure():
                     )
                 ],
                 bottom_instructions=[],
-                validated=True
+                validated=True,
             )
         ],
-        children=[shared_child]
+        children=[shared_child],
     )
     root2 = SolutionNode(
         stage=0,
@@ -310,10 +319,10 @@ def test_path_selector_dag_structure():
                     )
                 ],
                 bottom_instructions=[],
-                validated=True
+                validated=True,
             )
         ],
-        children=[shared_child]
+        children=[shared_child],
     )
     # Select top 2 paths
     paths = selector.select_top_k_paths([root1, root2], top_k=2)
@@ -323,6 +332,8 @@ def test_path_selector_dag_structure():
         assert len(path.steps) == 3
         assert path.steps[1].node == shared_child
         assert path.steps[2].node == leaf
+
+
 def test_admissible_heuristic():
     """Test that heuristic never overestimates remaining cost."""
     cost_model = CostModel("generic")
@@ -342,10 +353,10 @@ def test_admissible_heuristic():
                     )
                 ],
                 bottom_instructions=[],
-                validated=True
+                validated=True,
             )
         ],
-        children=[]
+        children=[],
     )
     leaf2 = SolutionNode(
         stage=2,
@@ -360,10 +371,10 @@ def test_admissible_heuristic():
                     )
                 ],
                 bottom_instructions=[],
-                validated=True
+                validated=True,
             )
         ],
-        children=[]
+        children=[],
     )
     child = SolutionNode(
         stage=1,
@@ -378,10 +389,10 @@ def test_admissible_heuristic():
                     )
                 ],
                 bottom_instructions=[],
-                validated=True
+                validated=True,
             )
         ],
-        children=[leaf1, leaf2]
+        children=[leaf1, leaf2],
     )
     root = SolutionNode(
         stage=0,
@@ -389,12 +400,10 @@ def test_admissible_heuristic():
         output_state=leaf_state,
         gadgets=[
             PermutationGadget(
-                top_instructions=[],
-                bottom_instructions=[],
-                validated=True
+                top_instructions=[], bottom_instructions=[], validated=True
             )
         ],
-        children=[child]
+        children=[child],
     )
     # Compute heuristic
     min_remaining = selector._compute_admissible_heuristic([root], max_stage=2)
@@ -403,6 +412,8 @@ def test_admissible_heuristic():
     assert min_remaining[id(child)] == 1.0
     # At root, heuristic should be 1.0 (child) + 1.0 (leaf1) = 2.0
     assert min_remaining[id(root)] == 2.0
+
+
 def test_prune_to_top_k_paths():
     """Test tree pruning keeps only nodes on selected paths."""
     cost_model = CostModel("generic")
@@ -420,12 +431,10 @@ def test_prune_to_top_k_paths():
         output_state=leaf_state,
         gadgets=[
             PermutationGadget(
-                top_instructions=[],
-                bottom_instructions=[],
-                validated=True
+                top_instructions=[], bottom_instructions=[], validated=True
             )
         ],
-        children=[]
+        children=[],
     )
     leaf2 = SolutionNode(
         stage=2,
@@ -433,12 +442,10 @@ def test_prune_to_top_k_paths():
         output_state=leaf_state,
         gadgets=[
             PermutationGadget(
-                top_instructions=[],
-                bottom_instructions=[],
-                validated=True
+                top_instructions=[], bottom_instructions=[], validated=True
             )
         ],
-        children=[]
+        children=[],
     )
     cheap = SolutionNode(
         stage=1,
@@ -453,10 +460,10 @@ def test_prune_to_top_k_paths():
                     )
                 ],
                 bottom_instructions=[],
-                validated=True
+                validated=True,
             )
         ],
-        children=[leaf1]
+        children=[leaf1],
     )
     expensive = SolutionNode(
         stage=1,
@@ -471,10 +478,10 @@ def test_prune_to_top_k_paths():
                     )
                 ],
                 bottom_instructions=[],
-                validated=True
+                validated=True,
             )
         ],
-        children=[leaf2]
+        children=[leaf2],
     )
     root = SolutionNode(
         stage=0,
@@ -482,12 +489,10 @@ def test_prune_to_top_k_paths():
         output_state=leaf_state,
         gadgets=[
             PermutationGadget(
-                top_instructions=[],
-                bottom_instructions=[],
-                validated=True
+                top_instructions=[], bottom_instructions=[], validated=True
             )
         ],
-        children=[cheap, expensive]
+        children=[cheap, expensive],
     )
     # Prune to top 1 path (should keep only cheap path)
     filtered_roots, selected_paths = selector.prune_to_top_k_paths([root], top_k=1)
@@ -498,5 +503,7 @@ def test_prune_to_top_k_paths():
     assert filtered_roots[0].children[0] == cheap
     # Expensive branch should be pruned
     assert expensive not in filtered_roots[0].children
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

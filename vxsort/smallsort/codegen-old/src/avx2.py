@@ -1,4 +1,3 @@
-import os
 from datetime import datetime
 
 from typing.io import IO
@@ -32,7 +31,9 @@ class AVX2BitonicISA(BitonicISA):
             self.bitonic_size_map[t] = int(self.vector_size_in_bytes / s)
 
     def clean_print(self, s: str):
-        clean_lines = str.join("\n", [l for l in s.splitlines() if not AVX2BitonicISA.REMOVE_ME in l])
+        clean_lines = str.join(
+            "\n", [l for l in s.splitlines() if AVX2BitonicISA.REMOVE_ME not in l]
+        )
         print(clean_lines, file=self.f_header)
 
     def max_bitonic_sort_vectors(self):
@@ -81,11 +82,15 @@ class AVX2BitonicISA(BitonicISA):
         return v
 
     def generate_param_list(self, start: int, numParams: int):
-        return str.join(", ", list(map(lambda p: f"d{p:02d}", range(start, start + numParams))))
+        return str.join(
+            ", ", list(map(lambda p: f"d{p:02d}", range(start, start + numParams)))
+        )
 
     def generate_param_def_list(self, numParams: int):
         t = self.type
-        return str.join(", ", list(map(lambda p: f"TV& d{p:02d}", range(1, numParams + 1))))
+        return str.join(
+            ", ", list(map(lambda p: f"TV& d{p:02d}", range(1, numParams + 1)))
+        )
 
     def generate_shuffle_X1(self, v: str):
         size = self.vector_size()
@@ -94,7 +99,9 @@ class AVX2BitonicISA(BitonicISA):
         elif size == 8:
             return self.i2t(f"_mm256_shuffle_epi32({self.t2i(v)}, 0b10'11'00'01)")
         elif size == 4:
-            return self.d2t(f"_mm256_shuffle_pd({self.t2d(v)}, {self.t2d(v)}, 0b0'1'0'1)")
+            return self.d2t(
+                f"_mm256_shuffle_pd({self.t2d(v)}, {self.t2d(v)}, 0b0'1'0'1)"
+            )
         raise Exception("WTF")
 
     def generate_shuffle_X2(self, v: str):
@@ -170,18 +177,28 @@ class AVX2BitonicISA(BitonicISA):
         # There is only one known case where we need something like this,
         # So check for it or raise an exception:
         if size == 16 and width == 16 and blend == 0b0101010110101010:
-            return self.i2t(f"_mm256_blendv_epi8({self.t2i(v1)}, {self.t2i(v2)}, x1_blend)")
+            return self.i2t(
+                f"_mm256_blendv_epi8({self.t2i(v1)}, {self.t2i(v2)}, x1_blend)"
+            )
 
         mask = self.generate_blend_mask(blend, width, asc)
         if size == 16:
             if width == 16:
-                return self.i2t(f"_mm256_blend_epi32({self.t2i(v1)}, {self.t2i(v2)}, 0b{mask:08b})")
+                return self.i2t(
+                    f"_mm256_blend_epi32({self.t2i(v1)}, {self.t2i(v2)}, 0b{mask:08b})"
+                )
             else:
-                return self.i2t(f"_mm256_blend_epi16({self.t2i(v1)}, {self.t2i(v2)}, 0b{mask:08b})")
+                return self.i2t(
+                    f"_mm256_blend_epi16({self.t2i(v1)}, {self.t2i(v2)}, 0b{mask:08b})"
+                )
         if size == 8:
-            return self.i2t(f"_mm256_blend_epi32({self.t2i(v1)}, {self.t2i(v2)}, 0b{mask:08b})")
+            return self.i2t(
+                f"_mm256_blend_epi32({self.t2i(v1)}, {self.t2i(v2)}, 0b{mask:08b})"
+            )
         elif size == 4:
-            return self.d2t(f"_mm256_blend_pd({self.t2d(v1)}, {self.t2d(v2)}, 0b{mask:08b})")
+            return self.d2t(
+                f"_mm256_blend_pd({self.t2d(v1)}, {self.t2d(v2)}, 0b{mask:08b})"
+            )
         raise Exception("WTF")
 
     def generate_vec_blend(self, v1: str, v2: str, blend: str):
@@ -222,9 +239,13 @@ class AVX2BitonicISA(BitonicISA):
         elif t == "f32":
             return f"_mm256_min_ps({v1}, {v2})"
         elif t == "i64":
-            return self.d2t(f"_mm256_blendv_pd({self.t2d(v1)}, {self.t2d(v2)}, i2d(cmp))")
+            return self.d2t(
+                f"_mm256_blendv_pd({self.t2d(v1)}, {self.t2d(v2)}, i2d(cmp))"
+            )
         elif t == "u64":
-            return self.d2t(f"_mm256_blendv_pd({self.t2d(v1)}, {self.t2d(v2)}, i2d(cmp))")
+            return self.d2t(
+                f"_mm256_blendv_pd({self.t2d(v1)}, {self.t2d(v2)}, i2d(cmp))"
+            )
         elif t == "f64":
             return f"_mm256_min_pd({v1}, {v2})"
         raise Exception("WTF")
@@ -242,9 +263,13 @@ class AVX2BitonicISA(BitonicISA):
         elif t == "f32":
             return f"_mm256_max_ps({v1}, {v2})"
         elif t == "i64":
-            return self.d2t(f"_mm256_blendv_pd({self.t2d(v2)}, {self.t2d(v1)}, i2d(cmp))")
+            return self.d2t(
+                f"_mm256_blendv_pd({self.t2d(v2)}, {self.t2d(v1)}, i2d(cmp))"
+            )
         elif t == "u64":
-            return self.d2t(f"_mm256_blendv_pd({self.t2d(v2)}, {self.t2d(v1)}, i2d(cmp))")
+            return self.d2t(
+                f"_mm256_blendv_pd({self.t2d(v2)}, {self.t2d(v1)}, i2d(cmp))"
+            )
         elif t == "f64":
             return f"_mm256_max_pd({v1}, {v2})"
         raise Exception("WTF")
@@ -268,11 +293,11 @@ class AVX2BitonicISA(BitonicISA):
             max_value = f"_mm256_andnot_si256({mask}, _mm256_set1_epi32(MAX))"
 
         if t == "f64":
-            max_value = f"_mm256_andnot_pd(i2d(mask), _mm256_set1_pd(MAX))"
+            max_value = "_mm256_andnot_pd(i2d(mask), _mm256_set1_pd(MAX))"
             load = f"_mm256_maskload_pd(({t} const *) ((__m256d const *) {v} + {offset}), {mask})"
             return f"_mm256_or_pd({load}, {max_value})"
         if t == "f32":
-            max_value = f"_mm256_andnot_ps(i2s(mask), _mm256_set1_ps(MAX))"
+            max_value = "_mm256_andnot_ps(i2s(mask), _mm256_set1_ps(MAX))"
             load = f"_mm256_maskload_ps(({t} const *) ((__m256 const *) {v} + {offset}), {mask})"
             return f"_mm256_or_ps({load}, {max_value})"
 
@@ -385,9 +410,9 @@ public:
 """)
 
     def generate_epilogue(self):
-        self.clean_print(f"""
-}};
-}}
+        self.clean_print("""
+};
+}
 
 #undef i2d
 #undef d2i
@@ -511,7 +536,11 @@ public:
         type = self.type
         g = self
         maybe_cmp = lambda: ", cmp" if (type == "i64" or type == "u64") else ""
-        maybe_topbit = lambda: f"\n        TV topBit = _mm256_set1_epi64x(1LLU << 63);" if (type == "u64") else ""
+        maybe_topbit = (
+            lambda: "\n        TV topBit = _mm256_set1_epi64x(1LLU << 63);"
+            if (type == "u64")
+            else ""
+        )
 
         w1 = int(next_power_of_2(width) / 2)
         w2 = int(width - w1)
@@ -555,7 +584,11 @@ public:
         type = self.type
         g = self
         maybe_cmp = lambda: ", cmp" if (type == "i64" or type == "u64") else ""
-        maybe_topbit = lambda: f"\n        TV topBit = _mm256_set1_epi64x(1LLU << 63);" if (type == "u64") else ""
+        maybe_topbit = (
+            lambda: "\n        TV topBit = _mm256_set1_epi64x(1LLU << 63);"
+            if (type == "u64")
+            else ""
+        )
 
         w1 = int(next_power_of_2(width) / 2)
         w2 = int(width - w1)
@@ -621,12 +654,18 @@ public:
     static NOINLINE void sort_{m:02d}v_full_{sfx}({type} *ptr) {{""")
 
             for l in range(0, m):
-                g.clean_print(f"        TV d{l + 1:02d} = {g.get_load_intrinsic('ptr', l)};")
+                g.clean_print(
+                    f"        TV d{l + 1:02d} = {g.get_load_intrinsic('ptr', l)};"
+                )
 
-            g.clean_print(f"        sort_{m:02d}v_{sfx}({g.generate_param_list(1, m)});")
+            g.clean_print(
+                f"        sort_{m:02d}v_{sfx}({g.generate_param_list(1, m)});"
+            )
 
             for l in range(0, m):
-                g.clean_print(f"        {g.get_store_intrinsic('ptr', l, f'd{l + 1:02d}')};")
+                g.clean_print(
+                    f"        {g.get_store_intrinsic('ptr', l, f'd{l + 1:02d}')};"
+                )
 
             g.clean_print("    }\n")
 
@@ -641,15 +680,25 @@ public:
 """)
 
             for l in range(0, m - 1):
-                g.clean_print(f"        TV d{l + 1:02d} = {g.get_load_intrinsic('ptr', l)};")
+                g.clean_print(
+                    f"        TV d{l + 1:02d} = {g.get_load_intrinsic('ptr', l)};"
+                )
 
-            g.clean_print(f"        TV d{m:02d} = {g.get_mask_load_intrinsic('ptr', m - 1, 'mask')};")
+            g.clean_print(
+                f"        TV d{m:02d} = {g.get_mask_load_intrinsic('ptr', m - 1, 'mask')};"
+            )
 
-            g.clean_print(f"        sort_{m:02d}v_ascending({g.generate_param_list(1, m)});")
+            g.clean_print(
+                f"        sort_{m:02d}v_ascending({g.generate_param_list(1, m)});"
+            )
 
             for l in range(0, m - 1):
-                g.clean_print(f"        {g.get_store_intrinsic('ptr', l, f'd{l + 1:02d}')};")
-            g.clean_print(f"        {g.get_mask_store_intrinsic('ptr', m - 1, f'd{m:02d}', 'mask')};")
+                g.clean_print(
+                    f"        {g.get_store_intrinsic('ptr', l, f'd{l + 1:02d}')};"
+                )
+            g.clean_print(
+                f"        {g.get_mask_store_intrinsic('ptr', m - 1, f'd{m:02d}', 'mask')};"
+            )
 
             g.clean_print("    }")
 
@@ -666,7 +715,9 @@ public:
         switch(length / N) {{""")
 
         for m in range(1, self.max_bitonic_sort_vectors() + 1):
-            g.clean_print(f"            case {m}: sort_{m:02d}v_full_{sfx}(ptr); break;")
+            g.clean_print(
+                f"            case {m}: sort_{m:02d}v_full_{sfx}(ptr); break;"
+            )
         g.clean_print("        }")
         g.clean_print("    }\n")
 

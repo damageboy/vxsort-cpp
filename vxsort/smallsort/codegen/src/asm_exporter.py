@@ -47,17 +47,17 @@ def _get_instruction_metadata(intrinsic_name: str) -> dict:
     }
 
     metadata = {
-        'shuffle_type': None,
-        'control_vector_width': None,
+        "shuffle_type": None,
+        "control_vector_width": None,
     }
 
     if intrinsic_name in shuffle2_instructions:
-        metadata['shuffle_type'] = 'shuffle2'
+        metadata["shuffle_type"] = "shuffle2"
     elif intrinsic_name in shuffle4_instructions:
-        metadata['shuffle_type'] = 'shuffle4'
+        metadata["shuffle_type"] = "shuffle4"
 
     if intrinsic_name in control_vector_instructions:
-        metadata['control_vector_width'] = control_vector_instructions[intrinsic_name]
+        metadata["control_vector_width"] = control_vector_instructions[intrinsic_name]
 
     return metadata
 
@@ -202,7 +202,7 @@ def _format_instruction(
         if args["b"] not in ["top", "bottom"]:
             # It's a control vector - allocate a temp register for it
             ctrl_val = args["b"]
-            ctrl_element_width = metadata['control_vector_width']
+            ctrl_element_width = metadata["control_vector_width"]
             ctrl_reg = reg_allocator.allocate_temp()
             operands.append(src1)
             operands.append(ctrl_reg)
@@ -217,7 +217,7 @@ def _format_instruction(
         if "op_idx" in args:
             # Variable permute with control vector
             ctrl_val = args["op_idx"]
-            ctrl_element_width = metadata['control_vector_width']
+            ctrl_element_width = metadata["control_vector_width"]
             ctrl_reg = reg_allocator.allocate_temp()
             operands.append(ctrl_reg)
             operands.append(src)
@@ -235,9 +235,9 @@ def _format_instruction(
         if isinstance(imm_val, int):
             operands.append(f"0x{imm_val:02x}")
             # Use appropriate shuffle formatter based on instruction type
-            if metadata['shuffle_type'] == 'shuffle2':
+            if metadata["shuffle_type"] == "shuffle2":
                 comment = mm_shuffle2_str(imm_val)
-            elif metadata['shuffle_type'] == 'shuffle4':
+            elif metadata["shuffle_type"] == "shuffle4":
                 comment = mm_shuffle_str(imm_val)
             else:
                 # Default to 4-element for backward compatibility
@@ -273,7 +273,9 @@ def _format_instruction(
 
             elements = []
             for i in range(num_elements):
-                element = (ctrl_val >> (i * ctrl_element_width)) & ((1 << ctrl_element_width) - 1)
+                element = (ctrl_val >> (i * ctrl_element_width)) & (
+                    (1 << ctrl_element_width) - 1
+                )
                 elements.append(element)
 
             comment = "[" + ", ".join(str(e) for e in elements) + "]"
@@ -289,8 +291,6 @@ def _format_instruction(
     return asm_line
 
 
-
-
 def _format_vector_state_as_comment(state, prefix: str = "") -> str:
     """Format VectorState __repr__ output as assembly comments."""
     state_str = repr(state)
@@ -300,7 +300,10 @@ def _format_vector_state_as_comment(state, prefix: str = "") -> str:
 
 
 def _print_solution_step_as_assembly(
-    step, reg_allocator: RegisterAllocator, cumulative_cost: float = 0.0, indent: int = 0
+    step,
+    reg_allocator: RegisterAllocator,
+    cumulative_cost: float = 0.0,
+    indent: int = 0,
 ):
     """Print a single PathStep as assembly code.
 
@@ -387,7 +390,9 @@ def export_solutions_to_asm(
     else:
         # Fall back to old behavior: enumerate paths through DAG
         # This is needed when top_k is None (no pruning)
-        print("Warning: No selected_paths provided, enumerating all paths (may be slow)")
+        print(
+            "Warning: No selected_paths provided, enumerating all paths (may be slow)"
+        )
 
         # Use PathSelector to enumerate paths with cap
         cost_model = CostModel("generic")
@@ -433,7 +438,11 @@ def export_solutions_to_asm(
                 # Print initial input state (before first stage)
                 if path.steps:
                     print("; Initial Input State:")
-                    print(_format_vector_state_as_comment(path.steps[0].node.input_state, ""))
+                    print(
+                        _format_vector_state_as_comment(
+                            path.steps[0].node.input_state, ""
+                        )
+                    )
                     print()
 
                 reg_allocator = RegisterAllocator(vm, dtype, num_vecs)
@@ -442,7 +451,9 @@ def export_solutions_to_asm(
                 running_cost = 0.0
                 for step in path.steps:
                     running_cost += step.score.total_score
-                    _print_solution_step_as_assembly(step, reg_allocator, cumulative_cost=running_cost)
+                    _print_solution_step_as_assembly(
+                        step, reg_allocator, cumulative_cost=running_cost
+                    )
 
                 print("=" * 80)
                 print()

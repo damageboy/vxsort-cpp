@@ -75,4 +75,6 @@ def export_solutions_to_json(roots: list[SolutionNode], output_path: str):
     with open(output_path, "w") as f:
         json.dump(output, f, indent=2)
 
-    print(f"Exported {len(roots)} roots, {len(nodes_dict)} unique nodes to {output_path}")
+    print(
+        f"Exported {len(roots)} roots, {len(nodes_dict)} unique nodes to {output_path}"
+    )

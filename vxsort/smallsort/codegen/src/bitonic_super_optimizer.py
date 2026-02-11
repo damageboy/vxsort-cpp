@@ -190,7 +190,6 @@ class SolutionNode:
         return f"SolutionNode(stage={self.stage}, gadgets={len(self.gadgets)}, children={len(self.children)})"
 
 
-
 class GadgetSynthesizer:
     """Synthesizes permutation gadgets using Z3."""
 
@@ -297,9 +296,7 @@ class GadgetSynthesizer:
             bottom_lane = Extract(lane_end, lane_start, bottom_reg)
 
             solver.add(top_lane == BitVecVal(top_elem, self.lane_width, ctx=ctx))
-            solver.add(
-                bottom_lane == BitVecVal(bottom_elem, self.lane_width, ctx=ctx)
-            )
+            solver.add(bottom_lane == BitVecVal(bottom_elem, self.lane_width, ctx=ctx))
 
         return top_reg, bottom_reg
 
@@ -343,9 +340,7 @@ class GadgetSynthesizer:
         solver = Solver(ctx=ctx)
 
         # Create input registers with actual element values
-        top_reg, bottom_reg = self._create_input_registers(
-            solver, ctx, input_state
-        )
+        top_reg, bottom_reg = self._create_input_registers(solver, ctx, input_state)
 
         # Collect all symbolic variables from instruction templates and resolve them
         symbolic_vars = {}
@@ -414,7 +409,7 @@ class GadgetSynthesizer:
             if allow_any_lane_order:
                 # Any target pair can land in any lane (existing behavior)
                 pair_options = []
-                for (elem_a, elem_b) in target_pairs:
+                for elem_a, elem_b in target_pairs:
                     val_a = BitVecVal(elem_a, self.lane_width, ctx=ctx)
                     val_b = BitVecVal(elem_b, self.lane_width, ctx=ctx)
                     pair_options.append(
@@ -521,9 +516,7 @@ class GadgetSynthesizer:
                 top_val = model.evaluate(top_lane, model_completion=True)
                 bottom_val = model.evaluate(bottom_lane, model_completion=True)
 
-                top_elem = (
-                    top_val.as_long() if hasattr(top_val, "as_long") else top_val
-                )
+                top_elem = top_val.as_long() if hasattr(top_val, "as_long") else top_val
                 bottom_elem = (
                     bottom_val.as_long()
                     if hasattr(bottom_val, "as_long")
@@ -1220,12 +1213,12 @@ class BitonicSuperVectorizer:
             bottom.append(pair[1])
 
         # Verify we have the expected number of elements
-        assert len(top) == self.elements_per_vector, (
-            f"Expected {self.elements_per_vector} elements in top, got {len(top)}"
-        )
-        assert len(bottom) == self.elements_per_vector, (
-            f"Expected {self.elements_per_vector} elements in bottom, got {len(bottom)}"
-        )
+        assert (
+            len(top) == self.elements_per_vector
+        ), f"Expected {self.elements_per_vector} elements in top, got {len(top)}"
+        assert (
+            len(bottom) == self.elements_per_vector
+        ), f"Expected {self.elements_per_vector} elements in bottom, got {len(bottom)}"
 
         return VectorState(top=top, bottom=bottom)
 
@@ -1405,13 +1398,6 @@ class BitonicSuperVectorizer:
                 output_to_inputs[output_tuple] = set()
             output_to_inputs[output_tuple].add(input_tuple)
 
-        num_unique_outputs = len(output_to_inputs)
-        shared_outputs = {
-            out: inputs
-            for out, inputs in output_to_inputs.items()
-            if len(inputs) > 1
-        }
-
         # Phase 4: Create nodes from grouped gadgets
         nodes_by_parent: dict[tuple, list[SolutionNode]] = {}
         # Deduplicate: track one representative per unique output_state
@@ -1510,6 +1496,7 @@ class BitonicSuperVectorizer:
             natural_order=natural_order,
         )
 
+
 _worker_tar = None
 _worker_job_count = 0
 
@@ -1574,5 +1561,3 @@ def _validate_gadget_worker(job):
 
     metadata["worker_pid"] = os.getpid()
     return gadget_results, input_state, metadata, construction_time, solver_time
-
-

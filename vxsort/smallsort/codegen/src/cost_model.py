@@ -1,4 +1,5 @@
 """Cost model for AVX instructions based on CPU microarchitecture."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -132,7 +133,6 @@ class CostModel:
         return total_cost
 
 
-
 def load_costs_from_uops_info(cpu_model: str) -> Dict[str, InstructionCost]:
     """
     Load instruction costs from uops.info data.
@@ -182,5 +182,3 @@ def load_costs_from_uops_info(cpu_model: str) -> Dict[str, InstructionCost]:
     except Exception as e:
         print(f"Warning: Failed to load cost data from {cost_file}: {e}")
         return {}
-
-
