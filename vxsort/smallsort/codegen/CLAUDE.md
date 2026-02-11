@@ -11,6 +11,7 @@ The `vxsort/smallsort/codegen/` directory contains a Python-based super-optimize
 ## Build Commands
 
 ### C++ (Main Library)
+
 ```bash
 mkdir build && cd build
 export CC=clang CXX=clang++
@@ -29,6 +30,14 @@ uv run pytest                              # Run tests
 uv run ruff check .                        # Lint
 uv run python src/bitonic_compiler.py --depth-limit=3 --gadget-depth 1 # Full synthesis (limited depth for speed)
 ```
+
+### Post work-item checklist
+
+When you finish working on any given feature please ensure that you don't report success to the user before:
+
+- Running tests with `uv run pytest` and fixing test failures when needed
+- Running `uv run ruff check .` and fixing ruff failures
+- Running `uv run vulture` and inspecting the output, removing dead code that may have resulted from the work
 
 ## Codegen Architecture
 
