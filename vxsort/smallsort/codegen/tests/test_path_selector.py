@@ -5,9 +5,6 @@ from dataclasses import dataclass
 from path_selector import (
     PathSelector,
     PathSelectorConfig,
-    GadgetScore,
-    PathStep,
-    CompletePath,
     _is_control_vector_instruction,
     _count_control_vectors,
 )

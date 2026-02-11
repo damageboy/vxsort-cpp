@@ -21,7 +21,6 @@ def export_solutions_to_json(roots: list[SolutionNode], output_path: str):
           }
         }
     """
-    import json
 
     def gadget_to_dict(gadget: PermutationGadget) -> dict:
         return {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from utils import vector_machine, primitive_type
+from utils import width_dict
 from z3_avx import mm_shuffle_str, mm_shuffle2_str
 
 
@@ -154,7 +155,6 @@ class RegisterAllocator:
 
 def _format_control_vector(val: int, vm: vector_machine, dtype: primitive_type) -> str:
     """Format a 256/512-bit control vector as a list of elements."""
-    from utils import width_dict
 
     total_bytes = width_dict[vm]
     total_bits = total_bytes * 8
@@ -267,7 +267,6 @@ def _format_instruction(
         # Format control vector with correct element width
         if ctrl_element_width is not None:
             # Use the instruction's element width instead of the data type's width
-            from utils import width_dict, primitive_type as prim_type
 
             total_bits = width_dict[reg_allocator.vm] * 8
             num_elements = total_bits // ctrl_element_width
