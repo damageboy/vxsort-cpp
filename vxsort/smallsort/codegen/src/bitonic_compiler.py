@@ -53,6 +53,7 @@ def generate_bitonic_sorter(
     gadget_depth: int = 3,
     smt2_dump_dir: str | None = None,
     natural_order: bool = False,
+    max_gadget_solutions: int = 3,
 ):
     """
     Generate bitonic sorter with super-optimized permutation sequences.
@@ -67,6 +68,8 @@ def generate_bitonic_sorter(
         gadget_depth: Maximum instruction depth per gadget (1-3, default 3)
         smt2_dump_dir: Directory to dump SMT2 files if requested
         natural_order: If True, add final stage restoring natural element order for memory writeback
+        max_gadget_solutions: Number of smallest unique output states to enumerate per
+            gadget template. Higher values increase search diversity at the cost of speed. Default: 3.
 
     Returns:
         List of SolutionNode trees representing different optimized solutions
@@ -85,7 +88,10 @@ def generate_bitonic_sorter(
     # Synthesize all stages to build solution tree
     print("Synthesizing permutation gadgets...")
     solutions, all_stages_complete = super_opt.synthesize_all_stages(
-        depth_limit=depth_limit, gadget_depth=gadget_depth, natural_order=natural_order
+        depth_limit=depth_limit,
+        gadget_depth=gadget_depth,
+        natural_order=natural_order,
+        max_unique_outputs=max_gadget_solutions,
     )
 
     print(f"Found {len(solutions)} root solutions")
@@ -195,6 +201,13 @@ if __name__ == "__main__":
         default=False,
         help="Add final permutation stage to restore natural element order for memory writeback",
     )
+    parser.add_argument(
+        "--max-gadget-solutions",
+        type=int,
+        default=3,
+        help="Number of unique output states to enumerate per gadget template. "
+        "Higher values increase search diversity at the cost of speed (default: 3)",
+    )
 
     args = parser.parse_args()
 
@@ -217,4 +230,5 @@ if __name__ == "__main__":
         gadget_depth=args.gadget_depth + 1,  # +1 because range is exclusive
         smt2_dump_dir=smt2_dump_dir,
         natural_order=args.natural_order,
+        max_gadget_solutions=args.max_gadget_solutions,
     )

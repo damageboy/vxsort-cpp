@@ -20,6 +20,7 @@ from z3 import (
     Distinct,
     Or,
     And,
+    simplify,
 )
 
 try:
@@ -322,6 +323,7 @@ class GadgetSynthesizer:
         input_state: VectorState,
         target_pairs: list[tuple[int, int]],
         max_solutions: int = 1,
+        max_unique_outputs: int = 3,
         solver_callback: callable | None = None,
         allow_any_lane_order: bool = True,
     ) -> tuple[list[tuple[PermutationGadget, VectorState]], float, float]:
@@ -343,8 +345,11 @@ class GadgetSynthesizer:
 
         Args:
             max_solutions: Maximum number of solutions to return. Defaults to 1,
-                which uses Z3 Optimize with minimize for deterministic results.
+                which enumerates unique output states deterministically.
                 Values > 1 use Z3 Solver with enumeration (non-deterministic ordering).
+            max_unique_outputs: When max_solutions == 1, the number of smallest
+                unique output states to enumerate per template. Higher values
+                increase search diversity at the cost of speed. Default: 3.
             solver_callback: Optional callback receiving the Solver instance.
             allow_any_lane_order: When True (default), any target pair can land
                 in any lane and the output state is canonicalized (min to top,
@@ -480,32 +485,72 @@ class GadgetSynthesizer:
             return [(gadget, output_state)], construction_time, solver_time
 
         if max_solutions == 1:
-            # Use Optimize with minimize to get a deterministic (minimum)
-            # solution. Z3's Solver is non-deterministic across process
-            # invocations due to ASLR affecting internal pointer-based
-            # hashing. Optimize with minimize always returns the unique
-            # lexicographic minimum, making results reproducible.
-            opt = Optimize(ctx=ctx)
-            for assertion in solver.assertions():
-                opt.add(assertion)
-            for term in terms:
-                opt.minimize(term)
-            result = opt.check()
-            if result != sat:
-                solver_time = time.perf_counter() - solver_start
-                return [], construction_time, solver_time
-            model = opt.model()
-            gadget, output_state = self._extract_solution_from_model(
-                model,
-                top_output,
-                bottom_output,
-                symbolic_vars,
-                top_instructions_template,
-                bottom_instructions_template,
-                fixed_output_state=fixed_output_state,
-            )
+            # Find the K smallest unique output states for this template.
+            #
+            # Z3's Solver is non-deterministic across invocations (ASLR
+            # affects internal hashing). Using Optimize.minimize on immediates
+            # is deterministic but biases toward trivial permutations, collapsing
+            # many templates to the same output state and starving later stages.
+            #
+            # Instead, we iteratively find the K smallest unique OUTPUT STATES
+            # using Optimize.minimize(top_output, bottom_output) with output-
+            # blocking. Each iteration blocks previously found outputs and finds
+            # the next-smallest. This is deterministic (same K smallest outputs
+            # every run) and preserves diversity (different templates have
+            # different instruction semantics → different minimal outputs).
+            #
+            # For each unique output, we pin the output and minimize immediates
+            # to get a deterministic gadget.
+            #
+            # NOTE: Despite the parameter name, this may return up to K results
+            # to preserve search diversity across templates.
+            original_assertions = list(solver.assertions())
+            results = []
+            output_blocks = []
+
+            for _ in range(max_unique_outputs):
+                opt = Optimize(ctx=ctx)
+                for a in original_assertions:
+                    opt.add(a)
+                for block in output_blocks:
+                    opt.add(block)
+                opt.minimize(top_output)
+                opt.minimize(bottom_output)
+                if opt.check() != sat:
+                    break
+                model = opt.model()
+                top_val = simplify(model.eval(top_output))
+                bot_val = simplify(model.eval(bottom_output))
+
+                # Pin output state & minimize immediates for deterministic gadget
+                opt2 = Optimize(ctx=ctx)
+                for a in original_assertions:
+                    opt2.add(a)
+                opt2.add(top_output == top_val)
+                opt2.add(bottom_output == bot_val)
+                for term in terms:
+                    opt2.minimize(term)
+                if opt2.check() == sat:
+                    gadget, output_state = self._extract_solution_from_model(
+                        opt2.model(),
+                        top_output,
+                        bottom_output,
+                        symbolic_vars,
+                        top_instructions_template,
+                        bottom_instructions_template,
+                        fixed_output_state=fixed_output_state,
+                    )
+                    results.append((gadget, output_state))
+
+                # Block this output state for the next iteration
+                output_blocks.append(
+                    Or(top_output != top_val, bottom_output != bot_val)
+                )
+
+            # Sort by output state for deterministic ordering
+            results.sort(key=lambda x: x[1].as_tuple())
             solver_time = time.perf_counter() - solver_start
-            return [(gadget, output_state)], construction_time, solver_time
+            return results, construction_time, solver_time
 
         # Enumerate multiple solutions over symbolic variables
         results = []
@@ -1281,6 +1326,7 @@ class BitonicSuperVectorizer:
         depth_limit: int | None = None,
         gadget_depth: int = 3,
         natural_order: bool = False,
+        max_unique_outputs: int = 3,
     ) -> tuple[list[SolutionNode], bool]:
         """
         Recursively explore all stage transitions to build solution tree.
@@ -1291,6 +1337,8 @@ class BitonicSuperVectorizer:
             gadget_depth: Maximum instruction depth per gadget (1-3, default 3).
             natural_order: If True, append a final stage that restores natural
                 element order (1..N in top, N+1..2N in bottom) for memory writeback.
+            max_unique_outputs: Number of smallest unique output states to enumerate
+                per template for deterministic diversity. Default: 3.
 
         Returns:
             Tuple of (root nodes, all_stages_complete) where all_stages_complete
@@ -1320,6 +1368,7 @@ class BitonicSuperVectorizer:
             0,
             depth_limit,
             all_candidates,
+            max_unique_outputs=max_unique_outputs,
         )
 
         # Determine expected stages
@@ -1339,6 +1388,7 @@ class BitonicSuperVectorizer:
         stage_idx: int,
         depth_limit: int | None = None,
         all_candidates: list[tuple] | None = None,
+        max_unique_outputs: int = 3,
     ) -> dict[tuple, list[SolutionNode]]:
         """
         Build solution tree collecting all candidates for entire stage before validation.
@@ -1350,6 +1400,8 @@ class BitonicSuperVectorizer:
             depth_limit: Maximum stage depth to explore
             all_candidates: Pre-computed list of (top_seq, bottom_seq) instruction templates,
                            independent of stage/input state
+            max_unique_outputs: Number of smallest unique output states to enumerate
+                per template for deterministic diversity.
 
         Returns:
             Dictionary mapping parent_path to list of SolutionNodes for that path
@@ -1375,6 +1427,7 @@ class BitonicSuperVectorizer:
                 "input_state": input_state,
                 "parent_path": parent_path,
                 "stage_idx": stage_idx,
+                "max_unique_outputs": max_unique_outputs,
             }
             if (
                 self._natural_order_stage is not None
@@ -1502,6 +1555,7 @@ class BitonicSuperVectorizer:
                 stage_idx + 1,
                 depth_limit,
                 all_candidates,
+                max_unique_outputs=max_unique_outputs,
             )
 
             # Build lookup from output_state_tuple -> shared children list
@@ -1525,6 +1579,7 @@ class BitonicSuperVectorizer:
         depth_limit: int | None = None,
         gadget_depth: int = 3,
         natural_order: bool = False,
+        max_unique_outputs: int = 3,
     ) -> tuple[list[SolutionNode], bool]:
         """Entry point: builds solution tree for all stages.
 
@@ -1532,6 +1587,8 @@ class BitonicSuperVectorizer:
             depth_limit: Maximum stage depth to explore (inclusive). If None, all stages are explored.
             gadget_depth: Maximum instruction depth per gadget (1-3, default 3).
             natural_order: If True, append a final stage restoring natural element order.
+            max_unique_outputs: Number of smallest unique output states to enumerate
+                per template for deterministic diversity. Default: 3.
 
         Returns:
             Tuple of (root nodes, all_stages_complete) where all_stages_complete
@@ -1541,6 +1598,7 @@ class BitonicSuperVectorizer:
             depth_limit=depth_limit,
             gadget_depth=gadget_depth,
             natural_order=natural_order,
+            max_unique_outputs=max_unique_outputs,
         )
 
 
@@ -1590,6 +1648,7 @@ def _validate_gadget_worker(job):
         _worker_tar.fileobj.flush()
 
     allow_any_lane_order = metadata.get("allow_any_lane_order", True)
+    max_unique_outputs = metadata.get("max_unique_outputs", 3)
 
     gadget_results, construction_time, solver_time = (
         synthesizer.synthesize_gadget_with_symbolic(
@@ -1598,6 +1657,7 @@ def _validate_gadget_worker(job):
             input_state,
             target_pairs,
             max_solutions=1,
+            max_unique_outputs=max_unique_outputs,
             solver_callback=dump_smt2_to_tar,
             allow_any_lane_order=allow_any_lane_order,
         )
