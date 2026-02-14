@@ -275,6 +275,35 @@ class GadgetSynthesizer:
             # Align operations
             intrinsics["_mm256_alignr_epi64"] = z3_avx._mm256_alignr_epi64
 
+        # For AVX512 i64, we need ZMM (512-bit) operations on 64-bit elements
+        if self.vm == vector_machine.AVX512 and self.prim_type == primitive_type.i64:
+            # Unmasked single-input
+            intrinsics["_mm512_permutexvar_epi64"] = z3_avx._mm512_permutexvar_epi64
+            intrinsics["_mm512_permute_pd"] = z3_avx._mm512_permute_pd
+            intrinsics["_mm512_permutevar_pd"] = z3_avx._mm512_permutevar_pd
+            # Masked single-input
+            intrinsics["_mm512_mask_permutexvar_epi64"] = (
+                z3_avx._mm512_mask_permutexvar_epi64
+            )
+            intrinsics["_mm512_mask_permute_pd"] = z3_avx._mm512_mask_permute_pd
+            intrinsics["_mm512_mask_permutevar_pd"] = z3_avx._mm512_mask_permutevar_pd
+            # Unmasked dual-input
+            intrinsics["_mm512_permutex2var_epi64"] = z3_avx._mm512_permutex2var_epi64
+            intrinsics["_mm512_shuffle_pd"] = z3_avx._mm512_shuffle_pd
+            intrinsics["_mm512_unpacklo_epi64"] = z3_avx._mm512_unpacklo_epi64
+            intrinsics["_mm512_unpackhi_epi64"] = z3_avx._mm512_unpackhi_epi64
+            intrinsics["_mm512_shuffle_i32x4"] = z3_avx._mm512_shuffle_i32x4
+            intrinsics["_mm512_alignr_epi64"] = z3_avx._mm512_alignr_epi64
+            # Masked dual-input
+            intrinsics["_mm512_mask_permutex2var_epi64"] = (
+                z3_avx._mm512_mask_permutex2var_epi64
+            )
+            intrinsics["_mm512_mask_shuffle_pd"] = z3_avx._mm512_mask_shuffle_pd
+            intrinsics["_mm512_mask_unpacklo_epi64"] = z3_avx._mm512_mask_unpacklo_epi64
+            intrinsics["_mm512_mask_unpackhi_epi64"] = z3_avx._mm512_mask_unpackhi_epi64
+            intrinsics["_mm512_mask_shuffle_i32x4"] = z3_avx._mm512_mask_shuffle_i32x4
+            intrinsics["_mm512_mask_alignr_epi64"] = z3_avx._mm512_mask_alignr_epi64
+
         return intrinsics
 
     def _create_input_registers(
@@ -1346,6 +1375,76 @@ class GadgetSynthesizer:
 
             return [permute_pd, permute4x64, permutexvar, permutevar_pd]
 
+        if self.vm == vector_machine.AVX512 and self.prim_type == primitive_type.i64:
+            input_reg = reg_name
+            unique_id = id(input_reg)
+
+            # --- Unmasked ---
+            # Cross-lane variable permute (most powerful)
+            permutexvar = InstructionSpec(
+                "_mm512_permutexvar_epi64",
+                {
+                    "a": input_reg,
+                    "op_idx": SymbolicPlaceholder(f"ctrl_permutexvar_{unique_id}", 512),
+                },
+            )
+            # In-lane permute with immediate
+            permute_pd = InstructionSpec(
+                "_mm512_permute_pd",
+                {
+                    "a": input_reg,
+                    "imm8": SymbolicPlaceholder(f"imm8_permute_pd_{unique_id}", 8),
+                },
+            )
+            # In-lane variable permute
+            permutevar_pd = InstructionSpec(
+                "_mm512_permutevar_pd",
+                {
+                    "a": input_reg,
+                    "b": SymbolicPlaceholder(f"ctrl_permutevar_pd_{unique_id}", 512),
+                },
+            )
+
+            # --- Masked ---
+            mask_permutexvar = InstructionSpec(
+                "_mm512_mask_permutexvar_epi64",
+                {
+                    "src": input_reg,
+                    "k": SymbolicPlaceholder(f"k_mask_permutexvar_{unique_id}", 8),
+                    "op_idx": SymbolicPlaceholder(
+                        f"ctrl_m_permutexvar_{unique_id}", 512
+                    ),
+                    "a": input_reg,
+                },
+            )
+            mask_permute_pd = InstructionSpec(
+                "_mm512_mask_permute_pd",
+                {
+                    "src": input_reg,
+                    "k": SymbolicPlaceholder(f"k_mask_permute_pd_{unique_id}", 8),
+                    "a": input_reg,
+                    "imm8": SymbolicPlaceholder(f"imm8_m_permute_pd_{unique_id}", 8),
+                },
+            )
+            mask_permutevar_pd = InstructionSpec(
+                "_mm512_mask_permutevar_pd",
+                {
+                    "src": input_reg,
+                    "k": SymbolicPlaceholder(f"k_mask_permutevar_pd_{unique_id}", 8),
+                    "a": input_reg,
+                    "b": SymbolicPlaceholder(f"ctrl_m_permutevar_pd_{unique_id}", 512),
+                },
+            )
+
+            return [
+                permutexvar,
+                permute_pd,
+                permutevar_pd,
+                mask_permutexvar,
+                mask_permute_pd,
+                mask_permutevar_pd,
+            ]
+
         raise NotImplementedError(
             f"Single-input instructions not implemented for {self.vm} and {self.prim_type}"
         )
@@ -1474,6 +1573,130 @@ class GadgetSynthesizer:
             )
 
             return [shuffle_pd, unpacklo, unpackhi, permute2x128, blend_pd, alignr]
+
+        if self.vm == vector_machine.AVX512 and self.prim_type == primitive_type.i64:
+            reg1 = reg1_name
+            reg2 = reg2_name
+            unique_id = f"{id(reg1)}_{id(reg2)}"
+
+            # --- Unmasked ---
+            # Two-source variable permute (most powerful AVX512 instruction)
+            permutex2var = InstructionSpec(
+                "_mm512_permutex2var_epi64",
+                {
+                    "a": reg1,
+                    "op_idx": SymbolicPlaceholder(
+                        f"ctrl_permutex2var_{unique_id}", 512
+                    ),
+                    "b": reg2,
+                },
+            )
+            # Shuffle pd within 128-bit lanes
+            shuffle_pd = InstructionSpec(
+                "_mm512_shuffle_pd",
+                {
+                    "a": reg1,
+                    "b": reg2,
+                    "imm8": SymbolicPlaceholder(f"imm8_shuffle_pd_{unique_id}", 8),
+                },
+            )
+            # Unpack low/high
+            unpacklo = InstructionSpec("_mm512_unpacklo_epi64", {"a": reg1, "b": reg2})
+            unpackhi = InstructionSpec("_mm512_unpackhi_epi64", {"a": reg1, "b": reg2})
+            # 128-bit lane shuffle
+            shuffle_i32x4 = InstructionSpec(
+                "_mm512_shuffle_i32x4",
+                {
+                    "a": reg1,
+                    "b": reg2,
+                    "imm8": SymbolicPlaceholder(f"imm8_shuf_i32x4_{unique_id}", 8),
+                },
+            )
+            # Align right
+            alignr = InstructionSpec(
+                "_mm512_alignr_epi64",
+                {
+                    "a": reg1,
+                    "b": reg2,
+                    "imm8": SymbolicPlaceholder(f"imm8_alignr_{unique_id}", 8),
+                },
+            )
+
+            # --- Masked ---
+            mask_permutex2var = InstructionSpec(
+                "_mm512_mask_permutex2var_epi64",
+                {
+                    "a": reg1,
+                    "k": SymbolicPlaceholder(f"k_mask_permutex2var_{unique_id}", 8),
+                    "op_idx": SymbolicPlaceholder(
+                        f"ctrl_m_permutex2var_{unique_id}", 512
+                    ),
+                    "b": reg2,
+                },
+            )
+            mask_shuffle_pd = InstructionSpec(
+                "_mm512_mask_shuffle_pd",
+                {
+                    "src": reg1,
+                    "k": SymbolicPlaceholder(f"k_mask_shuffle_pd_{unique_id}", 8),
+                    "a": reg1,
+                    "b": reg2,
+                    "imm8": SymbolicPlaceholder(f"imm8_m_shuffle_pd_{unique_id}", 8),
+                },
+            )
+            mask_unpacklo = InstructionSpec(
+                "_mm512_mask_unpacklo_epi64",
+                {
+                    "src": reg1,
+                    "k": SymbolicPlaceholder(f"k_mask_unpacklo_{unique_id}", 8),
+                    "a": reg1,
+                    "b": reg2,
+                },
+            )
+            mask_unpackhi = InstructionSpec(
+                "_mm512_mask_unpackhi_epi64",
+                {
+                    "src": reg1,
+                    "k": SymbolicPlaceholder(f"k_mask_unpackhi_{unique_id}", 8),
+                    "a": reg1,
+                    "b": reg2,
+                },
+            )
+            mask_shuffle_i32x4 = InstructionSpec(
+                "_mm512_mask_shuffle_i32x4",
+                {
+                    "src": reg1,
+                    "k": SymbolicPlaceholder(f"k_mask_shuf_i32x4_{unique_id}", 8),
+                    "a": reg1,
+                    "b": reg2,
+                    "imm8": SymbolicPlaceholder(f"imm8_m_shuf_i32x4_{unique_id}", 8),
+                },
+            )
+            mask_alignr = InstructionSpec(
+                "_mm512_mask_alignr_epi64",
+                {
+                    "src": reg1,
+                    "k": SymbolicPlaceholder(f"k_mask_alignr_{unique_id}", 8),
+                    "a": reg1,
+                    "b": reg2,
+                    "imm8": SymbolicPlaceholder(f"imm8_m_alignr_{unique_id}", 8),
+                },
+            )
+
+            return [
+                permutex2var,
+                shuffle_pd,
+                unpacklo,
+                unpackhi,
+                shuffle_i32x4,
+                alignr,
+                mask_permutex2var,
+                mask_shuffle_pd,
+                mask_unpacklo,
+                mask_unpackhi,
+                mask_shuffle_i32x4,
+                mask_alignr,
+            ]
 
         raise NotImplementedError(
             f"Dual-input instructions not implemented for {self.vm} and {self.prim_type}"
