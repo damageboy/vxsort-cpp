@@ -377,6 +377,8 @@ class GadgetSynthesizer:
                     if isinstance(value, SymbolicPlaceholder):
                         if value.size == 8:
                             actual_val = BitVec(value.name, 8, ctx=ctx)
+                        elif value.size == 16:
+                            actual_val = BitVec(value.name, 16, ctx=ctx)
                         elif value.size == 256:
                             actual_val = z3_avx.ymm_reg(value.name, ctx=ctx)
                         elif value.size == 512:
@@ -987,8 +989,67 @@ class GadgetSynthesizer:
                         key=key,
                     )
 
-            # Determine how to call the intrinsic based on its signature
-            if "a" in args and "op_idx" in args:
+            # Determine how to call the intrinsic based on its signature.
+            # AVX512 masked patterns (most specific) come first, then AVX2 patterns.
+            if (
+                "k" in args
+                and "src" in args
+                and "op_idx" in args
+                and "a" in args
+                and "b" not in args
+            ):
+                # Masked single-input with control vector
+                # e.g., _mm512_mask_permutexvar_epi64(src, k, op_idx, a)
+                current_reg = intrinsic(
+                    args["src"], args["k"], args["op_idx"], args["a"]
+                )
+            elif (
+                "k" in args
+                and "src" in args
+                and "a" in args
+                and "b" in args
+                and "imm8" in args
+            ):
+                # Masked dual-input with immediate
+                # e.g., _mm512_mask_shuffle_pd(src, k, a, b, imm8)
+                current_reg = intrinsic(
+                    args["src"], args["k"], args["a"], args["b"], args["imm8"]
+                )
+            elif (
+                "k" in args
+                and "src" in args
+                and "a" in args
+                and "imm8" in args
+                and "b" not in args
+            ):
+                # Masked single-input with immediate
+                # e.g., _mm512_mask_permute_pd(src, k, a, imm8)
+                current_reg = intrinsic(args["src"], args["k"], args["a"], args["imm8"])
+            elif (
+                "k" in args
+                and "src" in args
+                and "a" in args
+                and "b" in args
+                and "imm8" not in args
+            ):
+                # Masked dual-input without immediate
+                # e.g., _mm512_mask_unpacklo_epi64(src, k, a, b)
+                current_reg = intrinsic(args["src"], args["k"], args["a"], args["b"])
+            elif (
+                "k" in args
+                and "a" in args
+                and "op_idx" in args
+                and "b" in args
+                and "src" not in args
+            ):
+                # Masked permutex2var: a is merge source
+                # e.g., _mm512_mask_permutex2var_epi64(a, k, op_idx, b)
+                current_reg = intrinsic(args["a"], args["k"], args["op_idx"], args["b"])
+            elif "a" in args and "op_idx" in args and "b" in args and "k" not in args:
+                # Unmasked permutex2var
+                # e.g., _mm512_permutex2var_epi64(a, op_idx, b)
+                current_reg = intrinsic(args["a"], args["op_idx"], args["b"])
+            elif "a" in args and "op_idx" in args and "b" not in args:
                 # Single source with control index (e.g., _mm256_permutexvar_epi32)
                 current_reg = intrinsic(args["a"], args["op_idx"])
             elif "a" in args and "imm8" in args and "b" not in args:
