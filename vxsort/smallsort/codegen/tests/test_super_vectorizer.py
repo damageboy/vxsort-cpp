@@ -606,7 +606,7 @@ def test_asm_exporter_register_mapping():
 def test_avx512_i64_synthesis_depth1():
     """Test that AVX512 i64 synthesis finds solutions for first stage at depth 1."""
     super_opt = BitonicSuperVectorizer(2, primitive_type.i64, vector_machine.AVX512)
-    solutions, all_complete = super_opt.build_solution_tree(
+    solutions, _ = super_opt.build_solution_tree(
         depth_limit=1, gadget_depth=2, natural_order=False, max_unique_outputs=1
     )
     assert len(solutions) > 0, "Should find at least one solution for AVX512 i64"
