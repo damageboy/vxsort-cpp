@@ -3,7 +3,9 @@ import json
 from bitonic_super_optimizer import PermutationGadget, SolutionNode
 
 
-def export_solutions_to_json(roots: list[SolutionNode], output_path: str):
+def export_solutions_to_json(
+    roots: list[SolutionNode], output_path: str, *, natural_order: bool = False
+):
     """Generate JSON with all solutions and costs.
 
     The solution structure is a DAG (children are shared across nodes
@@ -68,6 +70,7 @@ def export_solutions_to_json(roots: list[SolutionNode], output_path: str):
     root_ids = [register_node(root) for root in roots]
 
     output = {
+        "natural_order": natural_order,
         "roots": root_ids,
         "nodes": nodes_dict,
     }

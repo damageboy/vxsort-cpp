@@ -394,6 +394,7 @@ def export_solutions_to_asm(
     vm: vector_machine,
     output_path: str,
     selected_paths=None,
+    natural_order: bool = False,
 ):
     """Export solutions as readable assembly code.
 
@@ -441,6 +442,7 @@ def export_solutions_to_asm(
             print(f"; Architecture: {vm.name}")
             print(f"; Data Type: {dtype.name}")
             print(f"; Number of vectors: {num_vecs}")
+            print(f"; Natural order: {'yes' if natural_order else 'no'}")
             print(f"; Root solutions: {len(solutions)}")
             if truncated:
                 print(f"; NOTE: Showing {len(all_paths)} paths (may be capped)")

@@ -119,9 +119,12 @@ def generate_bitonic_sorter(
             print(f"Kept {len(solutions)} roots after pruning")
 
     # Export solutions in the requested format(s)
+    order_suffix = "_natural" if natural_order else ""
     for output_format in output_formats:
         if output_format == "asm":
-            output_path = f"bitonic_solutions_{num_vecs}x{vm.name}_{type.name}.asm"
+            output_path = (
+                f"bitonic_solutions_{num_vecs}x{vm.name}_{type.name}{order_suffix}.asm"
+            )
             export_solutions_to_asm(
                 solutions,
                 num_vecs,
@@ -129,10 +132,15 @@ def generate_bitonic_sorter(
                 vm,
                 output_path,
                 selected_paths=selected_paths,
+                natural_order=natural_order,
             )
         elif output_format == "json":
-            output_path = f"bitonic_solutions_{num_vecs}x{vm.name}_{type.name}.json"
-            export_solutions_to_json(solutions, output_path)
+            output_path = (
+                f"bitonic_solutions_{num_vecs}x{vm.name}_{type.name}{order_suffix}.json"
+            )
+            export_solutions_to_json(
+                solutions, output_path, natural_order=natural_order
+            )
         else:
             print(f"Warning: Unknown output format '{output_format}', skipping")
 
