@@ -36,6 +36,8 @@ uv run python src/bitonic_compiler.py --depth-limit=3 --gadget-depth 1 # Full sy
 When you finish working on any given feature please ensure that you don't report success to the user before:
 
 - Running tests with `uv run pytest` and fixing test failures when needed
+- In general, and specifically if tests are added, it is important to ensure the test suite
+  doesn't run for more than 1 minute of wall clock
 - Running `uv run ruff check .` and fixing ruff failures
 - Running `uv run vulture` and inspecting the output, removing dead code that may have resulted from the work
 
@@ -62,7 +64,3 @@ The super-optimizer generates AVX permutation sequences for bitonic sort stages:
 - `bitonic_solutions_*.json` - Solution database
 - `bitonic_solutions_*.asm` - Annotated x86-64 assembly
 - `vxsort/smallsort/avx2/*.generated.h` - C++ headers used by the main library
-
-## Testing
-
-C++ tests use Google Test, organized by ISA and data type (signed/unsigned/float). Python tests use pytest with the main test file being `test_super_vectorizer.py`.
