@@ -1555,6 +1555,31 @@ def _mm512_shuffle_i32x4(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
     return simplify(Concat(lanes[::-1]))
 
 
+def _mm512_mask_shuffle_i32x4(
+    src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int
+):
+    """
+    Shuffle 128-bit lanes from a and b using imm8, with merge masking.
+
+    Implements __m512i _mm512_mask_shuffle_i32x4(__m512i src, __mmask16 k,
+    __m512i a, __m512i b, const int imm8)
+
+    Elements are copied from src when the corresponding mask bit is not set.
+    """
+    # First do the unmasked shuffle
+    unmasked = _mm512_shuffle_i32x4(a, b, imm8)
+
+    # Apply merge mask element-wise (32-bit elements, 16 total)
+    elements = [None] * 16
+    for j in range(16):
+        lo = j * 32
+        hi = lo + 31
+        mask_bit = Extract(j, j, k)
+        elements[j] = If(mask_bit == 1, Extract(hi, lo, unmasked), Extract(hi, lo, src))
+
+    return simplify(Concat(elements[::-1]))
+
+
 ##
 # 2xInput -> 1xOutput, blend hi/lo half of each 128b lane
 # - vpunpckldq:

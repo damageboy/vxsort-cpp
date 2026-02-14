@@ -28,7 +28,7 @@ from z3_avx import _mm512_shuffle_pd
 from z3_avx import _mm256_permute_pd
 from z3_avx import _mm512_permute_pd
 from z3_avx import _mm256_permute2x128_si256
-from z3_avx import _mm512_shuffle_i32x4
+from z3_avx import _mm512_shuffle_i32x4, _mm512_mask_shuffle_i32x4
 from z3_avx import _mm256_unpacklo_epi32, _mm256_unpackhi_epi32
 from z3_avx import _mm512_unpacklo_epi32, _mm512_unpackhi_epi32
 from z3_avx import _mm512_mask_unpacklo_epi32, _mm512_mask_unpackhi_epi32
@@ -3321,6 +3321,81 @@ class TestMaskShufflePs:
         assert (
             result == unsat
         ), f"Z3 found a counterexample for partial mask: {s.model() if result == sat else 'No model'}"
+
+
+class TestMaskShuffleI32x4:
+    """Tests for _mm512_mask_shuffle_i32x4"""
+
+    def test_mask_all_ones_equals_unmasked(self):
+        """With all-ones mask, result should equal unmasked shuffle_i32x4."""
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+
+        a = zmm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
+        b = zmm_reg_with_unique_values("b", s, bits=32, ctx=ctx)
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        k = BitVecVal(0xFFFF, 16)
+        imm8 = BitVecVal(null_shuffle_i32x4_imm8, 8, ctx=ctx)
+
+        masked = _mm512_mask_shuffle_i32x4(src, k, a, b, imm8)
+        unmasked = _mm512_shuffle_i32x4(a, b, imm8)
+
+        s.add(masked != unmasked)
+        result = s.check()
+        assert result == unsat, (
+            f"With all-ones mask, masked should equal unmasked: "
+            f"{s.model() if result == sat else 'No model'}"
+        )
+
+    def test_mask_all_zeros_preserves_src(self):
+        """With all-zeros mask, all elements should come from src."""
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+
+        a = zmm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
+        b = zmm_reg_with_unique_values("b", s, bits=32, ctx=ctx)
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        k = BitVecVal(0x0000, 16)
+
+        result_reg = _mm512_mask_shuffle_i32x4(src, k, a, b, null_shuffle_i32x4_imm8)
+
+        s.add(result_reg != src)
+        result = s.check()
+        assert result == unsat, (
+            f"With all-zeros mask, result should equal src: "
+            f"{s.model() if result == sat else 'No model'}"
+        )
+
+    def test_partial_mask(self):
+        """With partial mask 0x00FF, lower 8 elements from shuffle, upper 8 from src."""
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+
+        a = zmm_reg_with_unique_values("a", s, bits=32, ctx=ctx)
+        b = zmm_reg_with_unique_values("b", s, bits=32, ctx=ctx)
+        src = zmm_reg_with_unique_values("src", s, bits=32, ctx=ctx)
+        k = BitVecVal(0x00FF, 16)
+
+        masked = _mm512_mask_shuffle_i32x4(src, k, a, b, null_shuffle_i32x4_imm8)
+        unmasked = _mm512_shuffle_i32x4(a, b, null_shuffle_i32x4_imm8)
+
+        # Lower 256 bits (elements 0-7) should match unmasked
+        s.add(Extract(255, 0, masked) != Extract(255, 0, unmasked))
+        result = s.check()
+        assert result == unsat, "Lower 8 elements should come from shuffle result"
+
+        # Upper 256 bits (elements 8-15) should match src
+        s2 = Solver(ctx=ctx)
+        s2.add(s.assertions())  # reuse variable constraints
+        # Remove previous assertion, add new one
+        s2 = Solver(ctx=ctx)
+        a2 = zmm_reg_with_unique_values("a2", s2, bits=32, ctx=ctx)
+        b2 = zmm_reg_with_unique_values("b2", s2, bits=32, ctx=ctx)
+        src2 = zmm_reg_with_unique_values("src2", s2, bits=32, ctx=ctx)
+        masked2 = _mm512_mask_shuffle_i32x4(src2, k, a2, b2, null_shuffle_i32x4_imm8)
+        s2.add(Extract(511, 256, masked2) != Extract(511, 256, src2))
+        result2 = s2.check()
+        assert result2 == unsat, "Upper 8 elements should come from src"
 
 
 class TestMaskShufflePd:
