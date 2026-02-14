@@ -43,6 +43,42 @@ def _is_masked_intrinsic(intrinsic_name: str) -> bool:
     return "_mask_" in intrinsic_name
 
 
+def _get_compare_swap_mnemonics(
+    dtype: primitive_type, vm: vector_machine
+) -> tuple[str, str, str] | None:
+    """Get (mov, min, max) assembly mnemonics for a compare-swap operation.
+
+    Returns None for AVX2 i64/u64 which need emulation (no native min/max).
+
+    Note: primitive_type uses Python Enum with duplicate values, so i32/u32/f32
+    are aliases (same object), as are i64/u64/f64 and i16/u16. We use signed
+    integer semantics as the default since that's the primary use case.
+    """
+    element_size = dtype.value[0]
+
+    # AVX2 64-bit: no native min/max, needs cmpgt+blend emulation
+    if vm == vector_machine.AVX2 and element_size == 8:
+        return None
+
+    # mov mnemonic depends on element size and ISA
+    if vm == vector_machine.AVX512 and element_size == 8:
+        mov = "vmovdqa64"
+    elif vm == vector_machine.AVX512:
+        mov = "vmovdqa32"
+    else:
+        mov = "vmovdqa"
+
+    # min/max mnemonics by element size (signed integer semantics)
+    minmax_by_size = {
+        2: ("vpminsw", "vpmaxsw"),
+        4: ("vpminsd", "vpmaxsd"),
+        8: ("vpminsq", "vpmaxsq"),
+    }
+
+    min_mn, max_mn = minmax_by_size[element_size]
+    return (mov, min_mn, max_mn)
+
+
 class RegisterAllocator:
     """Manages register allocation for assembly output."""
 
@@ -348,11 +384,67 @@ def _format_vector_state_as_comment(state, prefix: str = "") -> str:
     return "\n".join(comment_lines)
 
 
+def _emit_compare_swap(
+    reg_allocator: RegisterAllocator,
+    top_reg: str,
+    bottom_reg: str,
+    prefix: str = "",
+):
+    """Emit min/max compare-swap instructions between top and bottom vectors.
+
+    For types with native min/max (all except AVX2 64-bit):
+        mov  tmp, top
+        min  top, top, bottom
+        max  bottom, bottom, tmp
+
+    For AVX2 64-bit (no native min/max):
+        mov       tmp1, top
+        cmpgt     tmp2, top, bottom      (signed comparison)
+        blendv    top, top, bottom, tmp2
+        blendv    bottom, bottom, tmp1, tmp2
+
+    Note: primitive_type aliases (i64/u64/f64 are same enum member) make it
+    impossible to distinguish signed vs unsigned at this level. Uses signed
+    comparison (vpcmpgtq) for the AVX2 64-bit emulation path.
+    """
+    dtype = reg_allocator.dtype
+    vm = reg_allocator.vm
+    mnemonics = _get_compare_swap_mnemonics(dtype, vm)
+
+    if mnemonics is not None:
+        # Native min/max path
+        mov, min_mn, max_mn = mnemonics
+        tmp = reg_allocator.allocate_temp()
+        print(f"{prefix}; Compare-swap (min/max):")
+        print(f"{prefix}    {mov:20s} {tmp}, {top_reg}")
+        print(f"{prefix}    {min_mn:20s} {top_reg}, {top_reg}, {bottom_reg}")
+        print(f"{prefix}    {max_mn:20s} {bottom_reg}, {bottom_reg}, {tmp}")
+    else:
+        # AVX2 64-bit emulation: cmpgt + blendv (signed comparison)
+        tmp1 = reg_allocator.allocate_temp()
+        tmp2 = reg_allocator.allocate_temp()
+        print(
+            f"{prefix}; Compare-swap "
+            f"(min/max via cmpgt+blend, no native 64-bit min/max on AVX2):"
+        )
+        print(f"{prefix}    {'vmovdqa':20s} {tmp1}, {top_reg}")
+        print(f"{prefix}    {'vpcmpgtq':20s} {tmp2}, {top_reg}, {bottom_reg}")
+        print(
+            f"{prefix}    {'vblendvpd':20s} "
+            f"{top_reg}, {top_reg}, {bottom_reg}, {tmp2}"
+        )
+        print(
+            f"{prefix}    {'vblendvpd':20s} "
+            f"{bottom_reg}, {bottom_reg}, {tmp1}, {tmp2}"
+        )
+
+
 def _print_solution_step_as_assembly(
     step,
     reg_allocator: RegisterAllocator,
     cumulative_cost: float = 0.0,
     indent: int = 0,
+    emit_compare_swap: bool = True,
 ):
     """Print a single PathStep as assembly code.
 
@@ -361,6 +453,8 @@ def _print_solution_step_as_assembly(
         reg_allocator: RegisterAllocator for register management
         cumulative_cost: Running total cost up to this step
         indent: Indentation level for nested output
+        emit_compare_swap: Whether to emit min/max compare-swap after permutations.
+            Set to False for the natural-order stage (pure reorder, no comparison).
     """
     prefix = "  " * indent
 
@@ -395,6 +489,10 @@ def _print_solution_step_as_assembly(
                 inst, reg_allocator, top_reg, bottom_reg, is_top=False
             )
             print(f"{prefix}{asm_line}")
+
+    # Emit compare-swap (min/max) after permutation instructions
+    if emit_compare_swap and reg_allocator.num_vecs > 1 and bottom_reg:
+        _emit_compare_swap(reg_allocator, top_reg, bottom_reg, prefix)
 
     # Print output state
     print(f"{prefix}; Output State:")
@@ -460,7 +558,7 @@ def export_solutions_to_asm(
         old_stdout = sys.stdout
         sys.stdout = f
         try:
-            print("; Bitonic Sort Assembly Output")
+            print("; Bitonic Sort Assembly Output (with min/max compare-swap)")
             print(f"; Architecture: {vm.name}")
             print(f"; Data Type: {dtype.name}")
             print(f"; Number of vectors: {num_vecs}")
@@ -502,10 +600,17 @@ def export_solutions_to_asm(
 
                 # Print each step in the path, accumulating cost
                 running_cost = 0.0
-                for step in path.steps:
+                last_idx = len(path.steps) - 1
+                for step_idx, step in enumerate(path.steps):
                     running_cost += step.score.total_score
+                    # Skip compare-swap on the final natural-order stage
+                    # (it's a pure reorder, not a comparison stage)
+                    is_natural_order_step = natural_order and step_idx == last_idx
                     _print_solution_step_as_assembly(
-                        step, reg_allocator, cumulative_cost=running_cost
+                        step,
+                        reg_allocator,
+                        cumulative_cost=running_cost,
+                        emit_compare_swap=not is_natural_order_step,
                     )
 
                 print("=" * 80)
