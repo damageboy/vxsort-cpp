@@ -613,6 +613,25 @@ def test_avx512_i64_synthesis_depth1():
     print(f"Found {len(solutions)} root solutions for AVX512 i64")
 
 
+def test_avx512_i32_synthesis_depth1():
+    """Test that AVX512 i32 synthesis infrastructure works (null gadget for first stage).
+
+    Full depth-2 synthesis is too slow for CI (~4 min for 16-element vectors).
+    The parametrized test_first_stage_requires_no_permutation covers i32+AVX512.
+    """
+    super_opt = BitonicSuperVectorizer(2, primitive_type.i32, vector_machine.AVX512)
+    assert super_opt.elements_per_vector == 16, "AVX512 i32 should have 16 elements"
+    assert super_opt.total_elements == 32, "Should have 32 total elements"
+    # Verify intrinsics are registered
+    assert len(super_opt.synthesizer.available_intrinsics) > 0
+    # Verify single and dual templates enumerate without error
+    single = super_opt.synthesizer._enumerate_single_input_instructions("test")
+    dual = super_opt.synthesizer._enumerate_dual_input_instructions("top", "bottom")
+    assert len(single) == 6, f"Expected 6 single-input templates, got {len(single)}"
+    assert len(dual) == 12, f"Expected 12 dual-input templates, got {len(dual)}"
+    print(f"AVX512 i32: {len(single)} single + {len(dual)} dual templates registered")
+
+
 def run_all_tests():
     """Run all tests."""
     print("=" * 60)
