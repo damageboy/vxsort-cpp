@@ -304,6 +304,35 @@ class GadgetSynthesizer:
             intrinsics["_mm512_mask_shuffle_i32x4"] = z3_avx._mm512_mask_shuffle_i32x4
             intrinsics["_mm512_mask_alignr_epi64"] = z3_avx._mm512_mask_alignr_epi64
 
+        # For AVX512 i32, we need ZMM (512-bit) operations on 32-bit elements
+        if self.vm == vector_machine.AVX512 and self.prim_type == primitive_type.i32:
+            # Unmasked single-input
+            intrinsics["_mm512_permutexvar_epi32"] = z3_avx._mm512_permutexvar_epi32
+            intrinsics["_mm512_permute_ps"] = z3_avx._mm512_permute_ps
+            intrinsics["_mm512_permutevar_ps"] = z3_avx._mm512_permutevar_ps
+            # Masked single-input
+            intrinsics["_mm512_mask_permutexvar_epi32"] = (
+                z3_avx._mm512_mask_permutexvar_epi32
+            )
+            intrinsics["_mm512_mask_permute_ps"] = z3_avx._mm512_mask_permute_ps
+            intrinsics["_mm512_mask_permutevar_ps"] = z3_avx._mm512_mask_permutevar_ps
+            # Unmasked dual-input
+            intrinsics["_mm512_permutex2var_epi32"] = z3_avx._mm512_permutex2var_epi32
+            intrinsics["_mm512_shuffle_ps"] = z3_avx._mm512_shuffle_ps
+            intrinsics["_mm512_unpacklo_epi32"] = z3_avx._mm512_unpacklo_epi32
+            intrinsics["_mm512_unpackhi_epi32"] = z3_avx._mm512_unpackhi_epi32
+            intrinsics["_mm512_shuffle_i32x4"] = z3_avx._mm512_shuffle_i32x4
+            intrinsics["_mm512_alignr_epi32"] = z3_avx._mm512_alignr_epi32
+            # Masked dual-input
+            intrinsics["_mm512_mask_permutex2var_epi32"] = (
+                z3_avx._mm512_mask_permutex2var_epi32
+            )
+            intrinsics["_mm512_mask_shuffle_ps"] = z3_avx._mm512_mask_shuffle_ps
+            intrinsics["_mm512_mask_unpacklo_epi32"] = z3_avx._mm512_mask_unpacklo_epi32
+            intrinsics["_mm512_mask_unpackhi_epi32"] = z3_avx._mm512_mask_unpackhi_epi32
+            intrinsics["_mm512_mask_shuffle_i32x4"] = z3_avx._mm512_mask_shuffle_i32x4
+            intrinsics["_mm512_mask_alignr_epi32"] = z3_avx._mm512_mask_alignr_epi32
+
         return intrinsics
 
     def _create_input_registers(
@@ -1445,6 +1474,73 @@ class GadgetSynthesizer:
                 mask_permutevar_pd,
             ]
 
+        if self.vm == vector_machine.AVX512 and self.prim_type == primitive_type.i32:
+            input_reg = reg_name
+            unique_id = id(input_reg)
+
+            # --- Unmasked ---
+            permutexvar = InstructionSpec(
+                "_mm512_permutexvar_epi32",
+                {
+                    "a": input_reg,
+                    "op_idx": SymbolicPlaceholder(f"ctrl_permutexvar_{unique_id}", 512),
+                },
+            )
+            permute_ps = InstructionSpec(
+                "_mm512_permute_ps",
+                {
+                    "a": input_reg,
+                    "imm8": SymbolicPlaceholder(f"imm8_permute_ps_{unique_id}", 8),
+                },
+            )
+            permutevar_ps = InstructionSpec(
+                "_mm512_permutevar_ps",
+                {
+                    "a": input_reg,
+                    "b": SymbolicPlaceholder(f"ctrl_permutevar_ps_{unique_id}", 512),
+                },
+            )
+
+            # --- Masked (16-bit k-mask for 16 elements) ---
+            mask_permutexvar = InstructionSpec(
+                "_mm512_mask_permutexvar_epi32",
+                {
+                    "src": input_reg,
+                    "k": SymbolicPlaceholder(f"k_mask_permutexvar_{unique_id}", 16),
+                    "op_idx": SymbolicPlaceholder(
+                        f"ctrl_m_permutexvar_{unique_id}", 512
+                    ),
+                    "a": input_reg,
+                },
+            )
+            mask_permute_ps = InstructionSpec(
+                "_mm512_mask_permute_ps",
+                {
+                    "src": input_reg,
+                    "k": SymbolicPlaceholder(f"k_mask_permute_ps_{unique_id}", 16),
+                    "a": input_reg,
+                    "imm8": SymbolicPlaceholder(f"imm8_m_permute_ps_{unique_id}", 8),
+                },
+            )
+            mask_permutevar_ps = InstructionSpec(
+                "_mm512_mask_permutevar_ps",
+                {
+                    "src": input_reg,
+                    "k": SymbolicPlaceholder(f"k_mask_permutevar_ps_{unique_id}", 16),
+                    "a": input_reg,
+                    "b": SymbolicPlaceholder(f"ctrl_m_permutevar_ps_{unique_id}", 512),
+                },
+            )
+
+            return [
+                permutexvar,
+                permute_ps,
+                permutevar_ps,
+                mask_permutexvar,
+                mask_permute_ps,
+                mask_permutevar_ps,
+            ]
+
         raise NotImplementedError(
             f"Single-input instructions not implemented for {self.vm} and {self.prim_type}"
         )
@@ -1692,6 +1788,125 @@ class GadgetSynthesizer:
                 alignr,
                 mask_permutex2var,
                 mask_shuffle_pd,
+                mask_unpacklo,
+                mask_unpackhi,
+                mask_shuffle_i32x4,
+                mask_alignr,
+            ]
+
+        if self.vm == vector_machine.AVX512 and self.prim_type == primitive_type.i32:
+            reg1 = reg1_name
+            reg2 = reg2_name
+            unique_id = f"{id(reg1)}_{id(reg2)}"
+
+            # --- Unmasked ---
+            permutex2var = InstructionSpec(
+                "_mm512_permutex2var_epi32",
+                {
+                    "a": reg1,
+                    "op_idx": SymbolicPlaceholder(
+                        f"ctrl_permutex2var_{unique_id}", 512
+                    ),
+                    "b": reg2,
+                },
+            )
+            shuffle_ps = InstructionSpec(
+                "_mm512_shuffle_ps",
+                {
+                    "a": reg1,
+                    "b": reg2,
+                    "imm8": SymbolicPlaceholder(f"imm8_shuffle_ps_{unique_id}", 8),
+                },
+            )
+            unpacklo = InstructionSpec("_mm512_unpacklo_epi32", {"a": reg1, "b": reg2})
+            unpackhi = InstructionSpec("_mm512_unpackhi_epi32", {"a": reg1, "b": reg2})
+            shuffle_i32x4 = InstructionSpec(
+                "_mm512_shuffle_i32x4",
+                {
+                    "a": reg1,
+                    "b": reg2,
+                    "imm8": SymbolicPlaceholder(f"imm8_shuf_i32x4_{unique_id}", 8),
+                },
+            )
+            alignr = InstructionSpec(
+                "_mm512_alignr_epi32",
+                {
+                    "a": reg1,
+                    "b": reg2,
+                    "imm8": SymbolicPlaceholder(f"imm8_alignr_{unique_id}", 8),
+                },
+            )
+
+            # --- Masked (16-bit k-mask for 16 elements) ---
+            mask_permutex2var = InstructionSpec(
+                "_mm512_mask_permutex2var_epi32",
+                {
+                    "a": reg1,
+                    "k": SymbolicPlaceholder(f"k_mask_permutex2var_{unique_id}", 16),
+                    "op_idx": SymbolicPlaceholder(
+                        f"ctrl_m_permutex2var_{unique_id}", 512
+                    ),
+                    "b": reg2,
+                },
+            )
+            mask_shuffle_ps = InstructionSpec(
+                "_mm512_mask_shuffle_ps",
+                {
+                    "src": reg1,
+                    "k": SymbolicPlaceholder(f"k_mask_shuffle_ps_{unique_id}", 16),
+                    "a": reg1,
+                    "b": reg2,
+                    "imm8": SymbolicPlaceholder(f"imm8_m_shuffle_ps_{unique_id}", 8),
+                },
+            )
+            mask_unpacklo = InstructionSpec(
+                "_mm512_mask_unpacklo_epi32",
+                {
+                    "src": reg1,
+                    "k": SymbolicPlaceholder(f"k_mask_unpacklo_{unique_id}", 16),
+                    "a": reg1,
+                    "b": reg2,
+                },
+            )
+            mask_unpackhi = InstructionSpec(
+                "_mm512_mask_unpackhi_epi32",
+                {
+                    "src": reg1,
+                    "k": SymbolicPlaceholder(f"k_mask_unpackhi_{unique_id}", 16),
+                    "a": reg1,
+                    "b": reg2,
+                },
+            )
+            mask_shuffle_i32x4 = InstructionSpec(
+                "_mm512_mask_shuffle_i32x4",
+                {
+                    "src": reg1,
+                    "k": SymbolicPlaceholder(f"k_mask_shuf_i32x4_{unique_id}", 16),
+                    "a": reg1,
+                    "b": reg2,
+                    "imm8": SymbolicPlaceholder(f"imm8_m_shuf_i32x4_{unique_id}", 8),
+                },
+            )
+            mask_alignr = InstructionSpec(
+                "_mm512_mask_alignr_epi32",
+                {
+                    "src": reg1,
+                    "k": SymbolicPlaceholder(f"k_mask_alignr_{unique_id}", 16),
+                    "a": reg1,
+                    "b": reg2,
+                    "imm8": SymbolicPlaceholder(f"imm8_m_alignr_{unique_id}", 8),
+                },
+            )
+
+            return [
+                permutex2var,
+                shuffle_ps,
+                unpacklo,
+                unpackhi,
+                shuffle_i32x4,
+                alignr,
+                mask_permutex2var,
+                mask_shuffle_ps,
                 mask_unpacklo,
                 mask_unpackhi,
                 mask_shuffle_i32x4,

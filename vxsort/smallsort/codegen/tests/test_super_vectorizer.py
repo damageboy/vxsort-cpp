@@ -174,8 +174,6 @@ def test_output_state_computation():
 @pytest.mark.parametrize("vm", [vector_machine.AVX2, vector_machine.AVX512])
 @pytest.mark.parametrize("dt", [primitive_type.i32, primitive_type.i64])
 def test_first_stage_requires_no_permutation(vm, dt):
-    if vm == vector_machine.AVX512 and dt == primitive_type.i32:
-        pytest.skip("AVX512 i32 not yet implemented")
     """Test that the initial state is constructed to make first stage a null operation."""
     print(f"Testing first stage requires no permutation for {vm.name}, {dt.name}...")
 
