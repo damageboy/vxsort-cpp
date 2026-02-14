@@ -18,16 +18,22 @@ def _get_instruction_metadata(intrinsic_name: str) -> dict:
     shuffle2_instructions = {
         "_mm256_shuffle_pd",
         "_mm512_shuffle_pd",
+        "_mm512_mask_shuffle_pd",
         "_mm256_permute_pd",
         "_mm512_permute_pd",
+        "_mm512_mask_permute_pd",
     }
 
     # Instructions that use shuffle with 4 elements (shuffle_ps variants)
     shuffle4_instructions = {
         "_mm256_shuffle_ps",
         "_mm512_shuffle_ps",
+        "_mm512_mask_shuffle_ps",
         "_mm256_permute_ps",
         "_mm512_permute_ps",
+        "_mm512_mask_permute_ps",
+        "_mm512_shuffle_i32x4",
+        "_mm512_mask_shuffle_i32x4",
     }
 
     # Instructions that use control vectors with their element widths
@@ -35,15 +41,21 @@ def _get_instruction_metadata(intrinsic_name: str) -> dict:
         # 32-bit control vectors
         "_mm256_permutexvar_epi32": 32,
         "_mm512_permutexvar_epi32": 32,
+        "_mm512_mask_permutexvar_epi32": 32,
         "_mm256_permutevar_ps": 32,
         "_mm512_permutevar_ps": 32,
+        "_mm512_mask_permutevar_ps": 32,
         "_mm512_permutex2var_epi32": 32,
+        "_mm512_mask_permutex2var_epi32": 32,
         # 64-bit control vectors
         "_mm256_permutexvar_epi64": 64,
         "_mm512_permutexvar_epi64": 64,
+        "_mm512_mask_permutexvar_epi64": 64,
         "_mm256_permutevar_pd": 64,
         "_mm512_permutevar_pd": 64,
+        "_mm512_mask_permutevar_pd": 64,
         "_mm512_permutex2var_epi64": 64,
+        "_mm512_mask_permutex2var_epi64": 64,
     }
 
     metadata = {
