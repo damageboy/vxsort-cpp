@@ -171,11 +171,11 @@ def test_output_state_computation():
     print("✓ Output state computation test passed\n")
 
 
-@pytest.mark.parametrize("vm", [vector_machine.AVX2])
+@pytest.mark.parametrize("vm", [vector_machine.AVX2, vector_machine.AVX512])
 @pytest.mark.parametrize("dt", [primitive_type.i32, primitive_type.i64])
-# @pytest.mark.parametrize("vm", [vector_machine.AVX2, vector_machine.AVX512])
-# @pytest.mark.parametrize("dt", [primitive_type.i16, primitive_type.i32, primitive_type.i64])
 def test_first_stage_requires_no_permutation(vm, dt):
+    if vm == vector_machine.AVX512 and dt == primitive_type.i32:
+        pytest.skip("AVX512 i32 not yet implemented")
     """Test that the initial state is constructed to make first stage a null operation."""
     print(f"Testing first stage requires no permutation for {vm.name}, {dt.name}...")
 
@@ -603,6 +603,16 @@ def test_asm_exporter_register_mapping():
     inst_prev_bottom = InstructionSpec("_mm256_permute_ps", {"a": "prev", "imm8": 0xB1})
     asm = _format_instruction(inst_prev_bottom, reg_alloc, "ymm0", "ymm1", is_top=False)
     assert "ymm1, ymm1" in asm, f"prev on bottom side should use ymm1, got: {asm}"
+
+
+def test_avx512_i64_synthesis_depth1():
+    """Test that AVX512 i64 synthesis finds solutions for first stage at depth 1."""
+    super_opt = BitonicSuperVectorizer(2, primitive_type.i64, vector_machine.AVX512)
+    solutions, all_complete = super_opt.build_solution_tree(
+        depth_limit=1, gadget_depth=2, natural_order=False, max_unique_outputs=1
+    )
+    assert len(solutions) > 0, "Should find at least one solution for AVX512 i64"
+    print(f"Found {len(solutions)} root solutions for AVX512 i64")
 
 
 def run_all_tests():

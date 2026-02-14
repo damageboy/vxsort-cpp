@@ -1666,7 +1666,7 @@ class GadgetSynthesizer:
                 "_mm512_mask_shuffle_i32x4",
                 {
                     "src": reg1,
-                    "k": SymbolicPlaceholder(f"k_mask_shuf_i32x4_{unique_id}", 8),
+                    "k": SymbolicPlaceholder(f"k_mask_shuf_i32x4_{unique_id}", 16),
                     "a": reg1,
                     "b": reg2,
                     "imm8": SymbolicPlaceholder(f"imm8_m_shuf_i32x4_{unique_id}", 8),
