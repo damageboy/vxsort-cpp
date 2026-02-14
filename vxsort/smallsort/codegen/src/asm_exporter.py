@@ -156,6 +156,11 @@ def _intrinsic_to_asm_mnemonic(intrinsic_name: str) -> str:
     return mapping.get(intrinsic_name, intrinsic_name)
 
 
+def _is_masked_intrinsic(intrinsic_name: str) -> bool:
+    """Check if an intrinsic is a masked (merge-mask) variant."""
+    return "_mask_" in intrinsic_name
+
+
 class RegisterAllocator:
     """Manages register allocation for assembly output."""
 
@@ -175,6 +180,10 @@ class RegisterAllocator:
         self.next_temp_reg = num_vecs
         self.temp_regs_allocated = []
 
+        # K-mask registers (k1-k7; k0 cannot be used as writemask)
+        self.next_kmask_reg = 1
+        self.kmask_regs_allocated = []
+
     def get_data_reg(self, vec_idx: int) -> str:
         """Get the register name for a data vector."""
         return f"{self.reg_prefix}{vec_idx}"
@@ -186,10 +195,21 @@ class RegisterAllocator:
         self.temp_regs_allocated.append(reg)
         return reg
 
+    def allocate_kmask(self) -> str:
+        """Allocate a k-mask register (k1-k7)."""
+        if self.next_kmask_reg > 7:
+            raise RuntimeError("Exhausted k-mask registers (k1-k7)")
+        reg = f"k{self.next_kmask_reg}"
+        self.next_kmask_reg += 1
+        self.kmask_regs_allocated.append(reg)
+        return reg
+
     def reset_temps(self):
         """Reset temporary register allocation."""
         self.next_temp_reg = self.num_vecs
         self.temp_regs_allocated = []
+        self.next_kmask_reg = 1
+        self.kmask_regs_allocated = []
 
 
 def _format_control_vector(val: int, vm: vector_machine, dtype: primitive_type) -> str:
@@ -251,14 +271,84 @@ def _format_instruction(
     args = inst.args
     dest_reg = top_reg if is_top else bottom_reg
 
+    # Handle k-mask for masked intrinsics
+    is_masked = _is_masked_intrinsic(inst.intrinsic_name)
+    kmask_reg = None
+    kmask_val = None
+    if is_masked and "k" in args:
+        kmask_reg = reg_allocator.allocate_kmask()
+        kmask_val = args["k"]
+
     # Build operand list - Intel syntax: dest, src1, [src2], [imm]
-    operands = [dest_reg]  # Destination is always first
+    # For masked instructions, dest gets {kN} suffix
+    dest_str = f"{dest_reg}{{{kmask_reg}}}" if kmask_reg else dest_reg
+    operands = [dest_str]  # Destination is always first
 
     ctrl_val = None
     ctrl_element_width = None  # Track element width for control vectors
 
-    # Handle different instruction patterns based on arguments
-    if "a" in args and "b" in args:
+    # Handle different instruction patterns based on arguments.
+    # More specific masked patterns come first, then fall through to
+    # existing unmasked patterns.
+
+    if (
+        "k" in args
+        and "src" in args
+        and "op_idx" in args
+        and "a" in args
+        and "b" not in args
+    ):
+        # Masked single-input with control vector
+        # e.g., _mm512_mask_permutexvar_epi64(src, k, op_idx, a)
+        ctrl_val = args["op_idx"]
+        ctrl_element_width = metadata["control_vector_width"]
+        ctrl_reg = reg_allocator.allocate_temp()
+        src = _resolve_source(args["a"], top_reg, bottom_reg, is_top)
+        operands.append(ctrl_reg)
+        operands.append(src)
+
+    elif "k" in args and "src" in args and "a" in args and "b" in args:
+        # Masked dual-input (with or without immediate)
+        # e.g., _mm512_mask_shuffle_pd(src, k, a, b, imm8)
+        # e.g., _mm512_mask_unpacklo_epi64(src, k, a, b)
+        src1 = _resolve_source(args["a"], top_reg, bottom_reg, is_top)
+        src2 = _resolve_source(args["b"], top_reg, bottom_reg, is_top)
+        operands.append(src1)
+        operands.append(src2)
+
+    elif "k" in args and "src" in args and "a" in args and "b" not in args:
+        # Masked single-input with immediate (no control vector, no b)
+        # e.g., _mm512_mask_permute_pd(src, k, a, imm8)
+        src = _resolve_source(args["a"], top_reg, bottom_reg, is_top)
+        operands.append(src)
+
+    elif (
+        "k" in args
+        and "a" in args
+        and "op_idx" in args
+        and "b" in args
+        and "src" not in args
+    ):
+        # Masked permutex2var: a is merge source, op_idx is control, b is second input
+        # e.g., _mm512_mask_permutex2var_epi64(a, k, op_idx, b)
+        ctrl_val = args["op_idx"]
+        ctrl_element_width = metadata["control_vector_width"]
+        ctrl_reg = reg_allocator.allocate_temp()
+        src2 = _resolve_source(args["b"], top_reg, bottom_reg, is_top)
+        operands.append(ctrl_reg)
+        operands.append(src2)
+
+    elif "a" in args and "op_idx" in args and "b" in args and "k" not in args:
+        # Unmasked permutex2var: a is first input, op_idx is control, b is second input
+        # e.g., _mm512_permutex2var_epi64(a, op_idx, b)
+        ctrl_val = args["op_idx"]
+        ctrl_element_width = metadata["control_vector_width"]
+        ctrl_reg = reg_allocator.allocate_temp()
+        src2 = _resolve_source(args["b"], top_reg, bottom_reg, is_top)
+        operands.append(ctrl_reg)
+        operands.append(src2)
+
+    elif "a" in args and "b" in args:
         # Two-input instruction (shuffle, blend, unpack, etc.)
         src1 = _resolve_source(args["a"], top_reg, bottom_reg, is_top)
         src2_raw = args["b"]
@@ -295,19 +385,19 @@ def _format_instruction(
         operands.append(src)
 
     # Add immediate values at the end
-    comment = None
+    comment_parts = []
     if "imm8" in args:
         imm_val = args["imm8"]
         if isinstance(imm_val, int):
             operands.append(f"0x{imm_val:02x}")
             # Use appropriate shuffle formatter based on instruction type
             if metadata["shuffle_type"] == "shuffle2":
-                comment = mm_shuffle2_str(imm_val)
+                comment_parts.append(mm_shuffle2_str(imm_val))
             elif metadata["shuffle_type"] == "shuffle4":
-                comment = mm_shuffle_str(imm_val)
+                comment_parts.append(mm_shuffle_str(imm_val))
             else:
                 # Default to 4-element for backward compatibility
-                comment = mm_shuffle_str(imm_val)
+                comment_parts.append(mm_shuffle_str(imm_val))
         else:
             operands.append(f"<{imm_val}>")  # Symbolic value
     elif "imm" in args:
@@ -344,13 +434,21 @@ def _format_instruction(
                 )
                 elements.append(element)
 
-            comment = "[" + ", ".join(str(e) for e in elements) + "]"
+            comment_parts.append("[" + ", ".join(str(e) for e in elements) + "]")
         else:
             # Fall back to data type's element width
-            comment = _format_control_vector(
-                ctrl_val, reg_allocator.vm, reg_allocator.dtype
+            comment_parts.append(
+                _format_control_vector(ctrl_val, reg_allocator.vm, reg_allocator.dtype)
             )
 
+    # Add k-mask value as a comment
+    if kmask_val is not None:
+        if isinstance(kmask_val, int):
+            comment_parts.insert(0, f"k=0x{kmask_val:02x}")
+        else:
+            comment_parts.insert(0, f"k={kmask_val}")
+
+    comment = ", ".join(comment_parts) if comment_parts else None
     asm_line = f"    {mnemonic:20s} {', '.join(operands)}"
     if comment:
         asm_line += f"  ; {comment}"
