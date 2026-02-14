@@ -1,159 +1,41 @@
 from __future__ import annotations
 
+from intrinsic_registry import get_intrinsic_registry
 from utils import vector_machine, primitive_type
 from utils import width_dict
 from z3_avx import mm_shuffle_str, mm_shuffle2_str
 
 
 def _get_instruction_metadata(intrinsic_name: str) -> dict:
-    """
-    Get metadata about an instruction for proper comment formatting.
+    """Get metadata about an instruction for proper comment formatting.
+
+    Delegates to the shared intrinsic registry.
 
     Returns:
         dict with:
-        - 'shuffle_type': 'shuffle2' for 2-element, 'shuffle4' for 4-element, None for not a shuffle
-        - 'control_vector_width': element width in bits for control vector operations, None otherwise
+        - 'imm_type': 'shuffle2', 'shuffle4', 'binary', or None
+        - 'control_vector_width': element width in bits for control vector ops, None
     """
-    # Instructions that use shuffle with 2 elements (shuffle_pd variants)
-    shuffle2_instructions = {
-        "_mm256_shuffle_pd",
-        "_mm512_shuffle_pd",
-        "_mm512_mask_shuffle_pd",
-        "_mm256_permute_pd",
-        "_mm512_permute_pd",
-        "_mm512_mask_permute_pd",
-    }
-
-    # Instructions that use shuffle with 4 elements (shuffle_ps variants)
-    shuffle4_instructions = {
-        "_mm256_shuffle_ps",
-        "_mm512_shuffle_ps",
-        "_mm512_mask_shuffle_ps",
-        "_mm256_permute_ps",
-        "_mm512_permute_ps",
-        "_mm512_mask_permute_ps",
-        "_mm512_shuffle_i32x4",
-        "_mm512_mask_shuffle_i32x4",
-    }
-
-    # Instructions that use control vectors with their element widths
-    control_vector_instructions = {
-        # 32-bit control vectors
-        "_mm256_permutexvar_epi32": 32,
-        "_mm512_permutexvar_epi32": 32,
-        "_mm512_mask_permutexvar_epi32": 32,
-        "_mm256_permutevar_ps": 32,
-        "_mm512_permutevar_ps": 32,
-        "_mm512_mask_permutevar_ps": 32,
-        "_mm512_permutex2var_epi32": 32,
-        "_mm512_mask_permutex2var_epi32": 32,
-        # 64-bit control vectors
-        "_mm256_permutexvar_epi64": 64,
-        "_mm512_permutexvar_epi64": 64,
-        "_mm512_mask_permutexvar_epi64": 64,
-        "_mm256_permutevar_pd": 64,
-        "_mm512_permutevar_pd": 64,
-        "_mm512_mask_permutevar_pd": 64,
-        "_mm512_permutex2var_epi64": 64,
-        "_mm512_mask_permutex2var_epi64": 64,
-    }
-
-    metadata = {
-        "shuffle_type": None,
-        "control_vector_width": None,
-    }
-
-    if intrinsic_name in shuffle2_instructions:
-        metadata["shuffle_type"] = "shuffle2"
-    elif intrinsic_name in shuffle4_instructions:
-        metadata["shuffle_type"] = "shuffle4"
-
-    if intrinsic_name in control_vector_instructions:
-        metadata["control_vector_width"] = control_vector_instructions[intrinsic_name]
-
-    return metadata
+    registry = get_intrinsic_registry()
+    info = registry.get(intrinsic_name)
+    if info is not None:
+        return {
+            "imm_type": info.imm_type,
+            "control_vector_width": info.control_vector_width,
+        }
+    return {"imm_type": None, "control_vector_width": None}
 
 
 def _intrinsic_to_asm_mnemonic(intrinsic_name: str) -> str:
-    """Map intrinsic name to assembly mnemonic."""
-    # Common AVX2/AVX512 intrinsics to assembly mnemonics
-    mapping = {
-        # Permute operations
-        "_mm256_permute4x64_epi64": "vpermq",
-        "_mm256_permute_ps": "vpermilps",
-        "_mm256_permute_pd": "vpermilpd",
-        "_mm256_permutexvar_epi32": "vpermd",
-        "_mm256_permutexvar_epi64": "vpermq",
-        "_mm256_permutevar_ps": "vpermilps",
-        "_mm256_permutevar_pd": "vpermilpd",
-        "_mm512_permutexvar_epi64": "vpermq",
-        "_mm512_permutexvar_epi32": "vpermd",
-        "_mm512_mask_permutexvar_epi32": "vpermd",
-        "_mm512_mask_permutexvar_epi64": "vpermq",
-        "_mm512_permutex2var_epi32": "vpermi2d",
-        "_mm512_permutex2var_epi64": "vpermi2q",
-        "_mm512_mask_permutex2var_epi32": "vpermi2d",
-        "_mm512_mask_permutex2var_epi64": "vpermi2q",
-        "_mm512_permute_pd": "vpermilpd",
-        "_mm512_mask_permute_ps": "vpermilps",
-        "_mm512_mask_permute_pd": "vpermilpd",
-        "_mm512_permutevar_ps": "vpermilps",
-        "_mm512_permutevar_pd": "vpermilpd",
-        "_mm512_mask_permutevar_ps": "vpermilps",
-        "_mm512_mask_permutevar_pd": "vpermilpd",
-        # Shuffle operations
-        "_mm256_shuffle_ps": "vshufps",
-        "_mm256_shuffle_pd": "vshufpd",
-        "_mm256_shuffle_epi32": "vpshufd",
-        "_mm512_shuffle_ps": "vshufps",
-        "_mm512_shuffle_pd": "vshufpd",
-        "_mm512_mask_shuffle_ps": "vshufps",
-        "_mm512_mask_shuffle_pd": "vshufpd",
-        "_mm512_shuffle_epi32": "vpshufd",
-        # Unpack operations
-        "_mm256_unpacklo_epi32": "vpunpckldq",
-        "_mm256_unpackhi_epi32": "vpunpckhdq",
-        "_mm256_unpacklo_epi64": "vpunpcklqdq",
-        "_mm256_unpackhi_epi64": "vpunpckhqdq",
-        "_mm256_unpacklo_ps": "vunpcklps",
-        "_mm256_unpackhi_ps": "vunpckhps",
-        "_mm512_unpacklo_epi32": "vpunpckldq",
-        "_mm512_unpackhi_epi32": "vpunpckhdq",
-        "_mm512_unpacklo_epi64": "vpunpcklqdq",
-        "_mm512_unpackhi_epi64": "vpunpckhqdq",
-        "_mm512_mask_unpacklo_epi32": "vpunpckldq",
-        "_mm512_mask_unpackhi_epi32": "vpunpckhdq",
-        "_mm512_mask_unpacklo_epi64": "vpunpcklqdq",
-        "_mm512_mask_unpackhi_epi64": "vpunpckhqdq",
-        # Permute2 operations
-        "_mm256_permute2x128_si256": "vperm2i128",
-        "_mm256_permute2f128_ps": "vperm2f128",
-        # Blend operations
-        "_mm256_blend_ps": "vblendps",
-        "_mm256_blend_pd": "vblendpd",
-        "_mm256_blendv_ps": "vblendvps",
-        "_mm256_blendv_pd": "vblendvpd",
-        "_mm256_blend_epi32": "vpblendd",
-        "_mm512_mask_blend_ps": "vblendmps",
-        "_mm512_mask_blend_epi32": "vpblendmd",
-        # Align operations
-        "_mm256_alignr_epi32": "valignd",
-        "_mm512_alignr_epi32": "valignd",
-        "_mm256_alignr_epi64": "valignq",
-        "_mm512_alignr_epi64": "valignq",
-        "_mm512_mask_alignr_epi32": "valignd",
-        "_mm512_mask_alignr_epi64": "valignq",
-        # 128-bit lane shuffle
-        "_mm512_shuffle_i32x4": "vshufi32x4",
-        "_mm512_mask_shuffle_i32x4": "vshufi32x4",
-        # Min/Max operations
-        "_mm256_min_ps": "vminps",
-        "_mm256_max_ps": "vmaxps",
-        "_mm512_min_ps": "vminps",
-        "_mm512_max_ps": "vmaxps",
-    }
+    """Map intrinsic name to assembly mnemonic.
 
-    return mapping.get(intrinsic_name, intrinsic_name)
+    Delegates to the shared intrinsic registry.
+    """
+    registry = get_intrinsic_registry()
+    info = registry.get(intrinsic_name)
+    if info is not None:
+        return info.asm_mnemonic.lower()
+    return intrinsic_name
 
 
 def _is_masked_intrinsic(intrinsic_name: str) -> bool:
@@ -389,15 +271,18 @@ def _format_instruction(
     if "imm8" in args:
         imm_val = args["imm8"]
         if isinstance(imm_val, int):
-            operands.append(f"0x{imm_val:02x}")
-            # Use appropriate shuffle formatter based on instruction type
-            if metadata["shuffle_type"] == "shuffle2":
+            imm_type = metadata["imm_type"]
+            if imm_type == "binary":
+                operands.append(f"0x{imm_val:02x}")
+                comment_parts.append(f"0b{imm_val:08b}")
+            elif imm_type == "shuffle2":
+                operands.append(f"0x{imm_val:02x}")
                 comment_parts.append(mm_shuffle2_str(imm_val))
-            elif metadata["shuffle_type"] == "shuffle4":
+            elif imm_type == "shuffle4":
+                operands.append(f"0x{imm_val:02x}")
                 comment_parts.append(mm_shuffle_str(imm_val))
             else:
-                # Default to 4-element for backward compatibility
-                comment_parts.append(mm_shuffle_str(imm_val))
+                operands.append(f"0x{imm_val:02x}")
         else:
             operands.append(f"<{imm_val}>")  # Symbolic value
     elif "imm" in args:

@@ -54,6 +54,7 @@ def generate_bitonic_sorter(
     smt2_dump_dir: str | None = None,
     natural_order: bool = False,
     max_gadget_solutions: int = 3,
+    target_cpu: str = "generic",
 ):
     """
     Generate bitonic sorter with super-optimized permutation sequences.
@@ -70,6 +71,8 @@ def generate_bitonic_sorter(
         natural_order: If True, add final stage restoring natural element order for memory writeback
         max_gadget_solutions: Number of smallest unique output states to enumerate per
             gadget template. Higher values increase search diversity at the cost of speed. Default: 3.
+        target_cpu: Target CPU for cost model (e.g., "generic", "TGL", "ZEN4", "tigerlake").
+            Default: "generic".
 
     Returns:
         List of SolutionNode trees representing different optimized solutions
@@ -111,7 +114,7 @@ def generate_bitonic_sorter(
                 f"Filtering to top {top_k} cheapest paths (out of {total_paths} total)..."
             )
             # Use PathSelector for unified scoring
-            cost_model = CostModel("generic")
+            cost_model = CostModel(target_cpu)
             path_selector = PathSelector(cost_model)
             solutions, selected_paths = path_selector.prune_to_top_k_paths(
                 solutions, top_k
@@ -216,6 +219,13 @@ if __name__ == "__main__":
         help="Number of unique output states to enumerate per gadget template. "
         "Higher values increase search diversity at the cost of speed (default: 3)",
     )
+    parser.add_argument(
+        "--target-cpu",
+        type=str,
+        default="generic",
+        help="Target CPU for cost model. Examples: generic, TGL, SKX, ZEN4, "
+        "tigerlake, skylake-x, zen4. Use 'generic' for default costs (default: generic)",
+    )
 
     args = parser.parse_args()
 
@@ -239,4 +249,5 @@ if __name__ == "__main__":
         smt2_dump_dir=smt2_dump_dir,
         natural_order=args.natural_order,
         max_gadget_solutions=args.max_gadget_solutions,
+        target_cpu=args.target_cpu,
     )

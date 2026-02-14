@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
-from typing import Dict
 
 
 @dataclass
@@ -18,25 +18,113 @@ class InstructionCost:
         return f"Cost(lat={self.latency}, tput={self.throughput}, ports={self.ports})"
 
 
+# Maps friendly CPU names to the architecture names used in the uops.info XML.
+_ARCH_ALIASES: dict[str, str] = {
+    # Intel
+    "sandybridge": "SNB",
+    "ivybridge": "IVB",
+    "haswell": "HSW",
+    "broadwell": "BDW",
+    "skylake": "SKL",
+    "kabylake": "KBL",
+    "coffeelake": "CFL",
+    "cannonlake": "CNL",
+    "icelake": "ICL",
+    "tigerlake": "TGL",
+    "rocketlake": "RKL",
+    "skylake-x": "SKX",
+    "cascadelake": "CLX",
+    "alderlake-p": "ADL-P",
+    "alderlake-e": "ADL-E",
+    # AMD
+    "zen+": "ZEN+",
+    "zen2": "ZEN2",
+    "zen3": "ZEN3",
+    "zen4": "ZEN4",
+}
+
+
+def _find_xml_path() -> str | None:
+    """Find instructions.xml.zst relative to this module's directory."""
+    module_dir = os.path.dirname(__file__)
+    candidate = os.path.join(module_dir, "..", "instructions.xml.zst")
+    if os.path.exists(candidate):
+        return os.path.abspath(candidate)
+    return None
+
+
+def resolve_arch_name(target_cpu: str) -> str | None:
+    """Resolve a target CPU name to the XML architecture name.
+
+    Accepts either a friendly name (e.g. "tigerlake") or an exact XML name
+    (e.g. "TGL"). Returns None for "generic".
+    """
+    if target_cpu == "generic":
+        return None
+    lower = target_cpu.lower()
+    if lower in _ARCH_ALIASES:
+        return _ARCH_ALIASES[lower]
+    # Accept exact XML names (case-sensitive)
+    return target_cpu
+
+
 class CostModel:
     """Cost model for evaluating instruction sequences."""
 
     def __init__(self, target_cpu: str = "generic"):
         self.target_cpu = target_cpu
-        self.instruction_costs: Dict[str, InstructionCost] = {}
+        self.instruction_costs: dict[str, InstructionCost] = {}
         self._initialize_costs()
 
     def _initialize_costs(self):
-        """Initialize instruction costs based on target CPU."""
-        if self.target_cpu == "generic":
-            self._init_generic_costs()
-        elif self.target_cpu == "zen5":
-            self._init_zen5_costs()
-        elif self.target_cpu == "icelake":
-            self._init_icelake_costs()
-        else:
-            # Default to generic
-            self._init_generic_costs()
+        """Initialize instruction costs: generic defaults + optional arch overlay."""
+        self._init_generic_costs()
+
+        arch_name = resolve_arch_name(self.target_cpu)
+        if arch_name is None:
+            return
+
+        xml_path = _find_xml_path()
+        if xml_path is None:
+            print("Warning: instructions.xml.zst not found, using generic costs")
+            return
+
+        self._overlay_arch_costs(xml_path, arch_name)
+
+    def _overlay_arch_costs(self, xml_path: str, arch_name: str):
+        """Overlay architecture-specific costs from the uops.info XML."""
+        try:
+            from intrinsic_registry import get_intrinsic_registry, xml_string_key
+            from uops_parser import parse_uops_xml
+        except ImportError:
+            from .intrinsic_registry import get_intrinsic_registry, xml_string_key
+            from .uops_parser import parse_uops_xml
+
+        xml_costs = parse_uops_xml(xml_path, arch_name)
+        if not xml_costs:
+            print(
+                f"Warning: No data for architecture '{arch_name}', using generic costs"
+            )
+            return
+
+        registry = get_intrinsic_registry()
+        overlaid = 0
+        for intrinsic_name, info in registry.items():
+            key = xml_string_key(info)
+            if key in xml_costs:
+                self.instruction_costs[intrinsic_name] = xml_costs[key]
+                overlaid += 1
+            else:
+                # Some AVX-512VL instructions at 256-bit width only exist as
+                # EVEX-encoded forms in the XML (e.g., VPERMQ_EVEX (YMM, ...)).
+                evex_key = key.replace(
+                    info.asm_mnemonic, f"{info.asm_mnemonic}_EVEX", 1
+                )
+                if evex_key in xml_costs:
+                    self.instruction_costs[intrinsic_name] = xml_costs[evex_key]
+                    overlaid += 1
+
+        print(f"Loaded {overlaid} instruction costs from uops.info for {arch_name}")
 
     def _init_generic_costs(self):
         """Generic/simple cost model - just instruction count."""
@@ -106,26 +194,6 @@ class CostModel:
             }
         )
 
-    def _init_zen5_costs(self):
-        """AMD Zen 5 cost model - loads from uops.info data if available."""
-        # Start with generic
-        self._init_generic_costs()
-
-        # Try to load Zen 5 specific costs from uops.info data
-        zen5_costs = load_costs_from_uops_info("zen5")
-        if zen5_costs:
-            self.instruction_costs.update(zen5_costs)
-
-    def _init_icelake_costs(self):
-        """Intel Ice Lake cost model - loads from uops.info data if available."""
-        # Start with generic
-        self._init_generic_costs()
-
-        # Try to load Ice Lake specific costs from uops.info data
-        icelake_costs = load_costs_from_uops_info("icelake")
-        if icelake_costs:
-            self.instruction_costs.update(icelake_costs)
-
     def get_instruction_cost(self, intrinsic_name: str) -> InstructionCost:
         """Get cost for a specific intrinsic."""
         if intrinsic_name in self.instruction_costs:
@@ -153,54 +221,3 @@ class CostModel:
             total_cost += cost.latency
 
         return total_cost
-
-
-def load_costs_from_uops_info(cpu_model: str) -> Dict[str, InstructionCost]:
-    """
-    Load instruction costs from uops.info data.
-
-    Reads pre-computed instruction costs from JSON files.
-    Data can be generated by scraping https://uops.info/ or manually entered.
-
-    Expected JSON format:
-    {
-      "cpu_model": "zen5",
-      "instructions": {
-        "VPERMD": {
-          "latency": 3.0,
-          "throughput": 1.0,
-          "ports": ["p5"]
-        },
-        ...
-      }
-    }
-    """
-    import json
-    import os
-
-    # Look for cost data file
-    script_dir = os.path.dirname(__file__)
-    cost_file = os.path.join(script_dir, f"uops_data_{cpu_model}.json")
-
-    if not os.path.exists(cost_file):
-        print(f"Note: Cost data file {cost_file} not found, using generic costs")
-        return {}
-
-    try:
-        with open(cost_file, "r") as f:
-            data = json.load(f)
-
-        costs = {}
-        for instruction_name, cost_data in data.get("instructions", {}).items():
-            costs[instruction_name] = InstructionCost(
-                latency=cost_data.get("latency", 1.0),
-                throughput=cost_data.get("throughput", 1.0),
-                ports=cost_data.get("ports", ["unknown"]),
-            )
-
-        print(f"Loaded {len(costs)} instruction costs from {cost_file}")
-        return costs
-
-    except Exception as e:
-        print(f"Warning: Failed to load cost data from {cost_file}: {e}")
-        return {}
