@@ -5,10 +5,13 @@ import sys
 
 import pytest
 from bitonic_sorter import BitonicSorter
+from asm_exporter import RegisterAllocator, _format_instruction
 from bitonic_super_optimizer import (
     BitonicSuperVectorizer,
     GadgetSynthesizer,
+    InstructionSpec,
     PermutationGadget,
+    SymbolicPlaceholder,
     VectorState,
 )
 from functional import seq
@@ -195,7 +198,9 @@ def test_first_stage_requires_no_permutation(vm, dt):
         }, got {initial_state.bottom[i]}"
 
     # Build solution tree for just the first stage
-    solutions, _ = super_opt.build_solution_tree(depth_limit=1)
+    solutions, _ = super_opt.build_solution_tree(
+        depth_limit=1, gadget_depth=1, natural_order=False, max_unique_outputs=1
+    )
 
     print(f"  Found {len(solutions)} valid solution tree root(s)")
 
@@ -388,6 +393,216 @@ def test_natural_order_integration():
 
     print(f"  Natural order gadget output: {output_state}")
     print("✓ Natural order integration test passed\n")
+
+
+def test_mux_encoding_chains_instructions():
+    """Test that the multiplexer-based operand selection in 2-instruction gadgets works.
+
+    Creates a 2-instruction template [permute_ps, permute_ps] on the top side
+    with an empty bottom sequence. For the second instruction, the synthesizer
+    creates a Z3 select variable that chooses between {top, bottom, prev}. After
+    synthesis, the select variable is resolved to a source name string stored in
+    InstructionSpec.args.
+
+    We verify that at least one result has inst2 with args["a"] == "prev",
+    proving the mux actually selected the chained output from inst1.
+    """
+    synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i32)
+    n = synthesizer.elements_per_vector  # 8 for AVX2 i32
+
+    # Get target pairs from the first bitonic sort stage (16-element network)
+    sorter = BitonicSorter(2 * n)
+    target_pairs = sorter.stages[0]
+
+    # Initial input state for stage 0: top gets first elements of each pair,
+    # bottom gets second elements. This matches how BitonicSuperVectorizer
+    # constructs the initial state from the first stage pairs.
+    input_state = VectorState(
+        top=[p[0] for p in target_pairs],
+        bottom=[p[1] for p in target_pairs],
+    )
+
+    # Build a 2-instruction template: [permute_ps, permute_ps] for top side.
+    # The first instruction operates on "top" directly.
+    # The second instruction's "a" arg is "top" -- but since it is inst2
+    # (inst_idx > 0), _apply_instructions will create a mux select variable
+    # choosing between {top_reg, bottom_reg, prev_output}.
+    top_template = [
+        InstructionSpec(
+            "_mm256_permute_ps",
+            {
+                "a": "top",
+                "imm8": SymbolicPlaceholder("imm8_permute_ps_inst1", 8),
+            },
+        ),
+        InstructionSpec(
+            "_mm256_permute_ps",
+            {
+                "a": "top",
+                "imm8": SymbolicPlaceholder("imm8_permute_ps_inst2", 8),
+            },
+        ),
+    ]
+    bottom_template = []
+
+    results, _, _ = synthesizer.synthesize_gadget_with_symbolic(
+        top_instructions_template=top_template,
+        bottom_instructions_template=bottom_template,
+        input_state=input_state,
+        target_pairs=target_pairs,
+        max_solutions=1,
+        max_unique_outputs=3,
+    )
+
+    assert len(results) > 0, "Should find at least one valid gadget"
+
+    # All returned gadgets must be validated
+    for gadget, output_state in results:
+        assert gadget.validated, f"Gadget should be validated: {gadget}"
+
+    # At least one result should have inst2 with args["a"] == "prev",
+    # proving the mux selected the chained output from inst1
+    prev_results = [
+        (gadget, output_state)
+        for gadget, output_state in results
+        if len(gadget.top_instructions) == 2
+        and gadget.top_instructions[1].args.get("a") == "prev"
+    ]
+    assert len(prev_results) > 0, (
+        'Expected at least one gadget with inst2 args[\'a\'] == \'prev\', '
+        f'but got: {[(g.top_instructions[1].args.get("a") if len(g.top_instructions) == 2 else "N/A") for g, _ in results]}'
+    )
+
+    print(
+        f"  Found {len(results)} total results, {len(prev_results)} with prev chaining"
+    )
+    for gadget, output_state in prev_results:
+        inst2 = gadget.top_instructions[1]
+        a_val = inst2.args["a"]
+        imm8_val = inst2.args["imm8"]
+        print(f"    inst2: {inst2.intrinsic_name}(a={a_val}, imm8={imm8_val})")
+    print("  All gadgets validated: True")
+
+
+def test_single_dual_template_combination():
+    """Test that (single, dual) 2-instruction templates work with mux encoding.
+
+    Creates a depth-2 gadget with a single-input instruction (permute_ps)
+    followed by a dual-input instruction (shuffle_ps). The mux encoding
+    lets Z3 decide whether inst2's "a" and "b" operands read from top,
+    bottom, or prev (the output of inst1).
+    """
+    synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i32)
+    n = synthesizer.elements_per_vector
+
+    sorter = BitonicSorter(2 * n)
+    target_pairs = sorter.stages[0]
+
+    input_state = VectorState(
+        top=[p[0] for p in target_pairs],
+        bottom=[p[1] for p in target_pairs],
+    )
+
+    inst1 = InstructionSpec(
+        "_mm256_permute_ps",
+        {
+            "a": "top",
+            "imm8": SymbolicPlaceholder("imm8_permute_ps_sd_test", 8),
+        },
+    )
+    inst2 = InstructionSpec(
+        "_mm256_shuffle_ps",
+        {
+            "a": "top",
+            "b": "bottom",
+            "imm8": SymbolicPlaceholder("imm8_shuffle_ps_sd_test", 8),
+        },
+    )
+
+    top_template = [inst1, inst2]
+    bottom_template = [
+        InstructionSpec(
+            "_mm256_permute_ps",
+            {
+                "a": "bottom",
+                "imm8": SymbolicPlaceholder("imm8_permute_ps_sd_bottom", 8),
+            },
+        )
+    ]
+
+    results, _, _ = synthesizer.synthesize_gadget_with_symbolic(
+        top_instructions_template=top_template,
+        bottom_instructions_template=bottom_template,
+        input_state=input_state,
+        target_pairs=target_pairs,
+        max_solutions=1,
+        max_unique_outputs=3,
+    )
+
+    assert (
+        len(results) >= 1
+    ), "Should find at least one gadget for (single, dual) template"
+
+    # Check that at least one result has inst2 reading from "prev"
+    found_prev = False
+    for gadget, output_state in results:
+        assert gadget.validated
+        inst2_concrete = gadget.top_instructions[1]
+        a_arg = inst2_concrete.args.get("a")
+        b_arg = inst2_concrete.args.get("b")
+        if a_arg == "prev" or b_arg == "prev":
+            found_prev = True
+
+    assert found_prev, (
+        "At least one result should have inst2 reading from 'prev'. "
+        f"Got: {[(g.top_instructions[1].args.get('a'), g.top_instructions[1].args.get('b')) for g, _ in results]}"
+    )
+
+
+def test_asm_exporter_register_mapping():
+    """Test that _format_instruction uses correct absolute register mapping.
+
+    Previously, bottom-side instructions had their registers swapped because
+    the exporter used relative (dest_reg, other_reg) mapping. Now it uses
+    absolute (top_reg, bottom_reg, is_top) mapping.
+    """
+    reg_alloc = RegisterAllocator(vector_machine.AVX2, primitive_type.i32, 2)
+
+    # Bottom single-input: args["a"] = "bottom" should use ymm1 (bottom reg)
+    inst_bottom_single = InstructionSpec(
+        "_mm256_permute_ps", {"a": "bottom", "imm8": 0xB1}
+    )
+    asm = _format_instruction(
+        inst_bottom_single, reg_alloc, "ymm0", "ymm1", is_top=False
+    )
+    # dest=ymm1 (bottom), src=ymm1 (bottom)
+    assert "ymm1, ymm1" in asm, f"Bottom single should read from ymm1, got: {asm}"
+
+    reg_alloc.reset_temps()
+
+    # Bottom dual-input: args["a"]="top", args["b"]="bottom"
+    inst_bottom_dual = InstructionSpec(
+        "_mm256_shuffle_ps", {"a": "top", "b": "bottom", "imm8": 0x4E}
+    )
+    asm = _format_instruction(inst_bottom_dual, reg_alloc, "ymm0", "ymm1", is_top=False)
+    # dest=ymm1, src1=ymm0 (top), src2=ymm1 (bottom)
+    assert (
+        "ymm1, ymm0, ymm1" in asm
+    ), f"Bottom dual should have src1=ymm0, src2=ymm1, got: {asm}"
+
+    reg_alloc.reset_temps()
+
+    # "prev" source on top side → should resolve to ymm0 (top = dest for top chain)
+    inst_prev_top = InstructionSpec("_mm256_permute_ps", {"a": "prev", "imm8": 0xB1})
+    asm = _format_instruction(inst_prev_top, reg_alloc, "ymm0", "ymm1", is_top=True)
+    assert "ymm0, ymm0" in asm, f"prev on top side should use ymm0, got: {asm}"
+
+    reg_alloc.reset_temps()
+
+    # "prev" source on bottom side → should resolve to ymm1 (bottom = dest for bottom chain)
+    inst_prev_bottom = InstructionSpec("_mm256_permute_ps", {"a": "prev", "imm8": 0xB1})
+    asm = _format_instruction(inst_prev_bottom, reg_alloc, "ymm0", "ymm1", is_top=False)
+    assert "ymm1, ymm1" in asm, f"prev on bottom side should use ymm1, got: {asm}"
 
 
 def run_all_tests():

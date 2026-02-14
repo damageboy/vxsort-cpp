@@ -20,6 +20,8 @@ from z3 import (
     Distinct,
     Or,
     And,
+    If,
+    ULE,
     simplify,
 )
 
@@ -222,9 +224,6 @@ class GadgetSynthesizer:
         self.dual_insts_top_bottom = self._enumerate_dual_input_instructions(
             "top", "bottom"
         )
-        self.dual_insts_bottom_top = self._enumerate_dual_input_instructions(
-            "bottom", "top"
-        )
 
     def _get_available_intrinsics(self) -> dict[str, callable]:
         """Get available intrinsics for the current VM and primitive type."""
@@ -397,22 +396,28 @@ class GadgetSynthesizer:
         maybe_resolve_symbolic_vars(bottom_instructions_template)
 
         # Apply gadget instructions to get output registers
-        top_output = self._apply_instructions(
+        top_output, top_mux_constraints = self._apply_instructions(
             top_reg,
             bottom_reg,
             top_instructions_template,
             is_top=True,
             solver=solver,
-            symbolic_vars=None,
+            symbolic_vars=symbolic_vars,
         )
-        bottom_output = self._apply_instructions(
+        bottom_output, bottom_mux_constraints = self._apply_instructions(
             top_reg,
             bottom_reg,
             bottom_instructions_template,
             is_top=False,
             solver=solver,
-            symbolic_vars=None,
+            symbolic_vars=symbolic_vars,
         )
+
+        # Add mux range constraints (select vars must be in {0, 1, 2})
+        for c in top_mux_constraints:
+            solver.add(c)
+        for c in bottom_mux_constraints:
+            solver.add(c)
 
         # Add constraints: for each output lane, the top/bottom elements must
         # form a valid target pair (in either orientation).
@@ -461,12 +466,21 @@ class GadgetSynthesizer:
                 bottom=[p[1] for p in target_pairs],
             )
 
-        # Collect symbolic variable terms for enumeration
-        terms = list(symbolic_vars.values())
+        # Partition symbolic vars: select variables (mux wiring) vs
+        # immediate/control vector variables
+        select_vars = {
+            k: v
+            for k, v in symbolic_vars.items()
+            if isinstance(k, str) and k.startswith("sel_")
+        }
+        imm_vars = {k: v for k, v in symbolic_vars.items() if k not in select_vars}
+        imm_terms = list(imm_vars.values())
+
         construction_time = time.perf_counter() - start_construction
         solver_start = time.perf_counter()
-        # If no symbolic variables, single check suffices
-        if not terms:
+
+        # If no symbolic variables at all, single check suffices
+        if not imm_terms and not select_vars:
             result = solver.check()
             if result != sat:
                 solver_time = time.perf_counter() - solver_start
@@ -485,67 +499,113 @@ class GadgetSynthesizer:
             return [(gadget, output_state)], construction_time, solver_time
 
         if max_solutions == 1:
-            # Find the K smallest unique output states for this template.
+            # K-per-wiring algorithm: deterministic synthesis with diversity.
             #
-            # Z3's Solver is non-deterministic across invocations (ASLR
-            # affects internal hashing). Using Optimize.minimize on immediates
-            # is deterministic but biases toward trivial permutations, collapsing
-            # many templates to the same output state and starving later stages.
+            # Outer loop: discover unique operand wirings (which source each
+            # inst2 operand reads from: top, bottom, or prev). The wiring
+            # space is small (at most 3^num_select_vars) and many wirings
+            # are UNSAT, so this terminates quickly.
             #
-            # Instead, we iteratively find the K smallest unique OUTPUT STATES
-            # using Optimize.minimize(top_output, bottom_output) with output-
-            # blocking. Each iteration blocks previously found outputs and finds
-            # the next-smallest. This is deterministic (same K smallest outputs
-            # every run) and preserves diversity (different templates have
-            # different instruction semantics → different minimal outputs).
+            # Inner loop: for each valid wiring, find the K smallest unique
+            # output states using Optimize.minimize with output-blocking.
+            # For each unique output, pin the output + wiring and minimize
+            # immediates for a deterministic gadget.
             #
-            # For each unique output, we pin the output and minimize immediates
-            # to get a deterministic gadget.
-            #
-            # NOTE: Despite the parameter name, this may return up to K results
-            # to preserve search diversity across templates.
+            # For depth-1 templates (no select vars), the outer loop runs
+            # once and the inner loop behaves identically to the previous
+            # K-smallest algorithm — fully backward compatible.
             original_assertions = list(solver.assertions())
             results = []
-            output_blocks = []
+            wiring_blocks = []
 
-            for _ in range(max_unique_outputs):
-                opt = Optimize(ctx=ctx)
+            # Outer loop: discover unique wirings
+            while True:
+                opt_wiring = Optimize(ctx=ctx)
                 for a in original_assertions:
-                    opt.add(a)
-                for block in output_blocks:
-                    opt.add(block)
-                opt.minimize(top_output)
-                opt.minimize(bottom_output)
-                if opt.check() != sat:
-                    break
-                model = opt.model()
-                top_val = simplify(model.eval(top_output))
-                bot_val = simplify(model.eval(bottom_output))
+                    opt_wiring.add(a)
+                for block in wiring_blocks:
+                    opt_wiring.add(block)
+                # Minimize output to get a deterministic first hit
+                opt_wiring.minimize(top_output)
+                opt_wiring.minimize(bottom_output)
 
-                # Pin output state & minimize immediates for deterministic gadget
-                opt2 = Optimize(ctx=ctx)
-                for a in original_assertions:
-                    opt2.add(a)
-                opt2.add(top_output == top_val)
-                opt2.add(bottom_output == bot_val)
-                for term in terms:
-                    opt2.minimize(term)
-                if opt2.check() == sat:
-                    gadget, output_state = self._extract_solution_from_model(
-                        opt2.model(),
-                        top_output,
-                        bottom_output,
-                        symbolic_vars,
-                        top_instructions_template,
-                        bottom_instructions_template,
-                        fixed_output_state=fixed_output_state,
+                if opt_wiring.check() != sat:
+                    break  # No more valid wirings
+
+                model = opt_wiring.model()
+
+                # Extract the wiring from the model
+                wiring = {}
+                for name, var in select_vars.items():
+                    wiring[name] = model.evaluate(var, model_completion=True).as_long()
+
+                # Pin this wiring for the inner loop
+                wiring_constraints = [
+                    var == BitVecVal(wiring[name], 2)
+                    for name, var in select_vars.items()
+                ]
+
+                # Inner loop: K smallest unique outputs for this wiring
+                output_blocks = []
+                for _ in range(max_unique_outputs):
+                    opt_k = Optimize(ctx=ctx)
+                    for a in original_assertions:
+                        opt_k.add(a)
+                    for c in wiring_constraints:
+                        opt_k.add(c)
+                    for block in output_blocks:
+                        opt_k.add(block)
+                    opt_k.minimize(top_output)
+                    opt_k.minimize(bottom_output)
+
+                    if opt_k.check() != sat:
+                        break
+
+                    model_k = opt_k.model()
+                    top_val = simplify(model_k.eval(top_output))
+                    bot_val = simplify(model_k.eval(bottom_output))
+
+                    # Pin output + wiring, minimize immediates only
+                    opt_imm = Optimize(ctx=ctx)
+                    for a in original_assertions:
+                        opt_imm.add(a)
+                    for c in wiring_constraints:
+                        opt_imm.add(c)
+                    opt_imm.add(top_output == top_val)
+                    opt_imm.add(bottom_output == bot_val)
+                    for term in imm_terms:
+                        opt_imm.minimize(term)
+
+                    if opt_imm.check() == sat:
+                        gadget, output_state = self._extract_solution_from_model(
+                            opt_imm.model(),
+                            top_output,
+                            bottom_output,
+                            symbolic_vars,
+                            top_instructions_template,
+                            bottom_instructions_template,
+                            fixed_output_state=fixed_output_state,
+                        )
+                        results.append((gadget, output_state))
+
+                    # Block this output for the next inner iteration
+                    output_blocks.append(
+                        Or(top_output != top_val, bottom_output != bot_val)
                     )
-                    results.append((gadget, output_state))
 
-                # Block this output state for the next iteration
-                output_blocks.append(
-                    Or(top_output != top_val, bottom_output != bot_val)
-                )
+                # Block this entire wiring for the next outer iteration
+                if select_vars:
+                    wiring_blocks.append(
+                        Or(
+                            *(
+                                var != BitVecVal(wiring[name], 2)
+                                for name, var in select_vars.items()
+                            )
+                        )
+                    )
+                else:
+                    # No select vars (depth-1): only run outer loop once
+                    break
 
             # Sort by output state for deterministic ordering
             results.sort(key=lambda x: x[1].as_tuple())
@@ -553,8 +613,9 @@ class GadgetSynthesizer:
             return results, construction_time, solver_time
 
         # Enumerate multiple solutions over symbolic variables
+        all_terms = list(symbolic_vars.values())
         results = []
-        for model in _all_smt(solver, terms, max_results=max_solutions):
+        for model in _all_smt(solver, all_terms, max_results=max_solutions):
             gadget, output_state = self._extract_solution_from_model(
                 model,
                 top_output,
@@ -618,7 +679,9 @@ class GadgetSynthesizer:
 
             output_state = VectorState(top=output_top, bottom=output_bottom)
 
-        # Create concrete instructions by substituting symbolic values
+        # Create concrete instructions by substituting symbolic values.
+        # Select variables (from mux encoding) are resolved to source name
+        # strings ("top", "bottom", "prev") via _SELECT_TO_SOURCE.
         def concretize_instructions(
             instructions: list[InstructionSpec],
         ) -> list[InstructionSpec]:
@@ -626,7 +689,14 @@ class GadgetSynthesizer:
             for inst in instructions:
                 concrete_args = {}
                 for key, value in inst.args.items():
-                    if id(value) in symbolic_vars:
+                    # Check if this arg has a corresponding select variable
+                    select_name = f"sel_{key}_{inst.intrinsic_name}_{id(inst)}"
+                    if select_name in symbolic_vars:
+                        select_val = model.evaluate(
+                            symbolic_vars[select_name], model_completion=True
+                        ).as_long()
+                        concrete_args[key] = self._SELECT_TO_SOURCE[select_val]
+                    elif id(value) in symbolic_vars:
                         if hasattr(value, "size") and callable(
                             getattr(value, "size", None)
                         ):
@@ -717,11 +787,12 @@ class GadgetSynthesizer:
             solver.add(top_lane == BitVecVal(top_elem, self.lane_width, ctx=ctx))
             solver.add(bottom_lane == BitVecVal(bottom_elem, self.lane_width, ctx=ctx))
 
-        # Apply gadget instructions
-        top_output = self._apply_instructions(
+        # Apply gadget instructions (mux constraints ignored here —
+        # concrete gadgets have resolved args, no select variables)
+        top_output, _ = self._apply_instructions(
             top_reg, bottom_reg, gadget.top_instructions, is_top=True
         )
-        bottom_output = self._apply_instructions(
+        bottom_output, _ = self._apply_instructions(
             top_reg, bottom_reg, gadget.bottom_instructions, is_top=False
         )
 
@@ -799,6 +870,53 @@ class GadgetSynthesizer:
                 return current_reg
         return arg
 
+    # Map select variable values to source name strings for extraction
+    _SELECT_TO_SOURCE = {0: "top", 1: "bottom", 2: "prev"}
+
+    def _create_operand_mux(
+        self,
+        key: str,
+        inst: InstructionSpec,
+        top_reg,
+        bottom_reg,
+        prev_output,
+        symbolic_vars: dict | None,
+        mux_constraints: list,
+    ):
+        """Create a Z3 If-else chain selecting between {top, bottom, prev}.
+
+        For inst2+ in a multi-instruction chain, register operands ("a", "b")
+        get a 2-bit select variable that Z3 uses to pick the optimal source.
+
+        Args:
+            key: Argument key ("a" or "b")
+            inst: The instruction spec (used for unique naming)
+            top_reg: Z3 register for original top input
+            bottom_reg: Z3 register for original bottom input
+            prev_output: Z3 register from the previous instruction's output
+            symbolic_vars: Dict to track the select variable for later extraction
+            mux_constraints: List to append range constraints to
+
+        Returns:
+            Z3 If-expression selecting between the three sources
+        """
+        select_name = f"sel_{key}_{inst.intrinsic_name}_{id(inst)}"
+        select_var = BitVec(select_name, 2)
+
+        if symbolic_vars is not None:
+            symbolic_vars[select_name] = select_var
+
+        # Constrain to exactly {0, 1, 2} — a 2-bit var can be 0-3
+        mux_constraints.append(ULE(select_var, BitVecVal(2, 2)))
+
+        mux = If(
+            select_var == 0,
+            top_reg,
+            If(select_var == 1, bottom_reg, If(select_var == 2, prev_output, top_reg)),
+        )  # unreachable due to constraint
+
+        return mux
+
     def _apply_instructions(
         self,
         top_reg,
@@ -811,6 +929,11 @@ class GadgetSynthesizer:
         """
         Apply a sequence of instructions to compute output register.
 
+        For multi-instruction sequences, inst2+ register operands get
+        multiplexer select variables so Z3 can choose whether each operand
+        reads from the original top/bottom registers or from the previous
+        instruction's output.
+
         Args:
             top_reg: Input top register
             bottom_reg: Input bottom register
@@ -820,12 +943,15 @@ class GadgetSynthesizer:
             symbolic_vars: Optional dict to track symbolic variables
 
         Returns:
-            Output register after applying instructions
+            (output_register, mux_constraints) tuple. The caller must add
+            mux_constraints to the solver before solving.
         """
         # Start with the appropriate input register
         current_reg = top_reg if is_top else bottom_reg
+        prev_output = None
+        mux_constraints = []
 
-        for inst in instructions:
+        for inst_idx, inst in enumerate(instructions):
             intrinsic = self.available_intrinsics.get(inst.intrinsic_name)
             if intrinsic is None:
                 raise ValueError(f"Unknown intrinsic: {inst.intrinsic_name}")
@@ -833,9 +959,33 @@ class GadgetSynthesizer:
             # Substitute register names in arguments with actual Z3 registers
             args = {}
             for key, value in inst.args.items():
-                args[key] = self._substitute_register_names(
-                    value, top_reg, bottom_reg, current_reg, symbolic_vars, key=key
-                )
+                if (
+                    inst_idx > 0
+                    and prev_output is not None
+                    and key in ("a", "b")
+                    and isinstance(value, str)
+                    and value in ("top", "bottom")
+                ):
+                    # inst2+: create mux for register operands
+                    args[key] = self._create_operand_mux(
+                        key,
+                        inst,
+                        top_reg,
+                        bottom_reg,
+                        prev_output,
+                        symbolic_vars,
+                        mux_constraints,
+                    )
+                else:
+                    # First instruction or non-register arg: resolve normally
+                    args[key] = self._substitute_register_names(
+                        value,
+                        top_reg,
+                        bottom_reg,
+                        current_reg,
+                        symbolic_vars,
+                        key=key,
+                    )
 
             # Determine how to call the intrinsic based on its signature
             if "a" in args and "op_idx" in args:
@@ -863,7 +1013,9 @@ class GadgetSynthesizer:
                 arg_values = list(args.values())
                 current_reg = intrinsic(*arg_values)
 
-        return current_reg
+            prev_output = current_reg
+
+        return current_reg, mux_constraints
 
     def _generate_candidate_gadgets(
         self, top_depth: int, bottom_depth: int
@@ -879,12 +1031,15 @@ class GadgetSynthesizer:
                 top_sequences = [[inst] for inst in self.single_insts_top]
                 top_sequences.extend([[inst] for inst in self.dual_insts_top_bottom])
             elif top_depth == 2:
-                # Try pairs: (single, single) and (dual, single)
+                # Try pairs: (single, single), (dual, single), (single, dual)
                 for inst1 in self.single_insts_top:
                     for inst2 in self.single_insts_top:
                         top_sequences.append([inst1, inst2])
                 for inst1 in self.dual_insts_top_bottom:
                     for inst2 in self.single_insts_top:
+                        top_sequences.append([inst1, inst2])
+                for inst1 in self.single_insts_top:
+                    for inst2 in self.dual_insts_top_bottom:
                         top_sequences.append([inst1, inst2])
             elif top_depth == 3:
                 # Try triples: (single, single, single)
@@ -907,6 +1062,9 @@ class GadgetSynthesizer:
                         bottom_sequences.append([inst1, inst2])
                 for inst1 in self.dual_insts_top_bottom:
                     for inst2 in self.single_insts_bottom:
+                        bottom_sequences.append([inst1, inst2])
+                for inst1 in self.single_insts_bottom:
+                    for inst2 in self.dual_insts_top_bottom:
                         bottom_sequences.append([inst1, inst2])
             elif bottom_depth == 3:
                 for inst1 in self.single_insts_bottom:

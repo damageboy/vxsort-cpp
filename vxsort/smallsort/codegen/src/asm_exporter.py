@@ -170,8 +170,32 @@ def _format_control_vector(val: int, vm: vector_machine, dtype: primitive_type) 
     return "[" + ", ".join(str(e) for e in elements) + "]"
 
 
+def _resolve_source(name: str, top_reg: str, bottom_reg: str, is_top: bool) -> str:
+    """Map a source name to a physical register.
+
+    Args:
+        name: Source name ("top", "bottom", or "prev")
+        top_reg: Physical register for the top vector
+        bottom_reg: Physical register for the bottom vector
+        is_top: Whether we're formatting a top-side instruction chain
+    """
+    if name == "top":
+        return top_reg
+    elif name == "bottom":
+        return bottom_reg
+    elif name == "prev":
+        # "prev" = output of prior instruction in this chain,
+        # which was written to the destination register
+        return top_reg if is_top else bottom_reg
+    return name  # not a register name (shouldn't happen for a/b args)
+
+
 def _format_instruction(
-    inst, reg_allocator: RegisterAllocator, dest_reg: str, other_reg: str
+    inst,
+    reg_allocator: RegisterAllocator,
+    top_reg: str,
+    bottom_reg: str,
+    is_top: bool,
 ) -> str:
     """
     Format a single instruction as assembly.
@@ -179,12 +203,14 @@ def _format_instruction(
     Args:
         inst: InstructionSpec with intrinsic_name and args
         reg_allocator: RegisterAllocator for temporary registers
-        dest_reg: The destination register (top or bottom)
-        other_reg: The other data register
+        top_reg: Physical register for the top vector (absolute)
+        bottom_reg: Physical register for the bottom vector (absolute)
+        is_top: Whether this instruction is in the top-side chain
     """
     mnemonic = _intrinsic_to_asm_mnemonic(inst.intrinsic_name)
     metadata = _get_instruction_metadata(inst.intrinsic_name)
     args = inst.args
+    dest_reg = top_reg if is_top else bottom_reg
 
     # Build operand list - Intel syntax: dest, src1, [src2], [imm]
     operands = [dest_reg]  # Destination is always first
@@ -195,23 +221,24 @@ def _format_instruction(
     # Handle different instruction patterns based on arguments
     if "a" in args and "b" in args:
         # Two-input instruction (shuffle, blend, unpack, etc.)
-        src1 = dest_reg if args["a"] == "top" else other_reg
-        src2 = dest_reg if args["b"] == "top" else other_reg
+        src1 = _resolve_source(args["a"], top_reg, bottom_reg, is_top)
+        src2_raw = args["b"]
 
         # Check if 'b' is a control vector (not a register name)
-        if args["b"] not in ["top", "bottom"]:
+        if src2_raw not in ["top", "bottom", "prev"]:
             # It's a control vector - allocate a temp register for it
-            ctrl_val = args["b"]
+            ctrl_val = src2_raw
             ctrl_element_width = metadata["control_vector_width"]
             ctrl_reg = reg_allocator.allocate_temp()
             operands.append(src1)
             operands.append(ctrl_reg)
         else:
+            src2 = _resolve_source(src2_raw, top_reg, bottom_reg, is_top)
             operands.append(src1)
             operands.append(src2)
     elif "a" in args:
         # Single-input instruction
-        src = dest_reg if args["a"] == "top" else other_reg
+        src = _resolve_source(args["a"], top_reg, bottom_reg, is_top)
 
         # Check for control/index operand
         if "op_idx" in args:
@@ -225,7 +252,7 @@ def _format_instruction(
             operands.append(src)
     elif "input" in args:
         # Old-style single-input
-        src = dest_reg if args["input"] == "top" else other_reg
+        src = _resolve_source(args["input"], top_reg, bottom_reg, is_top)
         operands.append(src)
 
     # Add immediate values at the end
@@ -332,17 +359,19 @@ def _print_solution_step_as_assembly(
     if gadget.top_instructions:
         print(f"{prefix}; Top vector ({top_reg}) operations:")
         for inst in gadget.top_instructions:
-            if bottom_reg:
-                asm_line = _format_instruction(inst, reg_allocator, top_reg, bottom_reg)
-            else:
-                asm_line = _format_instruction(inst, reg_allocator, top_reg, top_reg)
+            effective_bottom = bottom_reg if bottom_reg else top_reg
+            asm_line = _format_instruction(
+                inst, reg_allocator, top_reg, effective_bottom, is_top=True
+            )
             print(f"{prefix}{asm_line}")
 
     # Print bottom vector instructions
     if gadget.bottom_instructions and bottom_reg:
         print(f"{prefix}; Bottom vector ({bottom_reg}) operations:")
         for inst in gadget.bottom_instructions:
-            asm_line = _format_instruction(inst, reg_allocator, bottom_reg, top_reg)
+            asm_line = _format_instruction(
+                inst, reg_allocator, top_reg, bottom_reg, is_top=False
+            )
             print(f"{prefix}{asm_line}")
 
     # Print output state

@@ -2240,9 +2240,12 @@ class TestMaskPermutex2varEpi32:
         result = s.check()
         assert result == sat, "Z3 failed to find mask+indices for partial reverse"
         model_mask = s.model().evaluate(mask).as_long()
+        # Lower 8 bits must be set (positions 0-7 need permuted values).
+        # Upper 8 bits are don't-care: those positions expect a[i] which is
+        # achieved both by mask=0 (passthrough) and mask=1 if indices select a[i].
         assert (
-            model_mask == 0x00FF
-        ), f"Expected mask 0x00FF for first 8 elements, got 0x{model_mask:04x}"
+            model_mask & 0x00FF == 0x00FF
+        ), f"Expected lower 8 mask bits set, got 0x{model_mask:04x}"
 
 
 class TestMaskPermutex2varEpi64:
