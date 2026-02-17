@@ -208,6 +208,119 @@ class SolutionNode:
         return f"SolutionNode(stage={self.stage}, gadgets={len(self.gadgets)}, children={len(self.children)})"
 
 
+def get_available_intrinsics(
+    vm: vector_machine, prim_type: primitive_type
+) -> dict[str, callable]:
+    """Get available intrinsics for the given VM and primitive type."""
+    intrinsics = {}
+
+    # For AVX2 i32, we need YMM (256-bit) operations on 32-bit elements
+    if vm == vector_machine.AVX2 and prim_type == primitive_type.i32:
+        # Single input permutes (with immediates)
+        intrinsics["_mm256_permute4x64_epi64"] = z3_avx._mm256_permute4x64_epi64
+        intrinsics["_mm256_permute_ps"] = z3_avx._mm256_permute_ps
+
+        # Single input permutes (with control vectors)
+        intrinsics["_mm256_permutexvar_epi32"] = z3_avx._mm256_permutexvar_epi32
+        intrinsics["_mm256_permutevar_ps"] = z3_avx._mm256_permutevar_ps
+
+        # Two input permutes/shuffles
+        intrinsics["_mm256_shuffle_ps"] = z3_avx._mm256_shuffle_ps
+        intrinsics["_mm256_unpacklo_epi32"] = z3_avx._mm256_unpacklo_epi32
+        intrinsics["_mm256_unpackhi_epi32"] = z3_avx._mm256_unpackhi_epi32
+        intrinsics["_mm256_permute2x128_si256"] = z3_avx._mm256_permute2x128_si256
+
+        # Blends
+        intrinsics["_mm256_blend_ps"] = z3_avx._mm256_blend_ps
+        intrinsics["_mm256_blendv_ps"] = z3_avx._mm256_blendv_ps
+
+        # Align operations
+        intrinsics["_mm256_alignr_epi32"] = z3_avx._mm256_alignr_epi32
+
+    # For AVX2 i64, we need YMM (256-bit) operations on 64-bit elements
+    if vm == vector_machine.AVX2 and prim_type == primitive_type.i64:
+        # Single input permutes (with immediates)
+        intrinsics["_mm256_permute4x64_epi64"] = z3_avx._mm256_permute4x64_epi64
+        intrinsics["_mm256_permute_pd"] = z3_avx._mm256_permute_pd
+
+        # Single input permutes (with control vectors)
+        intrinsics["_mm256_permutexvar_epi64"] = z3_avx._mm256_permutexvar_epi64
+        intrinsics["_mm256_permutevar_pd"] = z3_avx._mm256_permutevar_pd
+
+        # Two input permutes/shuffles
+        intrinsics["_mm256_shuffle_pd"] = z3_avx._mm256_shuffle_pd
+        intrinsics["_mm256_unpacklo_epi64"] = z3_avx._mm256_unpacklo_epi64
+        intrinsics["_mm256_unpackhi_epi64"] = z3_avx._mm256_unpackhi_epi64
+        intrinsics["_mm256_permute2x128_si256"] = z3_avx._mm256_permute2x128_si256
+
+        # Blends
+        intrinsics["_mm256_blend_pd"] = z3_avx._mm256_blend_pd
+        intrinsics["_mm256_blendv_pd"] = z3_avx._mm256_blendv_pd
+
+        # Align operations
+        intrinsics["_mm256_alignr_epi64"] = z3_avx._mm256_alignr_epi64
+
+    # For AVX512 i64, we need ZMM (512-bit) operations on 64-bit elements
+    if vm == vector_machine.AVX512 and prim_type == primitive_type.i64:
+        # Unmasked single-input
+        intrinsics["_mm512_permutexvar_epi64"] = z3_avx._mm512_permutexvar_epi64
+        intrinsics["_mm512_permute_pd"] = z3_avx._mm512_permute_pd
+        intrinsics["_mm512_permutevar_pd"] = z3_avx._mm512_permutevar_pd
+        # Masked single-input
+        intrinsics["_mm512_mask_permutexvar_epi64"] = (
+            z3_avx._mm512_mask_permutexvar_epi64
+        )
+        intrinsics["_mm512_mask_permute_pd"] = z3_avx._mm512_mask_permute_pd
+        intrinsics["_mm512_mask_permutevar_pd"] = z3_avx._mm512_mask_permutevar_pd
+        # Unmasked dual-input
+        intrinsics["_mm512_permutex2var_epi64"] = z3_avx._mm512_permutex2var_epi64
+        intrinsics["_mm512_shuffle_pd"] = z3_avx._mm512_shuffle_pd
+        intrinsics["_mm512_unpacklo_epi64"] = z3_avx._mm512_unpacklo_epi64
+        intrinsics["_mm512_unpackhi_epi64"] = z3_avx._mm512_unpackhi_epi64
+        intrinsics["_mm512_shuffle_i32x4"] = z3_avx._mm512_shuffle_i32x4
+        intrinsics["_mm512_alignr_epi64"] = z3_avx._mm512_alignr_epi64
+        # Masked dual-input
+        intrinsics["_mm512_mask_permutex2var_epi64"] = (
+            z3_avx._mm512_mask_permutex2var_epi64
+        )
+        intrinsics["_mm512_mask_shuffle_pd"] = z3_avx._mm512_mask_shuffle_pd
+        intrinsics["_mm512_mask_unpacklo_epi64"] = z3_avx._mm512_mask_unpacklo_epi64
+        intrinsics["_mm512_mask_unpackhi_epi64"] = z3_avx._mm512_mask_unpackhi_epi64
+        intrinsics["_mm512_mask_shuffle_i32x4"] = z3_avx._mm512_mask_shuffle_i32x4
+        intrinsics["_mm512_mask_alignr_epi64"] = z3_avx._mm512_mask_alignr_epi64
+
+    # For AVX512 i32, we need ZMM (512-bit) operations on 32-bit elements
+    if vm == vector_machine.AVX512 and prim_type == primitive_type.i32:
+        # Unmasked single-input
+        intrinsics["_mm512_permutexvar_epi32"] = z3_avx._mm512_permutexvar_epi32
+        intrinsics["_mm512_permute_ps"] = z3_avx._mm512_permute_ps
+        intrinsics["_mm512_permutevar_ps"] = z3_avx._mm512_permutevar_ps
+        # Masked single-input
+        intrinsics["_mm512_mask_permutexvar_epi32"] = (
+            z3_avx._mm512_mask_permutexvar_epi32
+        )
+        intrinsics["_mm512_mask_permute_ps"] = z3_avx._mm512_mask_permute_ps
+        intrinsics["_mm512_mask_permutevar_ps"] = z3_avx._mm512_mask_permutevar_ps
+        # Unmasked dual-input
+        intrinsics["_mm512_permutex2var_epi32"] = z3_avx._mm512_permutex2var_epi32
+        intrinsics["_mm512_shuffle_ps"] = z3_avx._mm512_shuffle_ps
+        intrinsics["_mm512_unpacklo_epi32"] = z3_avx._mm512_unpacklo_epi32
+        intrinsics["_mm512_unpackhi_epi32"] = z3_avx._mm512_unpackhi_epi32
+        intrinsics["_mm512_shuffle_i32x4"] = z3_avx._mm512_shuffle_i32x4
+        intrinsics["_mm512_alignr_epi32"] = z3_avx._mm512_alignr_epi32
+        # Masked dual-input
+        intrinsics["_mm512_mask_permutex2var_epi32"] = (
+            z3_avx._mm512_mask_permutex2var_epi32
+        )
+        intrinsics["_mm512_mask_shuffle_ps"] = z3_avx._mm512_mask_shuffle_ps
+        intrinsics["_mm512_mask_unpacklo_epi32"] = z3_avx._mm512_mask_unpacklo_epi32
+        intrinsics["_mm512_mask_unpackhi_epi32"] = z3_avx._mm512_mask_unpackhi_epi32
+        intrinsics["_mm512_mask_shuffle_i32x4"] = z3_avx._mm512_mask_shuffle_i32x4
+        intrinsics["_mm512_mask_alignr_epi32"] = z3_avx._mm512_mask_alignr_epi32
+
+    return intrinsics
+
+
 class GadgetSynthesizer:
     """Synthesizes permutation gadgets using Z3."""
 
@@ -216,7 +329,7 @@ class GadgetSynthesizer:
         self.prim_type = prim_type
         self.elements_per_vector = width_dict[vm] // int(prim_type.value[0])
         self.lane_width = int(prim_type.value[0]) * 8  # 16, 32, or 64 bits per element
-        self.available_intrinsics = self._get_available_intrinsics()
+        self.available_intrinsics = get_available_intrinsics(vm, prim_type)
 
         # Memoize instruction templates - these are reused across all gadget generation
         self.single_insts_top = self._enumerate_single_input_instructions("top")
@@ -224,116 +337,6 @@ class GadgetSynthesizer:
         self.dual_insts_top_bottom = self._enumerate_dual_input_instructions(
             "top", "bottom"
         )
-
-    def _get_available_intrinsics(self) -> dict[str, callable]:
-        """Get available intrinsics for the current VM and primitive type."""
-        intrinsics = {}
-
-        # For AVX2 i32, we need YMM (256-bit) operations on 32-bit elements
-        if self.vm == vector_machine.AVX2 and self.prim_type == primitive_type.i32:
-            # Single input permutes (with immediates)
-            intrinsics["_mm256_permute4x64_epi64"] = z3_avx._mm256_permute4x64_epi64
-            intrinsics["_mm256_permute_ps"] = z3_avx._mm256_permute_ps
-
-            # Single input permutes (with control vectors)
-            intrinsics["_mm256_permutexvar_epi32"] = z3_avx._mm256_permutexvar_epi32
-            intrinsics["_mm256_permutevar_ps"] = z3_avx._mm256_permutevar_ps
-
-            # Two input permutes/shuffles
-            intrinsics["_mm256_shuffle_ps"] = z3_avx._mm256_shuffle_ps
-            intrinsics["_mm256_unpacklo_epi32"] = z3_avx._mm256_unpacklo_epi32
-            intrinsics["_mm256_unpackhi_epi32"] = z3_avx._mm256_unpackhi_epi32
-            intrinsics["_mm256_permute2x128_si256"] = z3_avx._mm256_permute2x128_si256
-
-            # Blends
-            intrinsics["_mm256_blend_ps"] = z3_avx._mm256_blend_ps
-            intrinsics["_mm256_blendv_ps"] = z3_avx._mm256_blendv_ps
-
-            # Align operations
-            intrinsics["_mm256_alignr_epi32"] = z3_avx._mm256_alignr_epi32
-
-        # For AVX2 i64, we need YMM (256-bit) operations on 64-bit elements
-        if self.vm == vector_machine.AVX2 and self.prim_type == primitive_type.i64:
-            # Single input permutes (with immediates)
-            intrinsics["_mm256_permute4x64_epi64"] = z3_avx._mm256_permute4x64_epi64
-            intrinsics["_mm256_permute_pd"] = z3_avx._mm256_permute_pd
-
-            # Single input permutes (with control vectors)
-            intrinsics["_mm256_permutexvar_epi64"] = z3_avx._mm256_permutexvar_epi64
-            intrinsics["_mm256_permutevar_pd"] = z3_avx._mm256_permutevar_pd
-
-            # Two input permutes/shuffles
-            intrinsics["_mm256_shuffle_pd"] = z3_avx._mm256_shuffle_pd
-            intrinsics["_mm256_unpacklo_epi64"] = z3_avx._mm256_unpacklo_epi64
-            intrinsics["_mm256_unpackhi_epi64"] = z3_avx._mm256_unpackhi_epi64
-            intrinsics["_mm256_permute2x128_si256"] = z3_avx._mm256_permute2x128_si256
-
-            # Blends
-            intrinsics["_mm256_blend_pd"] = z3_avx._mm256_blend_pd
-            intrinsics["_mm256_blendv_pd"] = z3_avx._mm256_blendv_pd
-
-            # Align operations
-            intrinsics["_mm256_alignr_epi64"] = z3_avx._mm256_alignr_epi64
-
-        # For AVX512 i64, we need ZMM (512-bit) operations on 64-bit elements
-        if self.vm == vector_machine.AVX512 and self.prim_type == primitive_type.i64:
-            # Unmasked single-input
-            intrinsics["_mm512_permutexvar_epi64"] = z3_avx._mm512_permutexvar_epi64
-            intrinsics["_mm512_permute_pd"] = z3_avx._mm512_permute_pd
-            intrinsics["_mm512_permutevar_pd"] = z3_avx._mm512_permutevar_pd
-            # Masked single-input
-            intrinsics["_mm512_mask_permutexvar_epi64"] = (
-                z3_avx._mm512_mask_permutexvar_epi64
-            )
-            intrinsics["_mm512_mask_permute_pd"] = z3_avx._mm512_mask_permute_pd
-            intrinsics["_mm512_mask_permutevar_pd"] = z3_avx._mm512_mask_permutevar_pd
-            # Unmasked dual-input
-            intrinsics["_mm512_permutex2var_epi64"] = z3_avx._mm512_permutex2var_epi64
-            intrinsics["_mm512_shuffle_pd"] = z3_avx._mm512_shuffle_pd
-            intrinsics["_mm512_unpacklo_epi64"] = z3_avx._mm512_unpacklo_epi64
-            intrinsics["_mm512_unpackhi_epi64"] = z3_avx._mm512_unpackhi_epi64
-            intrinsics["_mm512_shuffle_i32x4"] = z3_avx._mm512_shuffle_i32x4
-            intrinsics["_mm512_alignr_epi64"] = z3_avx._mm512_alignr_epi64
-            # Masked dual-input
-            intrinsics["_mm512_mask_permutex2var_epi64"] = (
-                z3_avx._mm512_mask_permutex2var_epi64
-            )
-            intrinsics["_mm512_mask_shuffle_pd"] = z3_avx._mm512_mask_shuffle_pd
-            intrinsics["_mm512_mask_unpacklo_epi64"] = z3_avx._mm512_mask_unpacklo_epi64
-            intrinsics["_mm512_mask_unpackhi_epi64"] = z3_avx._mm512_mask_unpackhi_epi64
-            intrinsics["_mm512_mask_shuffle_i32x4"] = z3_avx._mm512_mask_shuffle_i32x4
-            intrinsics["_mm512_mask_alignr_epi64"] = z3_avx._mm512_mask_alignr_epi64
-
-        # For AVX512 i32, we need ZMM (512-bit) operations on 32-bit elements
-        if self.vm == vector_machine.AVX512 and self.prim_type == primitive_type.i32:
-            # Unmasked single-input
-            intrinsics["_mm512_permutexvar_epi32"] = z3_avx._mm512_permutexvar_epi32
-            intrinsics["_mm512_permute_ps"] = z3_avx._mm512_permute_ps
-            intrinsics["_mm512_permutevar_ps"] = z3_avx._mm512_permutevar_ps
-            # Masked single-input
-            intrinsics["_mm512_mask_permutexvar_epi32"] = (
-                z3_avx._mm512_mask_permutexvar_epi32
-            )
-            intrinsics["_mm512_mask_permute_ps"] = z3_avx._mm512_mask_permute_ps
-            intrinsics["_mm512_mask_permutevar_ps"] = z3_avx._mm512_mask_permutevar_ps
-            # Unmasked dual-input
-            intrinsics["_mm512_permutex2var_epi32"] = z3_avx._mm512_permutex2var_epi32
-            intrinsics["_mm512_shuffle_ps"] = z3_avx._mm512_shuffle_ps
-            intrinsics["_mm512_unpacklo_epi32"] = z3_avx._mm512_unpacklo_epi32
-            intrinsics["_mm512_unpackhi_epi32"] = z3_avx._mm512_unpackhi_epi32
-            intrinsics["_mm512_shuffle_i32x4"] = z3_avx._mm512_shuffle_i32x4
-            intrinsics["_mm512_alignr_epi32"] = z3_avx._mm512_alignr_epi32
-            # Masked dual-input
-            intrinsics["_mm512_mask_permutex2var_epi32"] = (
-                z3_avx._mm512_mask_permutex2var_epi32
-            )
-            intrinsics["_mm512_mask_shuffle_ps"] = z3_avx._mm512_mask_shuffle_ps
-            intrinsics["_mm512_mask_unpacklo_epi32"] = z3_avx._mm512_mask_unpacklo_epi32
-            intrinsics["_mm512_mask_unpackhi_epi32"] = z3_avx._mm512_mask_unpackhi_epi32
-            intrinsics["_mm512_mask_shuffle_i32x4"] = z3_avx._mm512_mask_shuffle_i32x4
-            intrinsics["_mm512_mask_alignr_epi32"] = z3_avx._mm512_mask_alignr_epi32
-
-        return intrinsics
 
     def _create_input_registers(
         self,

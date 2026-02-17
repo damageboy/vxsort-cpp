@@ -4,7 +4,13 @@ from bitonic_super_optimizer import PermutationGadget, SolutionNode
 
 
 def export_solutions_to_json(
-    roots: list[SolutionNode], output_path: str, *, natural_order: bool = False
+    roots: list[SolutionNode],
+    output_path: str,
+    *,
+    natural_order: bool = False,
+    vm_name: str,
+    prim_type_name: str,
+    num_vecs: int,
 ):
     """Generate JSON with all solutions and costs.
 
@@ -74,6 +80,10 @@ def export_solutions_to_json(
         "roots": root_ids,
         "nodes": nodes_dict,
     }
+
+    output["vector_machine"] = vm_name
+    output["primitive_type"] = prim_type_name
+    output["num_vecs"] = num_vecs
 
     with open(output_path, "w") as f:
         json.dump(output, f, indent=2)

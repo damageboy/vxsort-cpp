@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import tempfile
 
+from multiprocessing import Pool
+
 from json_exporter import export_solutions_to_json
 
 # Handle both relative and absolute imports
@@ -12,6 +14,12 @@ try:
     from .utils import vector_machine, primitive_type, width_dict
     from .asm_exporter import export_solutions_to_asm
     from .path_selector import PathSelector
+    from .bitonic_verifier import (
+        load_solutions_from_json,
+        extract_verify_steps,
+        _verify_path_worker,
+    )
+    from .success_progress import SuccessProgress
 
 except ImportError:
     from cost_model import CostModel
@@ -19,6 +27,102 @@ except ImportError:
     from utils import vector_machine, primitive_type, width_dict
     from asm_exporter import export_solutions_to_asm
     from path_selector import PathSelector
+    from bitonic_verifier import (  # type: ignore
+        load_solutions_from_json,
+        extract_verify_steps,
+        _verify_path_worker,
+    )
+    from success_progress import SuccessProgress
+
+
+def _run_verification(
+    paths_to_verify: list,
+    vm: vector_machine,
+    prim_type: primitive_type,
+    natural_order: bool,
+):
+    """Run Z3 end-to-end verification on a list of paths using multiprocessing.
+
+    Raises SystemExit(1) if any path fails.
+    """
+    total = len(paths_to_verify)
+
+    # Build lightweight picklable jobs (no SolutionNode tree references)
+    jobs = [
+        (i, extract_verify_steps(path), vm, prim_type, natural_order)
+        for i, path in enumerate(paths_to_verify)
+    ]
+
+    progress = SuccessProgress.create(
+        description_column="[orange1]{task.description}",
+        width=60,
+        success_style="green",
+        attempt_style="red",
+        success_label="Verified",
+    )
+    progress.start()
+    task_id = progress.add_task("Verifying paths", total=total, successes=0)
+
+    failures = []
+    try:
+        pool = Pool()
+        for path_index, result in pool.imap_unordered(_verify_path_worker, jobs):
+            progress.update(task_id, advance=1, success=1 if result.verified else 0)
+            if not result.verified:
+                failures.append((path_index, result))
+        pool.close()
+        pool.join()
+    finally:
+        progress.stop()
+
+    if failures:
+        failures.sort(key=lambda x: x[0])
+        print(f"\nVERIFICATION FAILED: {len(failures)}/{total} paths failed")
+        for path_index, result in failures:
+            print(f"  Path {path_index + 1}: counterexample={result.counterexample}")
+        raise SystemExit(1)
+    else:
+        print(f"\nAll {total} paths verified correct.")
+
+
+def verify_only_from_json(
+    json_path: str,
+    top_k: int | None = None,
+    target_cpu: str = "generic",
+):
+    """Load solutions from a JSON file and verify them without re-running synthesis.
+
+    The JSON file must contain vector_machine and primitive_type metadata
+    (written by json_exporter since Feb 2026).
+
+    Args:
+        json_path: Path to a JSON solutions file.
+        top_k: Number of best paths to verify. If None, verify all paths.
+        target_cpu: Target CPU for cost model during path selection.
+    """
+    bundle = load_solutions_from_json(json_path)
+
+    if bundle.vm_name is None or bundle.prim_type_name is None:
+        raise SystemExit(
+            f"Error: {json_path} has no vector_machine/primitive_type metadata.\n"
+            "Re-export the solutions with a current version of the tool."
+        )
+
+    vm = vector_machine[bundle.vm_name]
+    prim_type = primitive_type[bundle.prim_type_name]
+
+    print(
+        f"Loaded {len(bundle.roots)} roots from {json_path} "
+        f"({vm.name} {prim_type.name}, "
+        f"natural_order={bundle.natural_order})"
+    )
+
+    # Select paths
+    cost_model = CostModel(target_cpu)
+    path_selector = PathSelector(cost_model)
+    paths = path_selector.select_top_k_paths(bundle.roots, top_k or 10_000)
+
+    _run_verification(paths, vm, prim_type, bundle.natural_order)
 
 
 def _count_dag_paths(roots):
@@ -55,6 +159,7 @@ def generate_bitonic_sorter(
     natural_order: bool = False,
     max_gadget_solutions: int = 3,
     target_cpu: str = "generic",
+    verify: bool = False,
 ):
     """
     Generate bitonic sorter with super-optimized permutation sequences.
@@ -73,6 +178,8 @@ def generate_bitonic_sorter(
             gadget template. Higher values increase search diversity at the cost of speed. Default: 3.
         target_cpu: Target CPU for cost model (e.g., "generic", "TGL", "ZEN4", "tigerlake").
             Default: "generic".
+        verify: If True, verify selected paths with Z3 end-to-end proof of sorting
+            correctness. Default: False.
 
     Returns:
         List of SolutionNode trees representing different optimized solutions
@@ -142,10 +249,28 @@ def generate_bitonic_sorter(
                 f"bitonic_solutions_{num_vecs}x{vm.name}_{type.name}{order_suffix}.json"
             )
             export_solutions_to_json(
-                solutions, output_path, natural_order=natural_order
+                solutions,
+                output_path,
+                natural_order=natural_order,
+                vm_name=vm.name,
+                prim_type_name=type.name,
+                num_vecs=num_vecs,
             )
         else:
             print(f"Warning: Unknown output format '{output_format}', skipping")
+
+    # End-to-end verification
+    if verify:
+        # Build paths if we don't already have them
+        paths_to_verify = selected_paths
+        if paths_to_verify is None:
+            cost_model = CostModel(target_cpu)
+            path_selector = PathSelector(cost_model)
+            paths_to_verify = path_selector.select_top_k_paths(
+                solutions, top_k or 10_000
+            )
+
+        _run_verification(paths_to_verify, vm, type, natural_order)
 
     return solutions
 
@@ -164,14 +289,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--vector-machine",
         type=str,
-        required=True,
+        default=None,
         choices=list(vector_machine.__members__.keys()),
-        help=f"Vector architecture ({', '.join(vector_machine.__members__.keys())}",
+        help=f"Vector architecture ({', '.join(vector_machine.__members__.keys())})",
     )
     parser.add_argument(
         "--datatype",
         type=str,
-        required=True,
+        default=None,
         choices=list(primitive_type.__members__.keys()),
         help=f"Primitive data type ({', '.join(primitive_type.__members__.keys())})",
     )
@@ -226,8 +351,35 @@ if __name__ == "__main__":
         help="Target CPU for cost model. Examples: generic, TGL, SKX, ZEN4, "
         "tigerlake, skylake-x, zen4. Use 'generic' for default costs (default: generic)",
     )
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        default=False,
+        help="Verify selected paths with Z3 end-to-end proof of sorting correctness",
+    )
+    parser.add_argument(
+        "--verify-only",
+        type=str,
+        default=None,
+        metavar="JSON_FILE",
+        help="Skip synthesis and verify solutions from a JSON file. "
+        "The file must contain vector_machine/primitive_type metadata.",
+    )
 
     args = parser.parse_args()
+
+    # --verify-only mode: load JSON and verify without synthesis
+    if args.verify_only is not None:
+        verify_only_from_json(
+            args.verify_only,
+            top_k=args.top_k,
+            target_cpu=args.target_cpu,
+        )
+        raise SystemExit(0)
+
+    # Normal synthesis mode requires --vector-machine and --datatype
+    if not args.vector_machine or not args.datatype:
+        parser.error("--vector-machine and --datatype are required")
 
     # Convert string arguments to Enum members
     vm = vector_machine[args.vector_machine]
@@ -250,4 +402,5 @@ if __name__ == "__main__":
         natural_order=args.natural_order,
         max_gadget_solutions=args.max_gadget_solutions,
         target_cpu=args.target_cpu,
+        verify=args.verify,
     )

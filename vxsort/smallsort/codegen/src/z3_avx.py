@@ -2215,3 +2215,82 @@ def _mm512_mask_alignr_epi64(
     See _generic_alignr for operation details.
     """
     return _generic_alignr(a, b, imm8, 512, 64, src=src, k=k)
+
+
+# ── Min / Max ────────────────────────────────────────────────────────────────
+
+
+def _generic_minmax(a, b, total_width, element_width, take_min):
+    """Element-wise signed min or max.
+
+    Z3 BitVec ``<`` is ``bvslt`` (signed), matching the hardware instructions
+    (vpminsd/vpmaxsd for i32, vpminsq/vpmaxsq for i64).
+
+    Args:
+        a, b: Z3 BitVecRef operands of *total_width* bits.
+        total_width: Register width in bits (256 or 512).
+        element_width: Element width in bits (32 or 64).
+        take_min: If True return element-wise min, else max.
+    """
+    num_elements = total_width // element_width
+    elements = []
+    for j in range(num_elements):
+        lo = j * element_width
+        hi = lo + element_width - 1
+        a_elem = Extract(hi, lo, a)
+        b_elem = Extract(hi, lo, b)
+        if take_min:
+            elements.append(If(a_elem < b_elem, a_elem, b_elem))
+        else:
+            elements.append(If(a_elem < b_elem, b_elem, a_elem))
+    return simplify(Concat(elements[::-1]))
+
+
+def generic_min(a, b, total_width, element_width):
+    """Element-wise signed minimum."""
+    return _generic_minmax(a, b, total_width, element_width, take_min=True)
+
+
+def generic_max(a, b, total_width, element_width):
+    """Element-wise signed maximum."""
+    return _generic_minmax(a, b, total_width, element_width, take_min=False)
+
+
+def _mm256_min_epi32(a: BitVecRef, b: BitVecRef):
+    """Element-wise signed 32-bit minimum across a 256-bit register."""
+    return _generic_minmax(a, b, 256, 32, take_min=True)
+
+
+def _mm256_max_epi32(a: BitVecRef, b: BitVecRef):
+    """Element-wise signed 32-bit maximum across a 256-bit register."""
+    return _generic_minmax(a, b, 256, 32, take_min=False)
+
+
+def _mm256_min_epi64(a: BitVecRef, b: BitVecRef):
+    """Element-wise signed 64-bit minimum across a 256-bit register."""
+    return _generic_minmax(a, b, 256, 64, take_min=True)
+
+
+def _mm256_max_epi64(a: BitVecRef, b: BitVecRef):
+    """Element-wise signed 64-bit maximum across a 256-bit register."""
+    return _generic_minmax(a, b, 256, 64, take_min=False)
+
+
+def _mm512_min_epi32(a: BitVecRef, b: BitVecRef):
+    """Element-wise signed 32-bit minimum across a 512-bit register."""
+    return _generic_minmax(a, b, 512, 32, take_min=True)
+
+
+def _mm512_max_epi32(a: BitVecRef, b: BitVecRef):
+    """Element-wise signed 32-bit maximum across a 512-bit register."""
+    return _generic_minmax(a, b, 512, 32, take_min=False)
+
+
+def _mm512_min_epi64(a: BitVecRef, b: BitVecRef):
+    """Element-wise signed 64-bit minimum across a 512-bit register."""
+    return _generic_minmax(a, b, 512, 64, take_min=True)
+
+
+def _mm512_max_epi64(a: BitVecRef, b: BitVecRef):
+    """Element-wise signed 64-bit maximum across a 512-bit register."""
+    return _generic_minmax(a, b, 512, 64, take_min=False)

@@ -1,4 +1,16 @@
-from z3 import Solver, main_ctx, unsat, sat, BitVec, BitVecVal, Concat, Extract
+from z3 import (
+    Solver,
+    main_ctx,
+    unsat,
+    sat,
+    BitVec,
+    BitVecVal,
+    Concat,
+    Extract,
+    Not,
+    Or,
+    And,
+)
 
 # Assuming your z3s functions and registers are importable, e.g.:
 from z3_avx import (
@@ -60,6 +72,16 @@ from z3_avx import (
     construct_zmm_reg_from_elements,
 )
 from z3_avx import ymm_reg_reversed, zmm_reg_reversed
+from z3_avx import (
+    _mm256_min_epi32,
+    _mm256_max_epi32,
+    _mm256_min_epi64,
+    _mm256_max_epi64,
+    _mm512_min_epi32,
+    _mm512_max_epi32,
+    _mm512_min_epi64,
+    _mm512_max_epi64,
+)
 
 #    imm8 = 0b11100100 means:
 #    - Lane bits [1:0] = 00 (select element 0 for position 0)
@@ -5793,3 +5815,190 @@ class TestShuffle2MaskDecode:
             assert result.endswith(")"), f"Bad format for 0x{imm8:02x}: {result}"
             # Check it contains the right number of commas
             assert result.count(",") == 1, f"Bad format for 0x{imm8:02x}: {result}"
+
+
+class TestMinMaxEpi32:
+    """Tests for _mm256_min/max_epi32 and _mm512_min/max_epi32."""
+
+    def test_mm256_min_epi32_concrete(self):
+        """Concrete values: element-wise minimum is correct."""
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = ymm_reg_with_32b_values("a", s, [5, 3, 7, 1, 8, 2, 6, 4], ctx=ctx)
+        b = ymm_reg_with_32b_values("b", s, [2, 8, 4, 6, 1, 5, 3, 7], ctx=ctx)
+        expected = BitVecVal(array_to_long([2, 3, 4, 1, 1, 2, 3, 4], 32), 256)
+        result = _mm256_min_epi32(a, b)
+        s.add(result != expected)
+        assert s.check() == unsat
+
+    def test_mm256_max_epi32_concrete(self):
+        """Concrete values: element-wise maximum is correct."""
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = ymm_reg_with_32b_values("a", s, [5, 3, 7, 1, 8, 2, 6, 4], ctx=ctx)
+        b = ymm_reg_with_32b_values("b", s, [2, 8, 4, 6, 1, 5, 3, 7], ctx=ctx)
+        expected = BitVecVal(array_to_long([5, 8, 7, 6, 8, 5, 6, 7], 32), 256)
+        result = _mm256_max_epi32(a, b)
+        s.add(result != expected)
+        assert s.check() == unsat
+
+    def test_mm256_min_epi32_signed(self):
+        """Signed semantics: -1 < 1 so min(-1, 1) == -1."""
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        neg_one = (1 << 32) - 1  # 0xFFFFFFFF = -1 in two's complement
+        a = ymm_reg_with_32b_values("a", s, [neg_one] * 8, ctx=ctx)
+        b = ymm_reg_with_32b_values("b", s, [1] * 8, ctx=ctx)
+        result = _mm256_min_epi32(a, b)
+        expected = BitVecVal(array_to_long([neg_one] * 8, 32), 256)
+        s.add(result != expected)
+        assert s.check() == unsat
+
+    def test_mm256_minmax_epi32_preserves_elements(self):
+        """min(a,b) + max(a,b) preserves all elements (no duplication/loss)."""
+
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = ymm_reg("a", ctx=ctx)
+        b = ymm_reg("b", ctx=ctx)
+        lo = _mm256_min_epi32(a, b)
+        hi = _mm256_max_epi32(a, b)
+        for j in range(8):
+            bit_lo = j * 32
+            bit_hi = bit_lo + 31
+            a_e = Extract(bit_hi, bit_lo, a)
+            b_e = Extract(bit_hi, bit_lo, b)
+            lo_e = Extract(bit_hi, bit_lo, lo)
+            hi_e = Extract(bit_hi, bit_lo, hi)
+            s.add(
+                Not(
+                    Or(
+                        And(lo_e == a_e, hi_e == b_e),
+                        And(lo_e == b_e, hi_e == a_e),
+                    )
+                )
+            )
+        assert s.check() == unsat
+
+    def test_mm512_min_epi32_concrete(self):
+        """512-bit min: element-wise minimum is correct."""
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = zmm_reg_with_32b_values(
+            "a", s, [5, 3, 7, 1, 8, 2, 6, 4, 10, 12, 9, 11, 16, 14, 13, 15], ctx=ctx
+        )
+        b = zmm_reg_with_32b_values(
+            "b", s, [2, 8, 4, 6, 1, 5, 3, 7, 11, 9, 12, 10, 13, 15, 16, 14], ctx=ctx
+        )
+        expected = BitVecVal(
+            array_to_long([2, 3, 4, 1, 1, 2, 3, 4, 10, 9, 9, 10, 13, 14, 13, 14], 32),
+            512,
+        )
+        result = _mm512_min_epi32(a, b)
+        s.add(result != expected)
+        assert s.check() == unsat
+
+    def test_mm512_max_epi32_concrete(self):
+        """512-bit max: element-wise maximum is correct."""
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = zmm_reg_with_32b_values(
+            "a", s, [5, 3, 7, 1, 8, 2, 6, 4, 10, 12, 9, 11, 16, 14, 13, 15], ctx=ctx
+        )
+        b = zmm_reg_with_32b_values(
+            "b", s, [2, 8, 4, 6, 1, 5, 3, 7, 11, 9, 12, 10, 13, 15, 16, 14], ctx=ctx
+        )
+        expected = BitVecVal(
+            array_to_long([5, 8, 7, 6, 8, 5, 6, 7, 11, 12, 12, 11, 16, 15, 16, 15], 32),
+            512,
+        )
+        result = _mm512_max_epi32(a, b)
+        s.add(result != expected)
+        assert s.check() == unsat
+
+
+class TestMinMaxEpi64:
+    """Tests for _mm256_min/max_epi64 and _mm512_min/max_epi64."""
+
+    def test_mm256_min_epi64_concrete(self):
+        """Concrete values: element-wise minimum is correct."""
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = ymm_reg_with_64b_values("a", s, [5, 3, 7, 1], ctx=ctx)
+        b = ymm_reg_with_64b_values("b", s, [2, 8, 4, 6], ctx=ctx)
+        expected = BitVecVal(array_to_long([2, 3, 4, 1], 64), 256)
+        result = _mm256_min_epi64(a, b)
+        s.add(result != expected)
+        assert s.check() == unsat
+
+    def test_mm256_max_epi64_concrete(self):
+        """Concrete values: element-wise maximum is correct."""
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = ymm_reg_with_64b_values("a", s, [5, 3, 7, 1], ctx=ctx)
+        b = ymm_reg_with_64b_values("b", s, [2, 8, 4, 6], ctx=ctx)
+        expected = BitVecVal(array_to_long([5, 8, 7, 6], 64), 256)
+        result = _mm256_max_epi64(a, b)
+        s.add(result != expected)
+        assert s.check() == unsat
+
+    def test_mm256_min_epi64_signed(self):
+        """Signed semantics: -1 < 1 so min(-1, 1) == -1."""
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        neg_one = (1 << 64) - 1  # 0xFFFFFFFF_FFFFFFFF = -1
+        a = ymm_reg_with_64b_values("a", s, [neg_one] * 4, ctx=ctx)
+        b = ymm_reg_with_64b_values("b", s, [1] * 4, ctx=ctx)
+        result = _mm256_min_epi64(a, b)
+        expected = BitVecVal(array_to_long([neg_one] * 4, 64), 256)
+        s.add(result != expected)
+        assert s.check() == unsat
+
+    def test_mm256_minmax_epi64_preserves_elements(self):
+        """min(a,b) + max(a,b) preserves all elements."""
+
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = ymm_reg("a", ctx=ctx)
+        b = ymm_reg("b", ctx=ctx)
+        lo = _mm256_min_epi64(a, b)
+        hi = _mm256_max_epi64(a, b)
+        for j in range(4):
+            bit_lo = j * 64
+            bit_hi = bit_lo + 63
+            a_e = Extract(bit_hi, bit_lo, a)
+            b_e = Extract(bit_hi, bit_lo, b)
+            lo_e = Extract(bit_hi, bit_lo, lo)
+            hi_e = Extract(bit_hi, bit_lo, hi)
+
+            s.add(
+                Not(
+                    Or(
+                        And(lo_e == a_e, hi_e == b_e),
+                        And(lo_e == b_e, hi_e == a_e),
+                    )
+                )
+            )
+        assert s.check() == unsat
+
+    def test_mm512_min_epi64_concrete(self):
+        """512-bit min: element-wise minimum is correct."""
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = zmm_reg_with_64b_values("a", s, [5, 3, 7, 1, 8, 2, 6, 4], ctx=ctx)
+        b = zmm_reg_with_64b_values("b", s, [2, 8, 4, 6, 1, 5, 3, 7], ctx=ctx)
+        expected = BitVecVal(array_to_long([2, 3, 4, 1, 1, 2, 3, 4], 64), 512)
+        result = _mm512_min_epi64(a, b)
+        s.add(result != expected)
+        assert s.check() == unsat
+
+    def test_mm512_max_epi64_concrete(self):
+        """512-bit max: element-wise maximum is correct."""
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a = zmm_reg_with_64b_values("a", s, [5, 3, 7, 1, 8, 2, 6, 4], ctx=ctx)
+        b = zmm_reg_with_64b_values("b", s, [2, 8, 4, 6, 1, 5, 3, 7], ctx=ctx)
+        expected = BitVecVal(array_to_long([5, 8, 7, 6, 8, 5, 6, 7], 64), 512)
+        result = _mm512_max_epi64(a, b)
+        s.add(result != expected)
+        assert s.check() == unsat
