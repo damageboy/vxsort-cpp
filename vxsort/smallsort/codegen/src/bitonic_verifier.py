@@ -340,83 +340,74 @@ class BitonicPathVerifier:
     def _resolve_arg(self, key, value, top_reg, bottom_reg, current_reg, prev_output):
         """Resolve a concrete instruction argument to a Z3 value."""
         if isinstance(value, str):
-            if value == "top":
-                return top_reg
-            elif value == "bottom":
-                return bottom_reg
-            elif value == "prev":
+            register_names = {
+                "top": top_reg,
+                "bottom": bottom_reg,
+                "input": current_reg,
+                "a": current_reg,
+            }
+            if value in register_names:
+                return register_names[value]
+            if value == "prev":
                 if prev_output is None:
                     raise ValueError("'prev' referenced but no previous output")
                 return prev_output
-            elif value in ("input", "a"):
-                return current_reg
 
         if isinstance(value, int):
-            if key == "imm8":
-                return BitVecVal(value, 8)
-            elif key == "k":
-                # Mask width depends on elements per vector
-                return BitVecVal(value, self.elements_per_vector)
-            else:
-                return BitVecVal(value, self.total_bits)
+            bit_widths = {
+                "imm8": 8,
+                "k": self.elements_per_vector,
+            }
+            return BitVecVal(value, bit_widths.get(key, self.total_bits))
 
         return value
 
     def _dispatch_intrinsic(self, intrinsic, args: dict):
         """Dispatch an intrinsic call using the same pattern matching as
-        GadgetSynthesizer._apply_instructions."""
-        if (
-            "k" in args
-            and "src" in args
-            and "op_idx" in args
-            and "a" in args
-            and "b" not in args
-        ):
+        GadgetSynthesizer._apply_instructions.
+
+        Each pattern is a tuple of arg keys defining the call signature.
+        Patterns are checked from most specific (masked with many operands)
+        to least specific (fallback).
+        """
+        keys = frozenset(args.keys())
+
+        # Masked intrinsics (have 'k' in args)
+        # Pattern: masked single-input with control vector
+        if keys >= {"k", "src", "op_idx", "a"} and "b" not in args:
             return intrinsic(args["src"], args["k"], args["op_idx"], args["a"])
-        elif (
-            "k" in args
-            and "src" in args
-            and "a" in args
-            and "b" in args
-            and "imm8" in args
-        ):
+        # Pattern: masked dual-input with immediate
+        if keys >= {"k", "src", "a", "b", "imm8"}:
             return intrinsic(args["src"], args["k"], args["a"], args["b"], args["imm8"])
-        elif (
-            "k" in args
-            and "src" in args
-            and "a" in args
-            and "imm8" in args
-            and "b" not in args
-        ):
+        # Pattern: masked single-input with immediate
+        if keys >= {"k", "src", "a", "imm8"} and "b" not in args:
             return intrinsic(args["src"], args["k"], args["a"], args["imm8"])
-        elif (
-            "k" in args
-            and "src" in args
-            and "a" in args
-            and "b" in args
-            and "imm8" not in args
-        ):
+        # Pattern: masked dual-input without immediate
+        if keys >= {"k", "src", "a", "b"}:
             return intrinsic(args["src"], args["k"], args["a"], args["b"])
-        elif (
-            "k" in args
-            and "a" in args
-            and "op_idx" in args
-            and "b" in args
-            and "src" not in args
-        ):
+        # Pattern: masked permutex2var (no src, has op_idx)
+        if keys >= {"k", "a", "op_idx", "b"} and "src" not in args:
             return intrinsic(args["a"], args["k"], args["op_idx"], args["b"])
-        elif "a" in args and "op_idx" in args and "b" in args and "k" not in args:
+
+        # Unmasked intrinsics
+        # Pattern: permutex2var (a, op_idx, b)
+        if keys >= {"a", "op_idx", "b"} and "k" not in args:
             return intrinsic(args["a"], args["op_idx"], args["b"])
-        elif "a" in args and "op_idx" in args and "b" not in args:
+        # Pattern: single-input with control vector (a, op_idx)
+        if keys >= {"a", "op_idx"} and "b" not in args:
             return intrinsic(args["a"], args["op_idx"])
-        elif "a" in args and "imm8" in args and "b" not in args:
-            return intrinsic(args["a"], args["imm8"])
-        elif "a" in args and "b" in args and "imm8" in args:
+        # Pattern: dual-input with immediate (a, b, imm8)
+        if keys >= {"a", "b", "imm8"}:
             return intrinsic(args["a"], args["b"], args["imm8"])
-        elif "a" in args and "b" in args and "mask" in args:
+        # Pattern: dual-input with mask (a, b, mask)
+        if keys >= {"a", "b", "mask"}:
             return intrinsic(args["a"], args["b"], args["mask"])
-        elif "a" in args and "b" in args and "imm8" not in args and "mask" not in args:
+        # Pattern: single-input with immediate (a, imm8)
+        if keys >= {"a", "imm8"} and "b" not in args:
+            return intrinsic(args["a"], args["imm8"])
+        # Pattern: dual-input (a, b)
+        if keys >= {"a", "b"}:
             return intrinsic(args["a"], args["b"])
-        else:
-            arg_values = list(args.values())
-            return intrinsic(*arg_values)
+
+        # Fallback: pass all args positionally
+        return intrinsic(*args.values())

@@ -196,28 +196,19 @@ class CostModel:
 
     def get_instruction_cost(self, intrinsic_name: str) -> InstructionCost:
         """Get cost for a specific intrinsic."""
-        if intrinsic_name in self.instruction_costs:
-            return self.instruction_costs[intrinsic_name]
-        else:
-            # Unknown instruction, use default cost
-            return InstructionCost(latency=1.0, throughput=1.0, ports=["unknown"])
+        return self.instruction_costs.get(
+            intrinsic_name,
+            InstructionCost(latency=1.0, throughput=1.0, ports=["unknown"]),
+        )
 
     def calculate_gadget_cost(self, gadget) -> float:
+        """Calculate cost for a permutation gadget (sum of latencies).
+
+        Uses simple latency sum. More sophisticated models could account
+        for instruction-level parallelism.
         """
-        Calculate cost for a permutation gadget.
-        For now, use simple latency sum. More sophisticated models
-        could account for instruction-level parallelism.
-        """
-        total_cost = 0.0
-
-        # Sum costs for top instructions
-        for inst in gadget.top_instructions:
-            cost = self.get_instruction_cost(inst.intrinsic_name)
-            total_cost += cost.latency
-
-        # Sum costs for bottom instructions
-        for inst in gadget.bottom_instructions:
-            cost = self.get_instruction_cost(inst.intrinsic_name)
-            total_cost += cost.latency
-
-        return total_cost
+        all_instructions = gadget.top_instructions + gadget.bottom_instructions
+        return sum(
+            self.get_instruction_cost(inst.intrinsic_name).latency
+            for inst in all_instructions
+        )

@@ -77,13 +77,12 @@ def export_solutions_to_json(
 
     output = {
         "natural_order": natural_order,
+        "vector_machine": vm_name,
+        "primitive_type": prim_type_name,
+        "num_vecs": num_vecs,
         "roots": root_ids,
         "nodes": nodes_dict,
     }
-
-    output["vector_machine"] = vm_name
-    output["primitive_type"] = prim_type_name
-    output["num_vecs"] = num_vecs
 
     with open(output_path, "w") as f:
         json.dump(output, f, indent=2)

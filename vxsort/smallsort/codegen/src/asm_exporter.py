@@ -130,20 +130,17 @@ class RegisterAllocator:
         self.kmask_regs_allocated = []
 
 
-def _format_control_vector(val: int, vm: vector_machine, dtype: primitive_type) -> str:
-    """Format a 256/512-bit control vector as a list of elements."""
+def _format_control_vector_bits(val: int, total_bits: int, element_bits: int) -> str:
+    """Format a packed control vector as a bracketed list of lane values.
 
-    total_bytes = width_dict[vm]
-    total_bits = total_bytes * 8
-    element_bytes = dtype.value[0]
-    element_bits = element_bytes * 8
+    Args:
+        val: Packed integer containing all lane values.
+        total_bits: Total width of the vector register in bits.
+        element_bits: Width of each lane element in bits.
+    """
     num_lanes = total_bits // element_bits
-
-    elements = []
-    for i in range(num_lanes):
-        element = (val >> (i * element_bits)) & ((1 << element_bits) - 1)
-        elements.append(element)
-
+    mask = (1 << element_bits) - 1
+    elements = [(val >> (i * element_bits)) & mask for i in range(num_lanes)]
     return "[" + ", ".join(str(e) for e in elements) + "]"
 
 
@@ -341,25 +338,15 @@ def _format_instruction(
             operands.append(f"<{mask_val}>")
 
     if ctrl_val is not None:
-        # Format control vector with correct element width
+        total_bits = width_dict[reg_allocator.vm] * 8
         if ctrl_element_width is not None:
-            # Use the instruction's element width instead of the data type's width
-
-            total_bits = width_dict[reg_allocator.vm] * 8
-            num_elements = total_bits // ctrl_element_width
-
-            elements = []
-            for i in range(num_elements):
-                element = (ctrl_val >> (i * ctrl_element_width)) & (
-                    (1 << ctrl_element_width) - 1
-                )
-                elements.append(element)
-
-            comment_parts.append("[" + ", ".join(str(e) for e in elements) + "]")
-        else:
-            # Fall back to data type's element width
             comment_parts.append(
-                _format_control_vector(ctrl_val, reg_allocator.vm, reg_allocator.dtype)
+                _format_control_vector_bits(ctrl_val, total_bits, ctrl_element_width)
+            )
+        else:
+            element_bits = reg_allocator.dtype.value[0] * 8
+            comment_parts.append(
+                _format_control_vector_bits(ctrl_val, total_bits, element_bits)
             )
 
     # Add k-mask value as a comment
@@ -546,7 +533,6 @@ def export_solutions_to_asm(
 
         # Use PathSelector to enumerate paths with cap
         cost_model = CostModel("generic")
-        cost_model.compute_costs(solutions)
         path_selector = PathSelector(cost_model)
 
         # Select paths with a large limit to get "all" paths, capped at _MAX_ASM_PATHS

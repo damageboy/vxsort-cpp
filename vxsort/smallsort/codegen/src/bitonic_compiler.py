@@ -76,13 +76,11 @@ def _run_verification(
 
     failures = []
     try:
-        pool = Pool()
-        for path_index, result in pool.imap_unordered(_verify_path_worker, jobs):
-            progress.update(task_id, advance=1, success=1 if result.verified else 0)
-            if not result.verified:
-                failures.append((path_index, result))
-        pool.close()
-        pool.join()
+        with Pool() as pool:
+            for path_index, result in pool.imap_unordered(_verify_path_worker, jobs):
+                progress.update(task_id, advance=1, success=1 if result.verified else 0)
+                if not result.verified:
+                    failures.append((path_index, result))
     finally:
         progress.stop()
 
@@ -92,8 +90,8 @@ def _run_verification(
         for path_index, result in failures:
             print(f"  Path {path_index + 1}: counterexample={result.counterexample}")
         raise SystemExit(1)
-    else:
-        print(f"\nAll {total} paths verified correct.")
+
+    print(f"\nAll {total} paths verified correct.")
 
 
 def verify_only_from_json(
@@ -330,7 +328,6 @@ def generate_bitonic_sorter(
     return solutions
 
 
-# Press the green button in the gutter to run the script.
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Generate bitonic sorter with optimized permutations."
@@ -377,7 +374,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--gadget-depth",
         type=int,
-        default=3,
+        default=1,
         choices=[1, 2, 3],
         help="Maximum instruction depth per gadget (1-3, default: 3)",
     )
