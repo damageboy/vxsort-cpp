@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 import argparse
+import os
 import tempfile
 
 from multiprocessing import Pool
@@ -20,6 +21,11 @@ try:
         _verify_path_worker,
     )
     from .success_progress import SuccessProgress
+    from .checkpoint import (
+        CheckpointConfig,
+        load_checkpoint,
+        validate_checkpoint_config,
+    )
 
 except ImportError:
     from cost_model import CostModel
@@ -33,6 +39,11 @@ except ImportError:
         _verify_path_worker,
     )
     from success_progress import SuccessProgress
+    from checkpoint import (  # type: ignore
+        CheckpointConfig,
+        load_checkpoint,
+        validate_checkpoint_config,
+    )
 
 
 def _run_verification(
@@ -160,6 +171,8 @@ def generate_bitonic_sorter(
     max_gadget_solutions: int = 3,
     target_cpu: str = "generic",
     verify: bool = False,
+    checkpoint_dir: str | None = None,
+    resume_file: str | None = None,
 ):
     """
     Generate bitonic sorter with super-optimized permutation sequences.
@@ -180,6 +193,10 @@ def generate_bitonic_sorter(
             Default: "generic".
         verify: If True, verify selected paths with Z3 end-to-end proof of sorting
             correctness. Default: False.
+        checkpoint_dir: Directory to save checkpoints after each stage completes.
+            If None, no checkpoints are saved.
+        resume_file: Path to a checkpoint file to resume from. If provided, completed
+            stages are skipped and synthesis continues from where it left off.
 
     Returns:
         List of SolutionNode trees representing different optimized solutions
@@ -192,6 +209,42 @@ def generate_bitonic_sorter(
         f"Building {vm.name} sorter for {total_elements} elements ({num_vecs} vectors)"
     )
 
+    # Handle resume from checkpoint
+    resume_data = None
+    if resume_file is not None:
+        print(f"Loading checkpoint from {resume_file}...")
+        saved_config, per_stage_data, stages_completed, last_completed_stage = (
+            load_checkpoint(resume_file)
+        )
+
+        # Build current config for validation
+        current_config = CheckpointConfig(
+            num_vecs=num_vecs,
+            vm=vm.name,
+            prim_type=type.name,
+            gadget_depth=gadget_depth,
+            natural_order=natural_order,
+            max_unique_outputs=max_gadget_solutions,
+            depth_limit=depth_limit,
+        )
+
+        ok, msg = validate_checkpoint_config(saved_config, current_config)
+        if not ok:
+            raise SystemExit(f"Checkpoint incompatible: {msg}")
+
+        print(
+            f"Checkpoint valid: {len(stages_completed)} stages completed "
+            f"(last: {last_completed_stage})"
+        )
+        resume_data = {
+            "per_stage_data": per_stage_data,
+            "last_completed_stage": last_completed_stage,
+        }
+
+    # Create checkpoint directory if needed
+    if checkpoint_dir is not None:
+        os.makedirs(checkpoint_dir, exist_ok=True)
+
     # Create super-vectorizer
     super_opt = BitonicSuperVectorizer(num_vecs, type, vm, smt2_dump_dir=smt2_dump_dir)
 
@@ -202,6 +255,8 @@ def generate_bitonic_sorter(
         gadget_depth=gadget_depth,
         natural_order=natural_order,
         max_unique_outputs=max_gadget_solutions,
+        checkpoint_dir=checkpoint_dir,
+        resume_data=resume_data,
     )
 
     print(f"Found {len(solutions)} root solutions")
@@ -365,6 +420,22 @@ if __name__ == "__main__":
         help="Skip synthesis and verify solutions from a JSON file. "
         "The file must contain vector_machine/primitive_type metadata.",
     )
+    parser.add_argument(
+        "--checkpoint-dir",
+        type=str,
+        default=None,
+        metavar="DIR",
+        help="Directory to save checkpoints after each stage completes. "
+        "Enables resuming long-running compilations.",
+    )
+    parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        metavar="CHECKPOINT_FILE",
+        help="Resume synthesis from a checkpoint file (.json.zst). "
+        "Completed stages are skipped.",
+    )
 
     args = parser.parse_args()
 
@@ -403,4 +474,6 @@ if __name__ == "__main__":
         max_gadget_solutions=args.max_gadget_solutions,
         target_cpu=args.target_cpu,
         verify=args.verify,
+        checkpoint_dir=args.checkpoint_dir,
+        resume_file=args.resume,
     )

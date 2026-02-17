@@ -1987,9 +1987,11 @@ class BitonicSuperVectorizer:
         gadget_depth: int = 3,
         natural_order: bool = False,
         max_unique_outputs: int = 3,
+        checkpoint_dir: str | None = None,
+        resume_data: dict | None = None,
     ) -> tuple[list[SolutionNode], bool]:
         """
-        Recursively explore all stage transitions to build solution tree.
+        Iteratively explore all stage transitions to build solution tree.
         Returns (root_nodes, all_stages_complete).
 
         Args:
@@ -1999,6 +2001,10 @@ class BitonicSuperVectorizer:
                 element order (1..N in top, N+1..2N in bottom) for memory writeback.
             max_unique_outputs: Number of smallest unique output states to enumerate
                 per template for deterministic diversity. Default: 3.
+            checkpoint_dir: Directory to save checkpoints after each stage completes.
+                If None, no checkpoints are saved.
+            resume_data: If provided, resume from a previous checkpoint. Expected
+                keys: ``per_stage_data`` and ``last_completed_stage``.
 
         Returns:
             Tuple of (root nodes, all_stages_complete) where all_stages_complete
@@ -2021,14 +2027,34 @@ class BitonicSuperVectorizer:
         initial_state = self._create_initial_state()
         # Pre-compute all candidates once - they're independent of stage/input state
         all_candidates = self.synthesizer.precompute_all_candidates(gadget_depth)
+
+        # Build checkpoint config if checkpoint_dir is provided
+        checkpoint_config = None
+        if checkpoint_dir is not None:
+            try:
+                from checkpoint import CheckpointConfig
+            except ImportError:
+                from .checkpoint import CheckpointConfig  # type: ignore[no-redef]
+            checkpoint_config = CheckpointConfig(
+                num_vecs=self.num_vecs,
+                vm=self.vm.name,
+                prim_type=self.prim_type.name,
+                gadget_depth=gadget_depth,
+                natural_order=natural_order,
+                max_unique_outputs=max_unique_outputs,
+                depth_limit=depth_limit,
+            )
+
         # Start with empty parent path for the root
         input_states_with_context = [(initial_state, ())]
-        nodes_by_path = self._build_tree_recursive(
+        nodes_by_path = self._build_tree_iterative(
             input_states_with_context,
-            0,
             depth_limit,
             all_candidates,
             max_unique_outputs=max_unique_outputs,
+            checkpoint_dir=checkpoint_dir,
+            checkpoint_config=checkpoint_config,
+            resume_data=resume_data,
         )
 
         # Determine expected stages
@@ -2042,37 +2068,34 @@ class BitonicSuperVectorizer:
         # Return root nodes (those with empty parent path)
         return nodes_by_path.get((), []), all_stages_complete
 
-    def _build_tree_recursive(
+    def _process_single_stage(
         self,
-        input_states_with_context: list[tuple[VectorState, list]],
+        input_states_with_context: list[tuple[VectorState, tuple]],
         stage_idx: int,
-        depth_limit: int | None = None,
-        all_candidates: list[tuple] | None = None,
+        all_candidates: list[tuple],
         max_unique_outputs: int = 3,
-    ) -> dict[tuple, list[SolutionNode]]:
-        """
-        Build solution tree collecting all candidates for entire stage before validation.
+    ) -> tuple[dict[tuple, list[SolutionNode]], dict[tuple, VectorState]]:
+        """Process one stage: validate gadgets, group, create nodes.
+
+        Includes Phase 1 (collect candidates), Phase 2 (validate in parallel),
+        Phase 3 (group by transition), and Phase 4 (create nodes, track unique
+        outputs). Children are NOT wired by this method.
 
         Args:
-            input_states_with_context: List of (input_state, parent_path) tuples where parent_path
-                                      tracks the chain of previous gadgets leading to this state
-            stage_idx: Current stage index
-            depth_limit: Maximum stage depth to explore
-            all_candidates: Pre-computed list of (top_seq, bottom_seq) instruction templates,
-                           independent of stage/input state
-            max_unique_outputs: Number of smallest unique output states to enumerate
-                per template for deterministic diversity.
+            input_states_with_context: List of (input_state, parent_path) tuples
+                where parent_path tracks the chain of previous gadgets leading
+                to this state.
+            stage_idx: Current stage index.
+            all_candidates: Pre-computed list of (top_seq, bottom_seq) instruction
+                templates, independent of stage/input state.
+            max_unique_outputs: Number of smallest unique output states to
+                enumerate per template for deterministic diversity.
 
         Returns:
-            Dictionary mapping parent_path to list of SolutionNodes for that path
+            Tuple of (nodes_by_parent, unique_outputs) where nodes_by_parent maps
+            parent_path to list of SolutionNodes and unique_outputs maps output
+            state tuples to VectorState instances. Children on the nodes are empty.
         """
-        if stage_idx >= len(self.bitonic_sorter.stages) or (
-            depth_limit is not None and stage_idx >= depth_limit
-        ):
-            # No more stages or reached depth limit, return empty dict
-            print(f"Reached depth limit {stage_idx}")
-            return {}
-
         stage_pairs = self.bitonic_sorter.stages[stage_idx]
 
         print(
@@ -2120,16 +2143,6 @@ class BitonicSuperVectorizer:
 
         print(
             f"Stage {stage_idx}: Validated {len(validated_gadgets)}/{len(all_jobs)} gadgets"
-        )
-
-        if validated_gadgets:
-            self._stages_completed.add(stage_idx)
-
-        # Early bailout: Check if next stage would exceed depth limit or total stages
-        # No point building nodes if there are no more stages to process
-        next_stage_idx = stage_idx + 1
-        has_next_stage = next_stage_idx < len(self.bitonic_sorter.stages) and (
-            depth_limit is None or next_stage_idx < depth_limit
         )
 
         # Phase 3: Group gadgets by (parent_path, input_state, output_state)
@@ -2195,44 +2208,132 @@ class BitonicSuperVectorizer:
             nodes_by_parent[parent_path].append(node)
 
             # Track unique output_states for deduplication
-            if has_next_stage and output_tuple not in unique_outputs:
+            if output_tuple not in unique_outputs:
                 unique_outputs[output_tuple] = output_state
 
-        # Recurse with deduplicated next-stage inputs
-        if has_next_stage and unique_outputs:
-            total_next = sum(len(nodes) for nodes in nodes_by_parent.values())
-            print(
-                f"Stage {stage_idx}: Deduplicated {total_next} -> {len(unique_outputs)} next-stage inputs"
-            )
+        return nodes_by_parent, unique_outputs
 
-            next_stage_inputs = [
+    def _build_tree_iterative(
+        self,
+        initial_inputs: list[tuple[VectorState, tuple]],
+        depth_limit: int | None,
+        all_candidates: list[tuple],
+        max_unique_outputs: int = 3,
+        checkpoint_dir: str | None = None,
+        checkpoint_config=None,
+        resume_data: dict | None = None,
+    ) -> dict[tuple, list[SolutionNode]]:
+        """Build the solution tree iteratively using a forward pass then backward wiring.
+
+        The forward pass iterates through stages sequentially, processing each
+        stage with ``_process_single_stage``. The backward pass wires children
+        from later stages back into earlier stage nodes.
+
+        Args:
+            initial_inputs: List of (input_state, parent_path) tuples for stage 0.
+            depth_limit: Maximum stage depth to explore. If None, all stages.
+            all_candidates: Pre-computed instruction templates.
+            max_unique_outputs: Diversity parameter per template.
+            checkpoint_dir: Directory to save checkpoints after each stage.
+            checkpoint_config: Configuration object for checkpoint saving.
+            resume_data: If provided, resume from a previous checkpoint. Expected
+                keys: ``per_stage_data`` and ``last_completed_stage``.
+
+        Returns:
+            Dictionary mapping parent_path to list of SolutionNodes for stage 0.
+        """
+        per_stage_data = {}  # stage_idx -> (nodes_by_parent, unique_outputs)
+
+        # Determine effective limit
+        effective_limit = len(self.bitonic_sorter.stages)
+        if depth_limit is not None:
+            effective_limit = min(depth_limit, effective_limit)
+
+        # Handle resume: skip already-completed stages
+        start_stage = 0
+        current_inputs = initial_inputs
+        if resume_data is not None:
+            per_stage_data = resume_data["per_stage_data"]
+            start_stage = resume_data["last_completed_stage"] + 1
+            # Reconstruct current_inputs from last completed stage
+            last_stage = resume_data["last_completed_stage"]
+            _, unique_outputs = per_stage_data[last_stage]
+            current_inputs = [
                 (state, ("canonical", out_tuple))
                 for out_tuple, state in unique_outputs.items()
             ]
-
-            children_by_path = self._build_tree_recursive(
-                next_stage_inputs,
-                stage_idx + 1,
-                depth_limit,
-                all_candidates,
-                max_unique_outputs=max_unique_outputs,
+            print(
+                f"Resuming from stage {start_stage} with {len(current_inputs)} inputs"
             )
 
-            # Build lookup from output_state_tuple -> shared children list
-            output_to_children: dict[tuple, list[SolutionNode]] = {
-                out_tuple: children_by_path.get(("canonical", out_tuple), [])
-                for out_tuple in unique_outputs
-            }
+        # Forward pass: iterate through stages
+        for stage_idx in range(start_stage, effective_limit):
+            nodes_by_parent, unique_outputs = self._process_single_stage(
+                current_inputs, stage_idx, all_candidates, max_unique_outputs
+            )
+            per_stage_data[stage_idx] = (nodes_by_parent, unique_outputs)
 
-            # Attach shared children: all nodes with the same output_state
-            # get the same list object as their children
-            for parent_path, nodes in nodes_by_parent.items():
+            if nodes_by_parent:
+                self._stages_completed.add(stage_idx)
+
+            # Checkpoint save point
+            if checkpoint_dir is not None and checkpoint_config is not None:
+                try:
+                    from checkpoint import save_checkpoint, checkpoint_filename
+                except ImportError:
+                    from .checkpoint import save_checkpoint, checkpoint_filename  # type: ignore[no-redef]
+                ckpt_path = os.path.join(
+                    checkpoint_dir,
+                    checkpoint_filename(
+                        checkpoint_config.num_vecs,
+                        checkpoint_config.vm,
+                        checkpoint_config.prim_type,
+                        checkpoint_config.natural_order,
+                        stage_idx,
+                    ),
+                )
+                save_checkpoint(
+                    ckpt_path,
+                    checkpoint_config,
+                    per_stage_data,
+                    sorted(self._stages_completed),
+                    stage_idx,
+                )
+
+            # Log deduplication and prepare inputs for next stage
+            if unique_outputs:
+                total_next = sum(len(nodes) for nodes in nodes_by_parent.values())
+                print(
+                    f"Stage {stage_idx}: Deduplicated {total_next} -> {len(unique_outputs)} next-stage inputs"
+                )
+                current_inputs = [
+                    (state, ("canonical", out_tuple))
+                    for out_tuple, state in unique_outputs.items()
+                ]
+            else:
+                break  # No valid outputs, can't continue
+
+        # Backward pass: wire children by iterating stages in reverse
+        sorted_stages = sorted(per_stage_data.keys())
+        for i in range(len(sorted_stages) - 1):
+            stage_idx = sorted_stages[i]
+            next_stage_idx = sorted_stages[i + 1]
+
+            nodes_by_parent, _ = per_stage_data[stage_idx]
+            next_nodes_by_parent, _ = per_stage_data[next_stage_idx]
+
+            for _parent_path, nodes in nodes_by_parent.items():
                 for node in nodes:
                     out_key = node.output_state.as_tuple()
-                    if out_key in output_to_children:
-                        node.children = output_to_children[out_key]
+                    canonical_path = ("canonical", out_key)
+                    node.children = next_nodes_by_parent.get(canonical_path, [])
 
-        return nodes_by_parent
+        # Collect root stage nodes
+        all_nodes = {}
+        if sorted_stages:
+            all_nodes = per_stage_data[sorted_stages[0]][0]
+
+        return all_nodes
 
     def synthesize_all_stages(
         self,
@@ -2240,6 +2341,8 @@ class BitonicSuperVectorizer:
         gadget_depth: int = 3,
         natural_order: bool = False,
         max_unique_outputs: int = 3,
+        checkpoint_dir: str | None = None,
+        resume_data: dict | None = None,
     ) -> tuple[list[SolutionNode], bool]:
         """Entry point: builds solution tree for all stages.
 
@@ -2249,6 +2352,10 @@ class BitonicSuperVectorizer:
             natural_order: If True, append a final stage restoring natural element order.
             max_unique_outputs: Number of smallest unique output states to enumerate
                 per template for deterministic diversity. Default: 3.
+            checkpoint_dir: Directory to save checkpoints after each stage completes.
+                If None, no checkpoints are saved.
+            resume_data: If provided, resume from a previous checkpoint. Expected
+                keys: ``per_stage_data`` and ``last_completed_stage``.
 
         Returns:
             Tuple of (root nodes, all_stages_complete) where all_stages_complete
@@ -2259,6 +2366,8 @@ class BitonicSuperVectorizer:
             gadget_depth=gadget_depth,
             natural_order=natural_order,
             max_unique_outputs=max_unique_outputs,
+            checkpoint_dir=checkpoint_dir,
+            resume_data=resume_data,
         )
 
 
