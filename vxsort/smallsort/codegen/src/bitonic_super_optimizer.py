@@ -2012,6 +2012,10 @@ class BitonicSuperVectorizer:
         Returns:
             Tuple of (root nodes, all_stages_complete) where all_stages_complete
             is True if every expected stage was solved successfully.
+
+        Note:
+            This method is single-use per ``BitonicSuperVectorizer`` instance.
+            Create a new instance for each synthesis run.
         """
         if self._synthesis_started:
             raise RuntimeError(
@@ -2370,6 +2374,10 @@ class BitonicSuperVectorizer:
         Returns:
             Tuple of (root nodes, all_stages_complete) where all_stages_complete
             is True if every expected stage was solved successfully.
+
+        Note:
+            This method is single-use per ``BitonicSuperVectorizer`` instance.
+            Create a new instance for each synthesis run.
         """
         return self.build_solution_tree(
             depth_limit=depth_limit,

@@ -1049,15 +1049,16 @@ def vshufps_lane(
     ctrl23: BitVecRef,
     ctrl45: BitVecRef,
     ctrl67: BitVecRef,
-) -> None:
+) -> list[BitVecRef]:
     a_lane = extract_128b_lane(a, lane_idx)
     b_lane = extract_128b_lane(b, lane_idx)
 
-    chunks: list[BitVecRef] = [None] * 4
-    chunks[0] = _select4_ps(a_lane, ctrl01)
-    chunks[1] = _select4_ps(a_lane, ctrl23)
-    chunks[2] = _select4_ps(b_lane, ctrl45)
-    chunks[3] = _select4_ps(b_lane, ctrl67)
+    chunks = [
+        _select4_ps(a_lane, ctrl01),
+        _select4_ps(a_lane, ctrl23),
+        _select4_ps(b_lane, ctrl45),
+        _select4_ps(b_lane, ctrl67),
+    ]
     return chunks
 
 

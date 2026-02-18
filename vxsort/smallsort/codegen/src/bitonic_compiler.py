@@ -158,7 +158,7 @@ def _count_dag_paths(roots):
 
 def generate_bitonic_sorter(
     num_vecs: int,
-    type: primitive_type,
+    prim_type: primitive_type,
     vm: vector_machine,
     depth_limit: int | None = None,
     top_k: int | None = None,
@@ -177,7 +177,7 @@ def generate_bitonic_sorter(
 
     Args:
         num_vecs: Number of SIMD vectors to sort
-        type: Primitive type (i32, f32, i64, f64)
+        prim_type: Primitive type (i32, f32, i64, f64)
         vm: Vector machine (AVX2, AVX512)
         depth_limit: Maximum stage depth to explore (inclusive). If None, all stages are explored.
         top_k: Number of best solutions to keep. If None, all solutions are kept.
@@ -201,7 +201,7 @@ def generate_bitonic_sorter(
     """
     if output_formats is None:
         output_formats = ["json"]
-    total_elements = int(num_vecs * (width_dict[vm] / int(type.value[0])))
+    total_elements = int(num_vecs * (width_dict[vm] / int(prim_type.value[0])))
 
     print(
         f"Building {vm.name} sorter for {total_elements} elements ({num_vecs} vectors)"
@@ -219,7 +219,7 @@ def generate_bitonic_sorter(
         current_config = CheckpointConfig(
             num_vecs=num_vecs,
             vm=vm.name,
-            prim_type=type.name,
+            prim_type=prim_type.name,
             gadget_depth=gadget_depth,
             natural_order=natural_order,
             max_unique_outputs=max_gadget_solutions,
@@ -244,7 +244,9 @@ def generate_bitonic_sorter(
         os.makedirs(checkpoint_dir, exist_ok=True)
 
     # Create super-vectorizer
-    super_opt = BitonicSuperVectorizer(num_vecs, type, vm, smt2_dump_dir=smt2_dump_dir)
+    super_opt = BitonicSuperVectorizer(
+        num_vecs, prim_type, vm, smt2_dump_dir=smt2_dump_dir
+    )
 
     # Synthesize all stages to build solution tree
     print("Synthesizing permutation gadgets...")
@@ -285,28 +287,24 @@ def generate_bitonic_sorter(
     order_suffix = "_natural" if natural_order else ""
     for output_format in output_formats:
         if output_format == "asm":
-            output_path = (
-                f"bitonic_solutions_{num_vecs}x{vm.name}_{type.name}{order_suffix}.asm"
-            )
+            output_path = f"bitonic_solutions_{num_vecs}x{vm.name}_{prim_type.name}{order_suffix}.asm"
             export_solutions_to_asm(
                 solutions,
                 num_vecs,
-                type,
+                prim_type,
                 vm,
                 output_path,
                 selected_paths=selected_paths,
                 natural_order=natural_order,
             )
         elif output_format == "json":
-            output_path = (
-                f"bitonic_solutions_{num_vecs}x{vm.name}_{type.name}{order_suffix}.json"
-            )
+            output_path = f"bitonic_solutions_{num_vecs}x{vm.name}_{prim_type.name}{order_suffix}.json"
             export_solutions_to_json(
                 solutions,
                 output_path,
                 natural_order=natural_order,
                 vm_name=vm.name,
-                prim_type_name=type.name,
+                prim_type_name=prim_type.name,
                 num_vecs=num_vecs,
             )
         else:
@@ -323,7 +321,7 @@ def generate_bitonic_sorter(
                 solutions, top_k or 10_000
             )
 
-        _run_verification(paths_to_verify, vm, type, natural_order)
+        _run_verification(paths_to_verify, vm, prim_type, natural_order)
 
     return solutions
 
@@ -451,7 +449,7 @@ if __name__ == "__main__":
 
     # Convert string arguments to Enum members
     vm = vector_machine[args.vector_machine]
-    dtype = primitive_type[args.datatype]
+    prim_type = primitive_type[args.datatype]
 
     smt2_dump_dir = None
     if args.dump_smt2:
@@ -460,7 +458,7 @@ if __name__ == "__main__":
 
     generate_bitonic_sorter(
         args.num_vecs,
-        dtype,
+        prim_type,
         vm,
         depth_limit=args.depth_limit,
         top_k=args.top_k,

@@ -85,11 +85,9 @@ class PathSelectorConfig:
 
     Attributes:
         cv_penalty_weight: Penalty cycles per control vector instruction
-        max_paths: Maximum number of paths to explore/export
     """
 
     cv_penalty_weight: float = 0.5  # Cycles per CV instruction
-    max_paths: int = 10_000  # ASM export limit
 
 
 def _is_control_vector_instruction(inst) -> bool:
