@@ -1214,8 +1214,8 @@ class GadgetSynthesizer:
         reusing across all stages and input states.
         """
         all_candidates = []
-        for top_depth in range(gadget_depth):
-            for bottom_depth in range(gadget_depth):
+        for top_depth in range(gadget_depth + 1):
+            for bottom_depth in range(gadget_depth + 1):
                 candidates = self._generate_candidate_gadgets(top_depth, bottom_depth)
                 all_candidates.extend(candidates)
         return all_candidates
@@ -1945,6 +1945,9 @@ class BitonicSuperVectorizer:
 
         # Initialize gadget synthesizer
         self.synthesizer = GadgetSynthesizer(vm, prim_type)
+        # Single-use contract: one synthesis run per instance to avoid mutable
+        # run-state carryover between calls.
+        self._synthesis_started = False
 
         print(
             f"BitonicSuperVectorizer: {num_vecs} x {vm.name} vectors, {self.elements_per_vector} x {prim_type.name} elements per vector, {self.total_elements} total elements, {len(self.bitonic_sorter.stages)} stages"
@@ -1984,7 +1987,7 @@ class BitonicSuperVectorizer:
     def build_solution_tree(
         self,
         depth_limit: int | None = None,
-        gadget_depth: int = 3,
+        gadget_depth: int = 1,
         natural_order: bool = False,
         max_unique_outputs: int = 3,
         checkpoint_dir: str | None = None,
@@ -1996,7 +1999,7 @@ class BitonicSuperVectorizer:
 
         Args:
             depth_limit: Maximum stage depth to explore (inclusive). If None, all stages are explored.
-            gadget_depth: Maximum instruction depth per gadget (1-3, default 3).
+            gadget_depth: Maximum instruction depth per gadget (1-3, default 1).
             natural_order: If True, append a final stage that restores natural
                 element order (1..N in top, N+1..2N in bottom) for memory writeback.
             max_unique_outputs: Number of smallest unique output states to enumerate
@@ -2010,6 +2013,13 @@ class BitonicSuperVectorizer:
             Tuple of (root nodes, all_stages_complete) where all_stages_complete
             is True if every expected stage was solved successfully.
         """
+        if self._synthesis_started:
+            raise RuntimeError(
+                "BitonicSuperVectorizer instances are single-use. "
+                "Create a new instance for each synthesis run."
+            )
+        self._synthesis_started = True
+
         # Inject natural-order stage if requested
         self._natural_order_stage = None
         if natural_order:
@@ -2338,7 +2348,7 @@ class BitonicSuperVectorizer:
     def synthesize_all_stages(
         self,
         depth_limit: int | None = None,
-        gadget_depth: int = 3,
+        gadget_depth: int = 1,
         natural_order: bool = False,
         max_unique_outputs: int = 3,
         checkpoint_dir: str | None = None,
@@ -2348,7 +2358,7 @@ class BitonicSuperVectorizer:
 
         Args:
             depth_limit: Maximum stage depth to explore (inclusive). If None, all stages are explored.
-            gadget_depth: Maximum instruction depth per gadget (1-3, default 3).
+            gadget_depth: Maximum instruction depth per gadget (1-3, default 1).
             natural_order: If True, append a final stage restoring natural element order.
             max_unique_outputs: Number of smallest unique output states to enumerate
                 per template for deterministic diversity. Default: 3.

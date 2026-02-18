@@ -163,7 +163,7 @@ def generate_bitonic_sorter(
     depth_limit: int | None = None,
     top_k: int | None = None,
     output_formats: list[str] = None,
-    gadget_depth: int = 3,
+    gadget_depth: int = 1,
     smt2_dump_dir: str | None = None,
     natural_order: bool = False,
     max_gadget_solutions: int = 3,
@@ -182,7 +182,7 @@ def generate_bitonic_sorter(
         depth_limit: Maximum stage depth to explore (inclusive). If None, all stages are explored.
         top_k: Number of best solutions to keep. If None, all solutions are kept.
         output_formats: List of output formats (e.g., ["json", "asm"]). Default is ["json"].
-        gadget_depth: Maximum instruction depth per gadget (1-3, default 3)
+        gadget_depth: Maximum instruction depth per gadget (1-3, default 1)
         smt2_dump_dir: Directory to dump SMT2 files if requested
         natural_order: If True, add final stage restoring natural element order for memory writeback
         max_gadget_solutions: Number of smallest unique output states to enumerate per
@@ -376,7 +376,7 @@ if __name__ == "__main__":
         type=int,
         default=1,
         choices=[1, 2, 3],
-        help="Maximum instruction depth per gadget (1-3, default: 3)",
+        help="Maximum instruction depth per gadget (1-3, default: 1)",
     )
     parser.add_argument(
         "--dump-smt2",
@@ -465,7 +465,7 @@ if __name__ == "__main__":
         depth_limit=args.depth_limit,
         top_k=args.top_k,
         output_formats=args.output_format,  # Will be None if not specified, handled by function default
-        gadget_depth=args.gadget_depth + 1,  # +1 because range is exclusive
+        gadget_depth=args.gadget_depth,
         smt2_dump_dir=smt2_dump_dir,
         natural_order=args.natural_order,
         max_gadget_solutions=args.max_gadget_solutions,

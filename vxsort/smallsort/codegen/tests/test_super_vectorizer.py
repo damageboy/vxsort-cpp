@@ -317,7 +317,7 @@ def test_natural_order_integration():
     # Call build_solution_tree with natural_order=True but depth_limit=1
     # to verify the stage was injected without running the full tree
     _, _ = super_opt.build_solution_tree(
-        natural_order=True, depth_limit=1, gadget_depth=2
+        natural_order=True, depth_limit=1, gadget_depth=1
     )
 
     # Verify the natural order stage was injected
@@ -607,10 +607,24 @@ def test_avx512_i64_synthesis_depth1():
     """Test that AVX512 i64 synthesis finds solutions for first stage at depth 1."""
     super_opt = BitonicSuperVectorizer(2, primitive_type.i64, vector_machine.AVX512)
     solutions, _ = super_opt.build_solution_tree(
-        depth_limit=1, gadget_depth=2, natural_order=False, max_unique_outputs=1
+        depth_limit=1, gadget_depth=1, natural_order=False, max_unique_outputs=1
     )
     assert len(solutions) > 0, "Should find at least one solution for AVX512 i64"
     print(f"Found {len(solutions)} root solutions for AVX512 i64")
+
+
+def test_bitonicsupervectorizer_is_single_use():
+    """A BitonicSuperVectorizer instance should reject a second synthesis run."""
+    super_opt = BitonicSuperVectorizer(2, primitive_type.i64, vector_machine.AVX2)
+    roots, _ = super_opt.build_solution_tree(
+        depth_limit=1, gadget_depth=1, natural_order=False, max_unique_outputs=1
+    )
+    assert len(roots) > 0
+
+    with pytest.raises(RuntimeError, match="single-use"):
+        super_opt.build_solution_tree(
+            depth_limit=1, gadget_depth=1, natural_order=False, max_unique_outputs=1
+        )
 
 
 def test_avx512_i32_synthesis_depth1():
