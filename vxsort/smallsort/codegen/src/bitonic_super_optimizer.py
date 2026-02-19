@@ -110,6 +110,120 @@ def _all_smt(s, terms, max_results=None):
         stack.append((cur_terms[i:], None, 0))
 
 
+@dataclass(frozen=True)
+class _IntrinsicDispatchRule:
+    """One ordered intrinsic-dispatch rule.
+
+    A rule matches when the argument key-set exactly equals ``arg_keys``.
+    The intrinsic is then called using ``call_order`` to avoid argument-order
+    ambiguity.
+    """
+
+    name: str
+    arg_keys: frozenset[str]
+    call_order: tuple[str, ...]
+
+
+def _rule(
+    name: str,
+    arg_keys: tuple[str, ...],
+    call_order: tuple[str, ...],
+) -> _IntrinsicDispatchRule:
+    """Convenience constructor for readable dispatch table entries."""
+    return _IntrinsicDispatchRule(
+        name=name,
+        arg_keys=frozenset(arg_keys),
+        call_order=call_order,
+    )
+
+
+_INTRINSIC_DISPATCH_RULES: tuple[_IntrinsicDispatchRule, ...] = (
+    _rule(
+        name="masked_single_with_control",
+        arg_keys=("k", "src", "op_idx", "a"),
+        call_order=("src", "k", "op_idx", "a"),
+    ),
+    _rule(
+        name="masked_dual_with_immediate",
+        arg_keys=("k", "src", "a", "b", "imm8"),
+        call_order=("src", "k", "a", "b", "imm8"),
+    ),
+    _rule(
+        name="masked_single_with_immediate",
+        arg_keys=("k", "src", "a", "imm8"),
+        call_order=("src", "k", "a", "imm8"),
+    ),
+    _rule(
+        name="masked_dual_without_immediate",
+        arg_keys=("k", "src", "a", "b"),
+        call_order=("src", "k", "a", "b"),
+    ),
+    _rule(
+        name="masked_permutex2var",
+        arg_keys=("k", "a", "op_idx", "b"),
+        call_order=("a", "k", "op_idx", "b"),
+    ),
+    _rule(
+        name="unmasked_permutex2var",
+        arg_keys=("a", "op_idx", "b"),
+        call_order=("a", "op_idx", "b"),
+    ),
+    _rule(
+        name="single_source_with_control_index",
+        arg_keys=("a", "op_idx"),
+        call_order=("a", "op_idx"),
+    ),
+    _rule(
+        name="single_source_with_immediate",
+        arg_keys=("a", "imm8"),
+        call_order=("a", "imm8"),
+    ),
+    _rule(
+        name="dual_source_with_immediate",
+        arg_keys=("a", "b", "imm8"),
+        call_order=("a", "b", "imm8"),
+    ),
+    _rule(
+        name="dual_source_with_mask",
+        arg_keys=("a", "b", "mask"),
+        call_order=("a", "b", "mask"),
+    ),
+    _rule(
+        name="dual_source_plain",
+        arg_keys=("a", "b"),
+        call_order=("a", "b"),
+    ),
+)
+
+
+def _match_dispatch_rule(arg_keys: frozenset[str]) -> _IntrinsicDispatchRule | None:
+    """Return the first matching dispatch rule or ``None``.
+
+    Uses exact key-set matching for simpler, unambiguous dispatch.
+    """
+    for rule in _INTRINSIC_DISPATCH_RULES:
+        if arg_keys == rule.arg_keys:
+            return rule
+    return None
+
+
+def _dispatch_intrinsic_fallback(intrinsic, args: dict):
+    """Fallback positional dispatch that preserves incoming argument order."""
+    arg_order = tuple(args.keys())
+    return intrinsic(*(args[key] for key in arg_order))
+
+
+def _dispatch_intrinsic_by_signature(intrinsic, args: dict):
+    """Call an intrinsic using the first matching dispatch rule.
+
+    Falls back to legacy positional call order when no rule matches.
+    """
+    rule = _match_dispatch_rule(frozenset(args.keys()))
+    if rule is None:
+        return _dispatch_intrinsic_fallback(intrinsic, args)
+    return intrinsic(*(args[key] for key in rule.call_order))
+
+
 @dataclass
 class VectorState:
     """Tracks which elements are in which lanes of top/bottom vectors."""
@@ -376,6 +490,85 @@ class GadgetSynthesizer:
 
         return top_reg, bottom_reg
 
+    def _resolve_symbolic_instruction_args(
+        self,
+        instructions: list[InstructionSpec],
+        ctx: Context,
+        symbolic_vars: dict,
+    ) -> None:
+        """Resolve placeholders to concrete Z3 terms and track symbolic args."""
+        # SymbolicPlaceholder is used to communicate with multiprocessing.
+        # In tests, Z3 expressions may be passed directly.
+        for inst in instructions:
+            for key, value in inst.args.items():
+                if isinstance(value, SymbolicPlaceholder):
+                    if value.size == 8:
+                        actual_val = BitVec(value.name, 8, ctx=ctx)
+                    elif value.size == 16:
+                        actual_val = BitVec(value.name, 16, ctx=ctx)
+                    elif value.size == 256:
+                        actual_val = z3_avx.ymm_reg(value.name, ctx=ctx)
+                    elif value.size == 512:
+                        actual_val = z3_avx.zmm_reg(value.name, ctx=ctx)
+                    else:
+                        actual_val = BitVec(value.name, value.size, ctx=ctx)
+
+                    inst.args[key] = actual_val
+                    symbolic_vars[id(actual_val)] = actual_val
+                elif hasattr(value, "decl") and callable(getattr(value, "decl", None)):
+                    symbolic_vars[id(value)] = value
+
+    def _constrain_output_lanes_to_target_pairs(
+        self,
+        solver: Solver,
+        ctx: Context,
+        top_output,
+        bottom_output,
+        target_pairs: list[tuple[int, int]],
+        allow_any_lane_order: bool,
+    ) -> list:
+        """Constrain each lane to match target_pairs and return all output lanes."""
+        all_output_lanes = []
+        for lane_idx in range(self.elements_per_vector):
+            lane_start = lane_idx * self.lane_width
+            lane_end = lane_start + self.lane_width - 1
+
+            top_lane = Extract(lane_end, lane_start, top_output)
+            bottom_lane = Extract(lane_end, lane_start, bottom_output)
+
+            all_output_lanes.append(top_lane)
+            all_output_lanes.append(bottom_lane)
+
+            if allow_any_lane_order:
+                pair_options = []
+                for elem_a, elem_b in target_pairs:
+                    val_a = BitVecVal(elem_a, self.lane_width, ctx=ctx)
+                    val_b = BitVecVal(elem_b, self.lane_width, ctx=ctx)
+                    pair_options.append(
+                        Or(
+                            And(top_lane == val_a, bottom_lane == val_b),
+                            And(top_lane == val_b, bottom_lane == val_a),
+                        )
+                    )
+                solver.add(Or(*pair_options))
+            else:
+                elem_a, elem_b = target_pairs[lane_idx]
+                solver.add(top_lane == BitVecVal(elem_a, self.lane_width, ctx=ctx))
+                solver.add(bottom_lane == BitVecVal(elem_b, self.lane_width, ctx=ctx))
+
+        return all_output_lanes
+
+    def _fixed_output_state_from_target_pairs(
+        self, target_pairs: list[tuple[int, int]], allow_any_lane_order: bool
+    ) -> VectorState | None:
+        """Build deterministic output state in strict lane-order mode."""
+        if allow_any_lane_order:
+            return None
+        return VectorState(
+            top=[pair[0] for pair in target_pairs],
+            bottom=[pair[1] for pair in target_pairs],
+        )
+
     def synthesize_gadget_with_symbolic(
         self,
         top_instructions_template: list[InstructionSpec],
@@ -425,38 +618,12 @@ class GadgetSynthesizer:
 
         # Collect all symbolic variables from instruction templates and resolve them
         symbolic_vars = {}
-
-        def maybe_resolve_symbolic_vars(instructions: list[InstructionSpec]):
-            """Resolve SymbolicPlaceholder to actual Z3 variables."""
-
-            # SymbolicPlaceholder is used to communicate with multiprocessing
-            # z3 runs in "production"
-            # In testing code, the z3 expressions are passed directly
-            # So we need to handle both cases here
-            for inst in instructions:
-                for key, value in inst.args.items():
-                    if isinstance(value, SymbolicPlaceholder):
-                        if value.size == 8:
-                            actual_val = BitVec(value.name, 8, ctx=ctx)
-                        elif value.size == 16:
-                            actual_val = BitVec(value.name, 16, ctx=ctx)
-                        elif value.size == 256:
-                            actual_val = z3_avx.ymm_reg(value.name, ctx=ctx)
-                        elif value.size == 512:
-                            actual_val = z3_avx.zmm_reg(value.name, ctx=ctx)
-                        else:
-                            actual_val = BitVec(value.name, value.size, ctx=ctx)
-
-                        inst.args[key] = actual_val
-                        symbolic_vars[id(actual_val)] = actual_val
-                    elif hasattr(value, "decl") and callable(
-                        getattr(value, "decl", None)
-                    ):
-                        # Already a Z3 expression (e.g. from tests)
-                        symbolic_vars[id(value)] = value
-
-        maybe_resolve_symbolic_vars(top_instructions_template)
-        maybe_resolve_symbolic_vars(bottom_instructions_template)
+        self._resolve_symbolic_instruction_args(
+            top_instructions_template, ctx, symbolic_vars
+        )
+        self._resolve_symbolic_instruction_args(
+            bottom_instructions_template, ctx, symbolic_vars
+        )
 
         # Apply gadget instructions to get output registers
         top_output, top_mux_constraints = self._apply_instructions(
@@ -482,37 +649,14 @@ class GadgetSynthesizer:
         for c in bottom_mux_constraints:
             solver.add(c)
 
-        # Add constraints: for each output lane, the top/bottom elements must
-        # form a valid target pair (in either orientation).
-        all_output_lanes = []
-        for lane_idx in range(self.elements_per_vector):
-            lane_start = lane_idx * self.lane_width
-            lane_end = lane_start + self.lane_width - 1
-
-            top_lane = Extract(lane_end, lane_start, top_output)
-            bottom_lane = Extract(lane_end, lane_start, bottom_output)
-
-            all_output_lanes.append(top_lane)
-            all_output_lanes.append(bottom_lane)
-
-            if allow_any_lane_order:
-                # Any target pair can land in any lane (existing behavior)
-                pair_options = []
-                for elem_a, elem_b in target_pairs:
-                    val_a = BitVecVal(elem_a, self.lane_width, ctx=ctx)
-                    val_b = BitVecVal(elem_b, self.lane_width, ctx=ctx)
-                    pair_options.append(
-                        Or(
-                            And(top_lane == val_a, bottom_lane == val_b),
-                            And(top_lane == val_b, bottom_lane == val_a),
-                        )
-                    )
-                solver.add(Or(*pair_options))
-            else:
-                # Strict: pair[lane_idx] pinned to this lane, first->top, second->bottom
-                elem_a, elem_b = target_pairs[lane_idx]
-                solver.add(top_lane == BitVecVal(elem_a, self.lane_width, ctx=ctx))
-                solver.add(bottom_lane == BitVecVal(elem_b, self.lane_width, ctx=ctx))
+        all_output_lanes = self._constrain_output_lanes_to_target_pairs(
+            solver,
+            ctx,
+            top_output,
+            bottom_output,
+            target_pairs,
+            allow_any_lane_order,
+        )
 
         # All output elements must be distinct — prevents element duplication
         # where an instruction copies the same element to both top and bottom.
@@ -522,12 +666,9 @@ class GadgetSynthesizer:
             solver_callback(solver)
 
         # When strict lane order, the output state is deterministic from pairs
-        fixed_output_state = None
-        if not allow_any_lane_order:
-            fixed_output_state = VectorState(
-                top=[p[0] for p in target_pairs],
-                bottom=[p[1] for p in target_pairs],
-            )
+        fixed_output_state = self._fixed_output_state_from_target_pairs(
+            target_pairs, allow_any_lane_order
+        )
 
         # Partition symbolic vars: select variables (mux wiring) vs
         # immediate/control vector variables
@@ -1050,90 +1191,7 @@ class GadgetSynthesizer:
                         key=key,
                     )
 
-            # Determine how to call the intrinsic based on its signature.
-            # AVX512 masked patterns (most specific) come first, then AVX2 patterns.
-            if (
-                "k" in args
-                and "src" in args
-                and "op_idx" in args
-                and "a" in args
-                and "b" not in args
-            ):
-                # Masked single-input with control vector
-                # e.g., _mm512_mask_permutexvar_epi64(src, k, op_idx, a)
-                current_reg = intrinsic(
-                    args["src"], args["k"], args["op_idx"], args["a"]
-                )
-            elif (
-                "k" in args
-                and "src" in args
-                and "a" in args
-                and "b" in args
-                and "imm8" in args
-            ):
-                # Masked dual-input with immediate
-                # e.g., _mm512_mask_shuffle_pd(src, k, a, b, imm8)
-                current_reg = intrinsic(
-                    args["src"], args["k"], args["a"], args["b"], args["imm8"]
-                )
-            elif (
-                "k" in args
-                and "src" in args
-                and "a" in args
-                and "imm8" in args
-                and "b" not in args
-            ):
-                # Masked single-input with immediate
-                # e.g., _mm512_mask_permute_pd(src, k, a, imm8)
-                current_reg = intrinsic(args["src"], args["k"], args["a"], args["imm8"])
-            elif (
-                "k" in args
-                and "src" in args
-                and "a" in args
-                and "b" in args
-                and "imm8" not in args
-            ):
-                # Masked dual-input without immediate
-                # e.g., _mm512_mask_unpacklo_epi64(src, k, a, b)
-                current_reg = intrinsic(args["src"], args["k"], args["a"], args["b"])
-            elif (
-                "k" in args
-                and "a" in args
-                and "op_idx" in args
-                and "b" in args
-                and "src" not in args
-            ):
-                # Masked permutex2var: a is merge source
-                # e.g., _mm512_mask_permutex2var_epi64(a, k, op_idx, b)
-                current_reg = intrinsic(args["a"], args["k"], args["op_idx"], args["b"])
-            elif "a" in args and "op_idx" in args and "b" in args and "k" not in args:
-                # Unmasked permutex2var
-                # e.g., _mm512_permutex2var_epi64(a, op_idx, b)
-                current_reg = intrinsic(args["a"], args["op_idx"], args["b"])
-            elif "a" in args and "op_idx" in args and "b" not in args:
-                # Single source with control index (e.g., _mm256_permutexvar_epi32)
-                current_reg = intrinsic(args["a"], args["op_idx"])
-            elif "a" in args and "imm8" in args and "b" not in args:
-                # Single source with immediate (e.g., _mm256_permute_ps)
-                current_reg = intrinsic(args["a"], args["imm8"])
-            elif "a" in args and "b" in args and "imm8" in args:
-                # Two sources with immediate (e.g., _mm256_shuffle_ps)
-                current_reg = intrinsic(args["a"], args["b"], args["imm8"])
-            elif "a" in args and "b" in args and "mask" in args:
-                # Blend with variable mask
-                current_reg = intrinsic(args["a"], args["b"], args["mask"])
-            elif (
-                "a" in args
-                and "b" in args
-                and "imm8" not in args
-                and "mask" not in args
-            ):
-                # Two sources without immediate (e.g., unpack, permutevar_ps)
-                current_reg = intrinsic(args["a"], args["b"])
-            else:
-                # Generic fallback
-                arg_values = list(args.values())
-                current_reg = intrinsic(*arg_values)
+            current_reg = _dispatch_intrinsic_by_signature(intrinsic, args)
 
             prev_output = current_reg
 
@@ -1146,55 +1204,12 @@ class GadgetSynthesizer:
         Generate candidate instruction sequences without validation.
         Returns list of (top_sequence, bottom_sequence) tuples.
         """
-        # Build instruction sequences for top
-        top_sequences = []
-        if top_depth > 0:
-            if top_depth == 1:
-                top_sequences = [[inst] for inst in self.single_insts_top]
-                top_sequences.extend([[inst] for inst in self.dual_insts_top_bottom])
-            elif top_depth == 2:
-                # Try pairs: (single, single), (dual, single), (single, dual)
-                for inst1 in self.single_insts_top:
-                    for inst2 in self.single_insts_top:
-                        top_sequences.append([inst1, inst2])
-                for inst1 in self.dual_insts_top_bottom:
-                    for inst2 in self.single_insts_top:
-                        top_sequences.append([inst1, inst2])
-                for inst1 in self.single_insts_top:
-                    for inst2 in self.dual_insts_top_bottom:
-                        top_sequences.append([inst1, inst2])
-            elif top_depth == 3:
-                # Try triples: (single, single, single)
-                for inst1 in self.single_insts_top:
-                    for inst2 in self.single_insts_top:
-                        for inst3 in self.single_insts_top:
-                            top_sequences.append([inst1, inst2, inst3])
-        else:
-            top_sequences = [[]]  # Empty sequence for depth 0
-
-        # Build instruction sequences for bottom
-        bottom_sequences = []
-        if bottom_depth > 0:
-            if bottom_depth == 1:
-                bottom_sequences = [[inst] for inst in self.single_insts_bottom]
-                bottom_sequences.extend([[inst] for inst in self.dual_insts_top_bottom])
-            elif bottom_depth == 2:
-                for inst1 in self.single_insts_bottom:
-                    for inst2 in self.single_insts_bottom:
-                        bottom_sequences.append([inst1, inst2])
-                for inst1 in self.dual_insts_top_bottom:
-                    for inst2 in self.single_insts_bottom:
-                        bottom_sequences.append([inst1, inst2])
-                for inst1 in self.single_insts_bottom:
-                    for inst2 in self.dual_insts_top_bottom:
-                        bottom_sequences.append([inst1, inst2])
-            elif bottom_depth == 3:
-                for inst1 in self.single_insts_bottom:
-                    for inst2 in self.single_insts_bottom:
-                        for inst3 in self.single_insts_bottom:
-                            bottom_sequences.append([inst1, inst2, inst3])
-        else:
-            bottom_sequences = [[]]  # Empty sequence for depth 0
+        top_sequences = self._build_instruction_sequences(
+            top_depth, self.single_insts_top
+        )
+        bottom_sequences = self._build_instruction_sequences(
+            bottom_depth, self.single_insts_bottom
+        )
 
         # Generate all combinations
         candidates = []
@@ -1203,6 +1218,37 @@ class GadgetSynthesizer:
                 candidates.append((top_seq, bottom_seq))
 
         return candidates
+
+    def _build_instruction_sequences(
+        self, depth: int, single_insts: list[InstructionSpec]
+    ) -> list[list[InstructionSpec]]:
+        """Build ordered candidate instruction sequences for one side."""
+        if depth <= 0:
+            return [[]]
+
+        sequences = []
+        if depth == 1:
+            sequences = [[inst] for inst in single_insts]
+            sequences.extend([[inst] for inst in self.dual_insts_top_bottom])
+        elif depth == 2:
+            # Try pairs: (single, single), (dual, single), (single, dual)
+            for inst1 in single_insts:
+                for inst2 in single_insts:
+                    sequences.append([inst1, inst2])
+            for inst1 in self.dual_insts_top_bottom:
+                for inst2 in single_insts:
+                    sequences.append([inst1, inst2])
+            for inst1 in single_insts:
+                for inst2 in self.dual_insts_top_bottom:
+                    sequences.append([inst1, inst2])
+        elif depth == 3:
+            # Try triples: (single, single, single)
+            for inst1 in single_insts:
+                for inst2 in single_insts:
+                    for inst3 in single_insts:
+                        sequences.append([inst1, inst2, inst3])
+
+        return sequences
 
     def precompute_all_candidates(
         self, gadget_depth: int

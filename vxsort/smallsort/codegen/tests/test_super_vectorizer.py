@@ -146,6 +146,40 @@ def test_instruction_enumeration():
     print("✓ Instruction enumeration test passed\n")
 
 
+def test_generate_candidate_gadgets_order_and_counts():
+    """Candidate gadget generation keeps legacy ordering/count semantics."""
+    synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i64)
+
+    top_depth = 2
+    bottom_depth = 1
+    candidates = synthesizer._generate_candidate_gadgets(top_depth, bottom_depth)
+
+    top_sequences = []
+    for inst1 in synthesizer.single_insts_top:
+        for inst2 in synthesizer.single_insts_top:
+            top_sequences.append([inst1, inst2])
+    for inst1 in synthesizer.dual_insts_top_bottom:
+        for inst2 in synthesizer.single_insts_top:
+            top_sequences.append([inst1, inst2])
+    for inst1 in synthesizer.single_insts_top:
+        for inst2 in synthesizer.dual_insts_top_bottom:
+            top_sequences.append([inst1, inst2])
+
+    bottom_sequences = [[inst] for inst in synthesizer.single_insts_bottom]
+    bottom_sequences.extend([[inst] for inst in synthesizer.dual_insts_top_bottom])
+
+    expected = []
+    for top_seq in top_sequences:
+        for bottom_seq in bottom_sequences:
+            expected.append((top_seq, bottom_seq))
+
+    assert candidates == expected
+    assert synthesizer._generate_candidate_gadgets(0, 0) == [([], [])]
+    assert synthesizer._generate_candidate_gadgets(-1, 1) == [
+        ([], bottom_seq) for bottom_seq in bottom_sequences
+    ]
+
+
 def test_output_state_computation():
     """Test computing output state after applying a gadget."""
     print("Testing output state computation...")

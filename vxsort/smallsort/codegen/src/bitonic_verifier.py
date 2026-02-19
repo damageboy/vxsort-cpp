@@ -30,6 +30,7 @@ try:
         InstructionSpec,
         PermutationGadget,
         SolutionNode,
+        _dispatch_intrinsic_by_signature,
         get_available_intrinsics,
     )
     from .path_selector import CompletePath
@@ -41,6 +42,7 @@ except ImportError:
         InstructionSpec,
         PermutationGadget,
         SolutionNode,
+        _dispatch_intrinsic_by_signature,
         get_available_intrinsics,
     )
     from path_selector import CompletePath  # type: ignore
@@ -363,51 +365,5 @@ class BitonicPathVerifier:
         return value
 
     def _dispatch_intrinsic(self, intrinsic, args: dict):
-        """Dispatch an intrinsic call using the same pattern matching as
-        GadgetSynthesizer._apply_instructions.
-
-        Each pattern is a tuple of arg keys defining the call signature.
-        Patterns are checked from most specific (masked with many operands)
-        to least specific (fallback).
-        """
-        keys = frozenset(args.keys())
-
-        # Masked intrinsics (have 'k' in args)
-        # Pattern: masked single-input with control vector
-        if keys >= {"k", "src", "op_idx", "a"} and "b" not in args:
-            return intrinsic(args["src"], args["k"], args["op_idx"], args["a"])
-        # Pattern: masked dual-input with immediate
-        if keys >= {"k", "src", "a", "b", "imm8"}:
-            return intrinsic(args["src"], args["k"], args["a"], args["b"], args["imm8"])
-        # Pattern: masked single-input with immediate
-        if keys >= {"k", "src", "a", "imm8"} and "b" not in args:
-            return intrinsic(args["src"], args["k"], args["a"], args["imm8"])
-        # Pattern: masked dual-input without immediate
-        if keys >= {"k", "src", "a", "b"}:
-            return intrinsic(args["src"], args["k"], args["a"], args["b"])
-        # Pattern: masked permutex2var (no src, has op_idx)
-        if keys >= {"k", "a", "op_idx", "b"} and "src" not in args:
-            return intrinsic(args["a"], args["k"], args["op_idx"], args["b"])
-
-        # Unmasked intrinsics
-        # Pattern: permutex2var (a, op_idx, b)
-        if keys >= {"a", "op_idx", "b"} and "k" not in args:
-            return intrinsic(args["a"], args["op_idx"], args["b"])
-        # Pattern: single-input with control vector (a, op_idx)
-        if keys >= {"a", "op_idx"} and "b" not in args:
-            return intrinsic(args["a"], args["op_idx"])
-        # Pattern: dual-input with immediate (a, b, imm8)
-        if keys >= {"a", "b", "imm8"}:
-            return intrinsic(args["a"], args["b"], args["imm8"])
-        # Pattern: dual-input with mask (a, b, mask)
-        if keys >= {"a", "b", "mask"}:
-            return intrinsic(args["a"], args["b"], args["mask"])
-        # Pattern: single-input with immediate (a, imm8)
-        if keys >= {"a", "imm8"} and "b" not in args:
-            return intrinsic(args["a"], args["imm8"])
-        # Pattern: dual-input (a, b)
-        if keys >= {"a", "b"}:
-            return intrinsic(args["a"], args["b"])
-
-        # Fallback: pass all args positionally
-        return intrinsic(*args.values())
+        """Dispatch an intrinsic call using shared signature patterns."""
+        return _dispatch_intrinsic_by_signature(intrinsic, args)
