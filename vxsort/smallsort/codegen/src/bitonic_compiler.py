@@ -98,6 +98,8 @@ def verify_only_from_json(
     json_path: str,
     top_k: int | None = None,
     target_cpu: str = "generic",
+    estimate: bool = False,
+    nasm_path: str | None = None,
 ):
     """Load solutions from a JSON file and verify them without re-running synthesis.
 
@@ -108,6 +110,8 @@ def verify_only_from_json(
         json_path: Path to a JSON solutions file.
         top_k: Number of best paths to verify. If None, verify all paths.
         target_cpu: Target CPU for cost model during path selection.
+        estimate: If True, run OSACA performance estimation on selected paths.
+        nasm_path: Path to nasm binary for assembly verification (used with estimate).
     """
     bundle = load_solutions_from_json(json_path)
 
@@ -132,6 +136,25 @@ def verify_only_from_json(
     paths = path_selector.select_top_k_paths(bundle.roots, top_k or 10_000)
 
     _run_verification(paths, vm, prim_type, bundle.natural_order)
+
+    if estimate:
+        if bundle.num_vecs is None:
+            raise SystemExit(
+                f"Error: {json_path} has no num_vecs metadata. "
+                "Re-export the solutions with a current version of the tool."
+            )
+        from osaca_estimator import estimate_solutions, print_estimation_table
+
+        results = estimate_solutions(
+            paths,
+            vm,
+            prim_type,
+            bundle.num_vecs,
+            bundle.natural_order,
+            target_cpu,
+            nasm_path,
+        )
+        print_estimation_table(results, paths)
 
 
 def _count_dag_paths(roots):
@@ -171,6 +194,8 @@ def generate_bitonic_sorter(
     verify: bool = False,
     checkpoint_dir: str | None = None,
     resume_file: str | None = None,
+    estimate: bool = False,
+    nasm_path: str | None = None,
 ):
     """
     Generate bitonic sorter with super-optimized permutation sequences.
@@ -195,6 +220,8 @@ def generate_bitonic_sorter(
             If None, no checkpoints are saved.
         resume_file: Path to a checkpoint file to resume from. If provided, completed
             stages are skipped and synthesis continues from where it left off.
+        estimate: If True, run OSACA performance estimation on selected paths.
+        nasm_path: Path to nasm binary for assembly verification (used with --estimate).
 
     Returns:
         List of SolutionNode trees representing different optimized solutions
@@ -323,6 +350,29 @@ def generate_bitonic_sorter(
 
         _run_verification(paths_to_verify, vm, prim_type, natural_order)
 
+    # OSACA performance estimation
+    if estimate:
+        from osaca_estimator import estimate_solutions, print_estimation_table
+
+        paths_to_estimate = selected_paths
+        if paths_to_estimate is None:
+            cost_model = CostModel(target_cpu)
+            path_selector = PathSelector(cost_model)
+            paths_to_estimate = path_selector.select_top_k_paths(
+                solutions, top_k or 10_000
+            )
+
+        results = estimate_solutions(
+            paths_to_estimate,
+            vm,
+            prim_type,
+            num_vecs,
+            natural_order,
+            target_cpu,
+            nasm_path,
+        )
+        print_estimation_table(results, paths_to_estimate)
+
     return solutions
 
 
@@ -431,6 +481,19 @@ if __name__ == "__main__":
         help="Resume synthesis from a checkpoint file (.json.zst). "
         "Completed stages are skipped.",
     )
+    parser.add_argument(
+        "--estimate",
+        action="store_true",
+        default=False,
+        help="Run OSACA performance estimation on selected paths",
+    )
+    parser.add_argument(
+        "--nasm-path",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Path to nasm binary for assembly verification (used with --estimate)",
+    )
 
     args = parser.parse_args()
 
@@ -440,6 +503,8 @@ if __name__ == "__main__":
             args.verify_only,
             top_k=args.top_k,
             target_cpu=args.target_cpu,
+            estimate=args.estimate,
+            nasm_path=args.nasm_path,
         )
         raise SystemExit(0)
 
@@ -471,4 +536,6 @@ if __name__ == "__main__":
         verify=args.verify,
         checkpoint_dir=args.checkpoint_dir,
         resume_file=args.resume,
+        estimate=args.estimate,
+        nasm_path=args.nasm_path,
     )

@@ -31,6 +31,17 @@ uv run ruff check .                        # Lint
 uv run python src/bitonic_compiler.py --depth-limit=3 --gadget-depth 1 # Full synthesis (limited depth for speed)
 ```
 
+### Quick integration testing during development
+
+When you need to run the compiler to test a feature (not the full test suite), use **AVX2 i64** —
+it's the fastest configuration because 64-bit elements mean only 4 lanes per YMM register,
+so Z3 solves much faster than 8-lane i32 or 16-lane i16:
+
+```bash
+uv run python src/bitonic_compiler.py --vector-machine AVX2 --datatype i64 \
+  --depth-limit 3 --gadget-depth 1 --top-k 5
+```
+
 ### Post work-item checklist
 
 When you finish working on any given feature please ensure that you don't report success to the user before:

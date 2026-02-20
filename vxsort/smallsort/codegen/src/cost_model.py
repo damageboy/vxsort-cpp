@@ -41,6 +41,7 @@ _ARCH_ALIASES: dict[str, str] = {
     "zen2": "ZEN2",
     "zen3": "ZEN3",
     "zen4": "ZEN4",
+    "zen5": "ZEN5",
 }
 
 
