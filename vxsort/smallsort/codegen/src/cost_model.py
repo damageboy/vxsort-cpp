@@ -18,30 +18,51 @@ class InstructionCost:
         return f"Cost(lat={self.latency}, tput={self.throughput}, ports={self.ports})"
 
 
-# Maps friendly CPU names to the architecture names used in the uops.info XML.
-_ARCH_ALIASES: dict[str, str] = {
+@dataclass(frozen=True)
+class ArchInfo:
+    """Single source of truth for a target CPU architecture."""
+
+    canonical: str  # XML arch name, e.g. "SKX"
+    aliases: tuple[str, ...]  # User-friendly names, e.g. ("skylake-x",)
+    osaca_code: str | None  # OSACA model name, or None
+    vendor: str  # "Intel" or "AMD"
+
+
+# Authoritative registry of all supported architectures.
+_ARCH_REGISTRY: list[ArchInfo] = [
     # Intel
-    "sandybridge": "SNB",
-    "ivybridge": "IVB",
-    "haswell": "HSW",
-    "broadwell": "BDW",
-    "skylake": "SKL",
-    "kabylake": "KBL",
-    "coffeelake": "CFL",
-    "cannonlake": "CNL",
-    "icelake": "ICL",
-    "tigerlake": "TGL",
-    "rocketlake": "RKL",
-    "skylake-x": "SKX",
-    "cascadelake": "CLX",
-    "alderlake-p": "ADL-P",
-    "alderlake-e": "ADL-E",
+    ArchInfo("SNB", ("sandybridge",), "SNB", "Intel"),
+    ArchInfo("IVB", ("ivybridge",), "IVB", "Intel"),
+    ArchInfo("HSW", ("haswell",), "HSW", "Intel"),
+    ArchInfo("BDW", ("broadwell",), "BDW", "Intel"),
+    ArchInfo("SKL", ("skylake",), "SKX", "Intel"),
+    ArchInfo("KBL", ("kabylake",), "SKX", "Intel"),
+    ArchInfo("CFL", ("coffeelake",), "SKX", "Intel"),
+    ArchInfo("CNL", ("cannonlake",), "ICL", "Intel"),
+    ArchInfo("ICL", ("icelake",), "ICL", "Intel"),
+    ArchInfo("TGL", ("tigerlake",), "ICL", "Intel"),
+    ArchInfo("RKL", ("rocketlake",), "ICL", "Intel"),
+    ArchInfo("SKX", ("skylake-x",), "SKX", "Intel"),
+    ArchInfo("CLX", ("cascadelake",), "CSX", "Intel"),
+    ArchInfo("ADL-P", ("alderlake-p",), "SPR", "Intel"),
+    ArchInfo("ADL-E", ("alderlake-e",), "SPR", "Intel"),
     # AMD
-    "zen+": "ZEN+",
-    "zen2": "ZEN2",
-    "zen3": "ZEN3",
-    "zen4": "ZEN4",
-    "zen5": "ZEN5",
+    ArchInfo("ZEN+", ("zen+",), "ZEN1", "AMD"),
+    ArchInfo("ZEN1", ("zen1",), "ZEN1", "AMD"),
+    ArchInfo("ZEN2", ("zen2",), "ZEN2", "AMD"),
+    ArchInfo("ZEN3", ("zen3",), "ZEN3", "AMD"),
+    ArchInfo("ZEN4", ("zen4",), "ZEN4", "AMD"),
+    ArchInfo("ZEN5", ("zen5",), "ZEN5", "AMD"),
+]
+
+# Derived lookup: friendly name (lowercase) -> canonical XML name.
+_ARCH_ALIASES: dict[str, str] = {
+    alias: info.canonical for info in _ARCH_REGISTRY for alias in info.aliases
+}
+
+# Derived lookup: canonical XML name -> ArchInfo.
+_ARCH_BY_CANONICAL: dict[str, ArchInfo] = {
+    info.canonical: info for info in _ARCH_REGISTRY
 }
 
 
@@ -67,6 +88,25 @@ def resolve_arch_name(target_cpu: str) -> str | None:
         return _ARCH_ALIASES[lower]
     # Accept exact XML names (case-sensitive)
     return target_cpu
+
+
+def resolve_osaca_arch(target_cpu: str) -> str | None:
+    """Resolve a --target-cpu value to an OSACA architecture code.
+
+    Returns None if the architecture is not supported by OSACA.
+    """
+    canonical = resolve_arch_name(target_cpu)
+    if canonical is None:
+        return None
+    info = _ARCH_BY_CANONICAL.get(canonical)
+    if info is None:
+        return None
+    return info.osaca_code
+
+
+def get_supported_cpus() -> list[ArchInfo]:
+    """Return all supported CPU architectures."""
+    return list(_ARCH_REGISTRY)
 
 
 class CostModel:

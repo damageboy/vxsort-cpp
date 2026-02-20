@@ -25,44 +25,8 @@ from asm_exporter import (
     _is_masked_intrinsic,
     _resolve_source,
 )
-from cost_model import resolve_arch_name
+from cost_model import get_supported_cpus, resolve_osaca_arch
 from utils import primitive_type, vector_machine, width_dict
-
-# Maps canonical arch names (from cost_model.resolve_arch_name) to OSACA arch codes.
-_OSACA_ARCH_MAP: dict[str, str] = {
-    "SNB": "SNB",
-    "IVB": "IVB",
-    "HSW": "HSW",
-    "BDW": "BDW",
-    "SKL": "SKX",
-    "KBL": "SKX",
-    "CFL": "SKX",  # client Skylake -> SKX
-    "CNL": "ICL",
-    "ICL": "ICL",
-    "TGL": "ICL",
-    "RKL": "ICL",
-    "SKX": "SKX",
-    "CLX": "CSX",  # OSACA calls Cascade Lake "CSX"
-    "ADL-P": "SPR",
-    "ADL-E": "SPR",
-    "ZEN+": "ZEN1",
-    "ZEN1": "ZEN1",
-    "ZEN2": "ZEN2",
-    "ZEN3": "ZEN3",
-    "ZEN4": "ZEN4",
-    "ZEN5": "ZEN5",
-}
-
-
-def resolve_osaca_arch(target_cpu: str) -> str | None:
-    """Resolve a --target-cpu value to an OSACA architecture code.
-
-    Returns None if the architecture is not supported by OSACA.
-    """
-    canonical = resolve_arch_name(target_cpu)
-    if canonical is None:
-        return None
-    return _OSACA_ARCH_MAP.get(canonical)
 
 
 @dataclass
@@ -73,7 +37,7 @@ class OsacaResult:
     asm_path: str
     yaml_path: str
     critical_path: float
-    lcd: float
+    throughput: float
     warnings: list[str] = field(default_factory=list)
 
 
@@ -166,11 +130,10 @@ def _emit_gadget_asm(
                 )
                 rodata_entries.append((cv_label, data_directive))
 
-                load_mnemonic = (
-                    "vmovdqa"
-                    if reg_allocator.vm == vector_machine.AVX2
-                    else "vmovdqa32"
-                )
+                if reg_allocator.vm == vector_machine.AVX512:
+                    load_mnemonic = "vmovdqa64"
+                else:
+                    load_mnemonic = "vmovdqa32"
                 lines.append(f"    {load_mnemonic:20s} {ctrl_reg}, [rel {cv_label}]")
                 # Add comment showing CV contents
                 comment = _format_control_vector_bits(
@@ -311,7 +274,7 @@ def _emit_compare_swap_lines(
         # AVX2 64-bit emulation: cmpgt + blendv
         tmp1 = reg_allocator.allocate_temp()
         tmp2 = reg_allocator.allocate_temp()
-        lines.append(f"    {'vmovdqa':20s} {tmp1}, {top_reg}")
+        lines.append(f"    {'vmovdqa32':20s} {tmp1}, {top_reg}")
         lines.append(f"    {'vpcmpgtq':20s} {tmp2}, {top_reg}, {bottom_reg}")
         lines.append(
             f"    {'vblendvpd':20s} {top_reg}, {top_reg}, {bottom_reg}, {tmp2}"
@@ -453,32 +416,6 @@ def _verify_with_nasm(asm_path: str, nasm_path: str) -> bool:
             os.unlink(obj_path)
 
 
-def _split_kernel_by_stages(kernel) -> list[list]:
-    """Split a parsed OSACA kernel into per-stage chunks.
-
-    Splits at comment lines containing "-- Stage N --". Each chunk includes
-    all instructions from one stage comment to the next (exclusive).
-    """
-    stages: list[list] = []
-    current: list = []
-
-    for line in kernel:
-        if (
-            line.comment is not None
-            and line.mnemonic is None
-            and "-- Stage " in line.comment
-        ):
-            if current:
-                stages.append(current)
-            current = []
-        else:
-            current.append(line)
-
-    if current:
-        stages.append(current)
-    return stages
-
-
 def _run_osaca(
     asm_path: str,
     arch: str,
@@ -487,14 +424,19 @@ def _run_osaca(
 ) -> OsacaResult:
     """Run OSACA on an assembly file using the Python API.
 
-    Analyzes each stage independently to avoid OSACA's KernelDG hanging
-    on large straight-line kernels (exponential in dependency graph size).
-    Sums per-stage critical paths and takes the max LCD.
+    Computes only the critical path (CP) and port pressure — skips the
+    loop-carried dependency (LCD) analysis entirely.  OSACA's LCD uses
+    nx.all_simple_paths on a doubled dependency graph, which is exponential
+    in the number of register fan-out paths.  For our straight-line bitonic
+    sort kernels (not loop bodies) LCD is meaningless anyway.
 
-    Returns an OsacaResult with critical path and LCD values.
+    We bypass KernelDG.__init__ and call create_DG + dag_longest_path
+    directly on the full kernel.
     """
+    import networkx as nx
     from osaca.osaca import get_asm_parser
-    from osaca.semantics import ArchSemantics, KernelDG, MachineModel
+    from osaca.semantics import INSTR_FLAGS, ArchSemantics, MachineModel
+    from osaca.semantics.kernel_dg import KernelDG
     from osaca.semantics.marker_utils import reduce_to_section
 
     output_path = os.path.join(output_dir, f"solution_{solution_index:03d}.txt")
@@ -514,55 +456,59 @@ def _run_osaca(
         sem = ArchSemantics(parser, mm)
         sem.normalize_instruction_forms(kernel)
         sem.add_semantics(kernel)
-        sem.assign_optimal_throughput(kernel)
 
-        # Split into per-stage chunks and analyze each independently
-        stages = _split_kernel_by_stages(kernel)
-        if not stages:
-            warnings.append("No stages found in kernel")
-            stages = [kernel]
-
-        total_cp = 0.0
-        max_lcd = 0.0
-        stage_details: list[str] = []
-
-        for stage_idx, stage_kernel in enumerate(stages):
-            if not stage_kernel:
+        # Bail out if any instruction is missing from OSACA's database
+        unknown_mnemonics: list[str] = []
+        for instr in kernel:
+            if not instr.mnemonic:
                 continue
-
-            kdg = KernelDG(stage_kernel, parser, mm, sem, timeout=30)
-
-            # Extract critical path length for this stage
-            cp_chain = kdg.get_critical_path()
-            stage_cp = 0.0
-            if cp_chain:
-                for instr in cp_chain:
-                    if instr.latency is not None:
-                        stage_cp += instr.latency
-            total_cp += stage_cp
-
-            # Extract LCD for this stage
-            lcd_deps = kdg.get_loopcarried_dependencies()
-            stage_lcd = 0.0
-            if lcd_deps:
-                for dep in lcd_deps:
-                    if hasattr(dep, "latency") and dep.latency is not None:
-                        stage_lcd = max(stage_lcd, dep.latency)
-            max_lcd = max(max_lcd, stage_lcd)
-
-            stage_details.append(
-                f"Stage {stage_idx}: CP={stage_cp:.1f}, LCD={stage_lcd:.1f}, "
-                f"instrs={len(stage_kernel)}"
+            flags = getattr(instr, "flags", [])
+            if INSTR_FLAGS.TP_UNKWN in flags or INSTR_FLAGS.LT_UNKWN in flags:
+                unknown_mnemonics.append(instr.mnemonic)
+        if unknown_mnemonics:
+            unique = sorted(set(unknown_mnemonics))
+            raise ValueError(
+                f"OSACA {arch} database is missing {len(unique)} instruction(s): "
+                + ", ".join(unique)
             )
 
-        # Write per-stage details to output file
+        sem.assign_optimal_throughput(kernel)
+
+        # Build dependency graph directly — skip LCD (exponential cost)
+        kdg = object.__new__(KernelDG)
+        kdg.timed_out = False
+        kdg.kernel = kernel
+        kdg.parser = parser
+        kdg.model = mm
+        kdg.arch_sem = sem
+        kdg.dg = kdg.create_DG(kernel)
+        kdg.loopcarried_deps = {}
+
+        # Compute critical path via dag_longest_path on the DG
+        total_cp = 0.0
+        if nx.algorithms.dag.is_directed_acyclic_graph(kdg.dg):
+            longest = nx.algorithms.dag.dag_longest_path(kdg.dg, weight="latency")
+            for s, d in nx.utils.pairwise(longest):
+                total_cp += kdg.dg.edges[(s, d)]["latency"]
+            # Add latency of the last instruction in the path
+            if longest:
+                last_node = kdg.dg.nodes[longest[-1]]["instruction_form"]
+                if last_node.latency is not None:
+                    total_cp += last_node.latency
+
+        # Compute throughput (port pressure sum)
+        tp_sum = ArchSemantics.get_throughput_sum(kernel)
+        tp_max = max(tp_sum) if tp_sum else 0.0
+
+        # Write details to output file
         with open(output_path, "w") as f:
-            f.write(f"OSACA per-stage analysis for {Path(asm_path).name}\n")
+            f.write(f"OSACA analysis for {Path(asm_path).name}\n")
             f.write(f"Architecture: {arch}\n\n")
-            for detail in stage_details:
-                f.write(detail + "\n")
-            f.write(f"\nTotal CP: {total_cp:.1f}\n")
-            f.write(f"Max LCD: {max_lcd:.1f}\n")
+            f.write(f"Critical Path: {total_cp:.1f} cycles\n")
+            f.write(f"Throughput (port bottleneck): {tp_max:.2f} cycles\n")
+            f.write(f"Instructions: {len(kernel)}\n")
+            f.write(f"DG nodes: {kdg.dg.number_of_nodes()}, ")
+            f.write(f"edges: {kdg.dg.number_of_edges()}\n")
 
     except Exception as e:
         warnings.append(f"OSACA error: {e}")
@@ -571,7 +517,7 @@ def _run_osaca(
             asm_path=asm_path,
             yaml_path=output_path,
             critical_path=-1.0,
-            lcd=-1.0,
+            throughput=-1.0,
             warnings=warnings,
         )
 
@@ -580,7 +526,7 @@ def _run_osaca(
         asm_path=asm_path,
         yaml_path=output_path,
         critical_path=total_cp,
-        lcd=max_lcd,
+        throughput=tp_max,
         warnings=warnings,
     )
 
@@ -610,9 +556,10 @@ def estimate_solutions(
     """
     arch = resolve_osaca_arch(target_cpu)
     if arch is None:
+        supported = [info.canonical for info in get_supported_cpus() if info.osaca_code]
         print(
             f"Warning: Cannot resolve OSACA architecture for '{target_cpu}'. "
-            f"Supported architectures: {', '.join(sorted(_OSACA_ARCH_MAP.keys()))}",
+            f"Supported architectures: {', '.join(supported)}",
             file=sys.stderr,
         )
         return []
@@ -656,18 +603,18 @@ def print_estimation_table(results: list[OsacaResult], paths) -> None:
         print("No OSACA results to display.")
         return
 
-    headers = ["Solution", "ASM File", "CP", "LCD", "Stages", "CVs", "Our Cost"]
+    headers = ["Solution", "ASM File", "CP", "TP", "Stages", "CVs", "Our Cost"]
     rows = []
 
     for result, path in zip(results, paths):
         cp_str = f"{result.critical_path:.2f}" if result.critical_path >= 0 else "err"
-        lcd_str = f"{result.lcd:.2f}" if result.lcd >= 0 else "err"
+        tp_str = f"{result.throughput:.2f}" if result.throughput >= 0 else "err"
         rows.append(
             [
                 result.solution_index,
                 Path(result.asm_path).name,
                 cp_str,
-                lcd_str,
+                tp_str,
                 len(path.steps),
                 path.total_cv_count,
                 f"{path.total_score:.2f}",

@@ -10,7 +10,7 @@ from json_exporter import export_solutions_to_json
 
 # Handle both relative and absolute imports
 try:
-    from .cost_model import CostModel
+    from .cost_model import CostModel, get_supported_cpus
     from .bitonic_super_optimizer import BitonicSuperVectorizer
     from .utils import vector_machine, primitive_type, width_dict
     from .asm_exporter import export_solutions_to_asm
@@ -28,7 +28,7 @@ try:
     )
 
 except ImportError:
-    from cost_model import CostModel
+    from cost_model import CostModel, get_supported_cpus
     from bitonic_super_optimizer import BitonicSuperVectorizer
     from utils import vector_machine, primitive_type, width_dict
     from asm_exporter import export_solutions_to_asm
@@ -448,8 +448,8 @@ if __name__ == "__main__":
         "--target-cpu",
         type=str,
         default="generic",
-        help="Target CPU for cost model. Examples: generic, TGL, SKX, ZEN4, "
-        "tigerlake, skylake-x, zen4. Use 'generic' for default costs (default: generic)",
+        help="Target CPU for cost model (e.g. generic, TGL, SKX, ZEN4, "
+        "tigerlake, skylake-x, zen4). Use --list-cpus to see all options (default: generic)",
     )
     parser.add_argument(
         "--verify",
@@ -494,8 +494,35 @@ if __name__ == "__main__":
         metavar="PATH",
         help="Path to nasm binary for assembly verification (used with --estimate)",
     )
+    parser.add_argument(
+        "--list-cpus",
+        action="store_true",
+        default=False,
+        help="List all supported CPU architectures with uops.info and OSACA availability, then exit",
+    )
 
     args = parser.parse_args()
+
+    # --list-cpus mode: print supported architectures and exit
+    if args.list_cpus:
+        from uops_parser import list_available_architectures
+
+        xml_path = os.path.join(os.path.dirname(__file__), "..", "instructions.xml.zst")
+        has_xml = os.path.exists(xml_path)
+        xml_archs = list_available_architectures(xml_path) if has_xml else set()
+
+        rows = []
+        for info in get_supported_cpus():
+            aliases = ", ".join(info.aliases)
+            uops_col = "yes" if info.canonical in xml_archs else "-"
+            osaca_col = info.osaca_code if info.osaca_code else "-"
+            rows.append([info.canonical, aliases, info.vendor, uops_col, osaca_col])
+
+        from tabulate import tabulate
+
+        headers = ["Arch", "Alias", "Vendor", "uops.info", "OSACA model"]
+        print(tabulate(rows, headers=headers, tablefmt="rounded_outline"))
+        raise SystemExit(0)
 
     # --verify-only mode: load JSON and verify without synthesis
     if args.verify_only is not None:
