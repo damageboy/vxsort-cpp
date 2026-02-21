@@ -252,6 +252,7 @@ def generate_bitonic_sorter(
     resume_file: str | None = None,
     estimate: bool = False,
     nasm_path: str | None = None,
+    no_pipeline: bool = False,
 ):
     """
     Generate bitonic sorter with super-optimized permutation sequences.
@@ -278,6 +279,7 @@ def generate_bitonic_sorter(
             stages are skipped and synthesis continues from where it left off.
         estimate: If True, run OSACA performance estimation on selected paths.
         nasm_path: Path to nasm binary for assembly verification (used with --estimate).
+        no_pipeline: If True, disable pipelined stage processing.
 
     Returns:
         List of SolutionNode trees representing different optimized solutions
@@ -340,6 +342,7 @@ def generate_bitonic_sorter(
         max_unique_outputs=max_gadget_solutions,
         checkpoint_dir=checkpoint_dir,
         resume_data=resume_data,
+        pipeline=not no_pipeline,
     )
 
     print(f"Found {len(solutions)} root solutions")
@@ -559,6 +562,12 @@ if __name__ == "__main__":
         "and run OSACA performance estimation only.",
     )
     parser.add_argument(
+        "--no-pipeline",
+        action="store_true",
+        default=False,
+        help="Disable pipelined stage processing; use sequential stage barriers instead.",
+    )
+    parser.add_argument(
         "--list-cpus",
         action="store_true",
         default=False,
@@ -639,4 +648,5 @@ if __name__ == "__main__":
         resume_file=args.resume,
         estimate=args.estimate,
         nasm_path=args.nasm_path,
+        no_pipeline=args.no_pipeline,
     )
