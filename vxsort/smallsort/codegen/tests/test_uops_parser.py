@@ -23,6 +23,28 @@ from uops_parser import (
 _XML_PATH = os.path.join(os.path.dirname(__file__), "..", "instructions.xml.zst")
 _HAS_XML = os.path.exists(_XML_PATH)
 
+# Module-level cache: decompress and parse the XML once, reuse across all tests.
+_cached_xml_root = None
+
+
+def _get_xml_root():
+    """Return the cached XML root, loading it on first call."""
+    global _cached_xml_root
+    if _cached_xml_root is None:
+        _cached_xml_root = load_xml_root(_XML_PATH)
+    return _cached_xml_root
+
+
+@pytest.fixture(autouse=True)
+def _cache_xml_root(monkeypatch):
+    """Monkeypatch load_xml_root so every caller in uops_parser reuses the cached root."""
+    if not _HAS_XML:
+        return
+    import uops_parser as _uops_mod
+
+    root = _get_xml_root()
+    monkeypatch.setattr(_uops_mod, "load_xml_root", lambda _path: root)
+
 
 # ---------------------------------------------------------------------------
 # Registry coverage tests
@@ -115,7 +137,7 @@ def test_registry_covers_all_asm_exporter_intrinsics():
 @pytest.mark.skipif(not _HAS_XML, reason="instructions.xml.zst not found")
 def test_xml_string_keys_exist_in_xml():
     """Every registry entry's xml_string_key() exists in the XML index."""
-    root = load_xml_root(_XML_PATH)
+    root = _get_xml_root()
     index = _build_xml_index(root)
 
     registry = get_intrinsic_registry()

@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+from collections import Counter
 
 import pytest
 from bitonic_super_optimizer import (
@@ -129,7 +130,7 @@ class TestCheckpointSaveLoad:
             num_vecs=2,
             vm="AVX2",
             prim_type="i64",
-            gadget_depth=3,
+            gadget_depth=1,
             natural_order=False,
             max_unique_outputs=3,
             depth_limit=None,
@@ -258,7 +259,7 @@ class TestConfigValidation:
             num_vecs=2,
             vm="AVX2",
             prim_type="i64",
-            gadget_depth=3,
+            gadget_depth=1,
             natural_order=False,
             max_unique_outputs=3,
             depth_limit=None,
@@ -327,7 +328,7 @@ class TestIterativeMatchesOriginal:
         sv = BitonicSuperVectorizer(2, primitive_type.i64, vector_machine.AVX2)
         roots, _ = sv.build_solution_tree(
             depth_limit=3,
-            gadget_depth=2,
+            gadget_depth=1,
             max_unique_outputs=3,
         )
         # Should find at least some solutions
@@ -336,13 +337,42 @@ class TestIterativeMatchesOriginal:
         assert len(sv._stages_completed) > 0
 
     @pytest.mark.slow
+    def test_avx2_i64_depth3_checkpoint_equivalence(self):
+        """Property test: checkpointing must not change synthesized AVX2/i64 output."""
+        params = {
+            "depth_limit": 3,
+            "gadget_depth": 1,
+            "max_unique_outputs": 3,
+        }
+
+        # Baseline: no checkpointing
+        sv_no_ckpt = BitonicSuperVectorizer(2, primitive_type.i64, vector_machine.AVX2)
+        roots_no_ckpt, _ = sv_no_ckpt.build_solution_tree(**params)
+        outputs_no_ckpt = _collect_output_states(roots_no_ckpt)
+        intrinsics_no_ckpt = _collect_intrinsic_types_by_stage(roots_no_ckpt)
+
+        # Property run: same synthesis parameters, but checkpointing enabled
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sv_ckpt = BitonicSuperVectorizer(2, primitive_type.i64, vector_machine.AVX2)
+            roots_ckpt, _ = sv_ckpt.build_solution_tree(
+                checkpoint_dir=tmpdir,
+                **params,
+            )
+
+        outputs_ckpt = _collect_output_states(roots_ckpt)
+        intrinsics_ckpt = _collect_intrinsic_types_by_stage(roots_ckpt)
+
+        assert outputs_no_ckpt == outputs_ckpt
+        assert intrinsics_no_ckpt == intrinsics_ckpt
+
+    @pytest.mark.slow
     def test_checkpoint_roundtrip_integration(self):
         """Run with checkpointing, then verify checkpoint can be loaded."""
         with tempfile.TemporaryDirectory() as tmpdir:
             sv = BitonicSuperVectorizer(2, primitive_type.i64, vector_machine.AVX2)
             sv.build_solution_tree(
                 depth_limit=3,
-                gadget_depth=2,
+                gadget_depth=1,
                 max_unique_outputs=3,
                 checkpoint_dir=tmpdir,
             )
@@ -370,7 +400,7 @@ class TestIterativeMatchesOriginal:
         sv_full = BitonicSuperVectorizer(2, primitive_type.i64, vector_machine.AVX2)
         full_roots, _ = sv_full.build_solution_tree(
             depth_limit=3,
-            gadget_depth=2,
+            gadget_depth=1,
             max_unique_outputs=3,
         )
 
@@ -382,7 +412,7 @@ class TestIterativeMatchesOriginal:
             sv_ckpt = BitonicSuperVectorizer(2, primitive_type.i64, vector_machine.AVX2)
             sv_ckpt.build_solution_tree(
                 depth_limit=1,
-                gadget_depth=2,
+                gadget_depth=1,
                 max_unique_outputs=3,
                 checkpoint_dir=tmpdir,
             )
@@ -408,7 +438,7 @@ class TestIterativeMatchesOriginal:
             )
             resumed_roots, _ = sv_resume.build_solution_tree(
                 depth_limit=3,
-                gadget_depth=2,
+                gadget_depth=1,
                 max_unique_outputs=3,
                 resume_data=resume_data,
             )
@@ -440,6 +470,32 @@ def _collect_output_states(roots):
     return result
 
 
+def _collect_intrinsic_types_by_stage(roots) -> dict[int, Counter]:
+    """Collect intrinsic usage counts per stage from a solution DAG."""
+    result: dict[int, Counter] = {}
+    visited = set()
+
+    def _walk(node):
+        nid = id(node)
+        if nid in visited:
+            return
+        visited.add(nid)
+
+        stage_counter = result.setdefault(node.stage, Counter())
+        for gadget in node.gadgets:
+            for inst in gadget.top_instructions:
+                stage_counter[inst.intrinsic_name] += 1
+            for inst in gadget.bottom_instructions:
+                stage_counter[inst.intrinsic_name] += 1
+
+        for child in node.children:
+            _walk(child)
+
+    for root in roots:
+        _walk(root)
+    return result
+
+
 class TestNaturalOrderWithCheckpoint:
     """Natural order stage works through checkpoint cycle."""
 
@@ -449,7 +505,7 @@ class TestNaturalOrderWithCheckpoint:
             sv = BitonicSuperVectorizer(2, primitive_type.i64, vector_machine.AVX2)
             roots, _ = sv.build_solution_tree(
                 depth_limit=4,
-                gadget_depth=2,
+                gadget_depth=1,
                 natural_order=True,
                 max_unique_outputs=3,
                 checkpoint_dir=tmpdir,

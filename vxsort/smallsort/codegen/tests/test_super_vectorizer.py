@@ -211,20 +211,13 @@ def test_output_state_computation():
 
 @pytest.mark.parametrize("vm", [vector_machine.AVX2, vector_machine.AVX512])
 @pytest.mark.parametrize("dt", [primitive_type.i32, primitive_type.i64])
-def test_first_stage_requires_no_permutation(vm, dt):
-    """Test that the initial state is constructed to make first stage a null operation."""
-    print(f"Testing first stage requires no permutation for {vm.name}, {dt.name}...")
-
+def test_first_stage_initial_state_matches_pairs(vm, dt):
+    """Test that the initial state is constructed to match first stage pairs (no Z3)."""
     super_opt = BitonicSuperVectorizer(2, dt, vm)
 
-    # Get initial state and first stage pairs
     initial_state = super_opt._create_initial_state()
     first_stage_pairs = super_opt.bitonic_sorter.stages[0]
 
-    print(f"  First stage pairs: {first_stage_pairs}")
-    print(f"Initial state: {initial_state}")
-
-    # Verify that initial state matches first stage pairs
     for i, (a, b) in enumerate(first_stage_pairs):
         assert initial_state.top[i] == a, f"Top element at index {i} should be {
             a
@@ -233,27 +226,39 @@ def test_first_stage_requires_no_permutation(vm, dt):
             b
         }, got {initial_state.bottom[i]}"
 
-    # Build solution tree for just the first stage
+
+@pytest.mark.parametrize(
+    "vm, dt",
+    [
+        (vector_machine.AVX2, primitive_type.i32),
+        (vector_machine.AVX2, primitive_type.i64),
+        pytest.param(
+            vector_machine.AVX512,
+            primitive_type.i64,
+            marks=pytest.mark.slow,
+        ),
+        pytest.param(
+            vector_machine.AVX512,
+            primitive_type.i32,
+            marks=pytest.mark.slow,
+        ),
+    ],
+)
+def test_first_stage_null_gadget(vm, dt):
+    """Z3 synthesis: first stage should yield a 0-instruction gadget."""
+    super_opt = BitonicSuperVectorizer(2, dt, vm)
+
     solutions, _ = super_opt.build_solution_tree(
         depth_limit=1, gadget_depth=1, natural_order=False, max_unique_outputs=1
     )
 
-    print(f"  Found {len(solutions)} valid solution tree root(s)")
-
-    # Verify that the first gadget is a null (0-instruction) gadget
     assert len(solutions) > 0, "Should find at least one valid solution"
-    # Find solutions that have at least one gadget with 0 instructions
     null_solutions = [
         s for s in solutions if any(g.instruction_count() == 0 for g in s.gadgets)
     ]
     assert (
         len(null_solutions) > 0
     ), "Should find at least one solution with null (0-instruction) gadget for first stage"
-
-    # Get minimum instruction count from first solution's gadgets
-    min_instructions = min(g.instruction_count() for g in solutions[0].gadgets)
-    print(f"  ✓ First gadget requires {min_instructions} instructions (as expected)")
-    print("✓ First stage null permutation test passed\n")
 
 
 def test_natural_order_identity():
@@ -641,16 +646,6 @@ def test_asm_exporter_register_mapping():
     assert "ymm1, ymm1" in asm, f"prev on bottom side should use ymm1, got: {asm}"
 
 
-def test_avx512_i64_synthesis_depth1():
-    """Test that AVX512 i64 synthesis finds solutions for first stage at depth 1."""
-    super_opt = BitonicSuperVectorizer(2, primitive_type.i64, vector_machine.AVX512)
-    solutions, _ = super_opt.build_solution_tree(
-        depth_limit=1, gadget_depth=1, natural_order=False, max_unique_outputs=1
-    )
-    assert len(solutions) > 0, "Should find at least one solution for AVX512 i64"
-    print(f"Found {len(solutions)} root solutions for AVX512 i64")
-
-
 def test_bitonicsupervectorizer_is_single_use():
     """A BitonicSuperVectorizer instance should reject a second synthesis run."""
     super_opt = BitonicSuperVectorizer(2, primitive_type.i64, vector_machine.AVX2)
@@ -793,7 +788,7 @@ def run_all_tests():
         test_bitonicsupervectorizer_init()
         test_instruction_enumeration()
         test_output_state_computation()
-        test_first_stage_requires_no_permutation()
+        test_first_stage_initial_state_matches_pairs()
 
         print("=" * 60)
         print("All tests passed! ✓")
