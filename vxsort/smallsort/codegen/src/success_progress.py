@@ -1,13 +1,15 @@
 from __future__ import annotations
+
 from time import sleep
+
 from rich.console import Console
 from rich.progress import (
-    Progress,
     BarColumn,
-    TextColumn,
-    TaskProgressColumn,
     MofNCompleteColumn,
+    Progress,
     ProgressColumn,
+    TaskProgressColumn,
+    TextColumn,
 )
 from rich.text import Text
 
@@ -96,7 +98,9 @@ class DualBarColumn(BarColumn):
 
         assert len(pieces) == self.bar_width, (
             f"Expected width {self.bar_width}, got {len(pieces)} "
-            f"for total={task.total}, completed={task.completed}, successes={task.fields.get('successes', 0)}"
+            f"for total={task.total}, completed={task.completed}, successes={
+                task.fields.get('successes', 0)
+            }"
         )
 
         return pieces
@@ -163,6 +167,7 @@ class SuccessProgress(Progress):
             ),
             TqdmColumn(),
             console=console,
+            refresh_per_second=1,
         )
 
     def update(self, task_id, *args, **kwargs):
