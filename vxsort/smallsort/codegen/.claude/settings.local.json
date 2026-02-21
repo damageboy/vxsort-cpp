@@ -5,7 +5,21 @@
       "Bash(uv run python:*)",
       "Bash(uv run ruff check:*)",
       "Bash(uv run:*)",
-      "Bash(PYTHONHASHSEED=0 uv run python:*)"
+      "Bash(PYTHONHASHSEED=0 uv run python:*)",
+      "Bash(wc:*)",
+      "Bash(du:*)",
+      "Bash(ls:*)",
+      "Bash(uv sync:*)",
+      "Bash(git -C /Users/dmg/projects/vxsort-cpp/vxsort/smallsort/codegen status:*)",
+      "Bash(git -C /Users/dmg/projects/vxsort-cpp/vxsort/smallsort/codegen diff:*)",
+      "Bash(git -C /Users/dmg/projects/vxsort-cpp/vxsort/smallsort/codegen log:*)",
+      "Bash(git -C /Users/dmg/projects/vxsort-cpp/vxsort/smallsort/codegen add:*)",
+      "Bash(git -C:*)",
+      "Bash(source:*)",
+      "Bash(tail:*)",
+      "Bash(echo:*)",
+      "Bash(for f in /tmp/vxsort_osaca_ps7xscqi/solution_*.asm)",
+      "Bash(nasm:*)"
     ]
   }
 }

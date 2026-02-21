@@ -1269,7 +1269,8 @@ class GadgetSynthesizer:
     def _validate_gadgets(
         self,
         jobs: list[tuple],
-        show_progress: bool = True,
+        progress: SuccessProgress | None = None,
+        task_id=None,
     ) -> list[tuple[PermutationGadget, VectorState, VectorState, dict]]:
         """
         Validate candidate gadgets using synthesis in parallel.
@@ -1280,72 +1281,60 @@ class GadgetSynthesizer:
         """
         validated_gadgets = []
 
-        progress = None
-        task_id = None
-        if show_progress:
-            progress = SuccessProgress.create(
-                width=60,
-                success_style="green",
-                attempt_style="yellow",
-                success_label="Valid",
-            )
-            progress.start()
-            task_id = progress.add_task(
-                "Validating gadgets", total=len(jobs), successes=0
-            )
-
-        try:
-            pool = Pool()
-            total_construct_time = 0.0
-            total_solve_time = 0.0
-
-            # Use imap_unordered for streaming results and progress updates
-            for (
-                gadget_results,
-                job_input_state,
-                job_metadata,
-                construct_time,
-                solver_time,
-            ) in pool.imap_unordered(_validate_gadget_worker, jobs):
-                total_construct_time += construct_time
-                total_solve_time += solver_time
-
-                success_inc = 0
-                for gadget, output_state in gadget_results:
-                    validated_gadgets.append(
-                        (gadget, job_input_state, output_state, job_metadata)
-                    )
-                    success_inc = 1
-
-                if progress:
-                    progress.update(task_id, advance=1, success=success_inc)
-
-            pool.close()
-            pool.join()
-
-            if jobs:
-                print(
-                    f"TOTAL construction time: {total_construct_time:.2f}s, TOTAL solver time: {total_solve_time:.2f}s"
-                )
-
-            # Phase 2.5: Compress tar files if smt2_dump_dir is set
-            if jobs and "smt2_dump_dir" in jobs[0][6]:
-                smt2_dump_dir = jobs[0][6]["smt2_dump_dir"]
-                stage_idx = jobs[0][6]["stage_idx"]
-                for filename in os.listdir(smt2_dump_dir):
-                    if filename.startswith(f"stage{stage_idx}_") and filename.endswith(
-                        ".tar"
-                    ):
-                        tar_path = os.path.join(smt2_dump_dir, filename)
-                        zst_path = tar_path + ".zst"
-                        cctx = zstd.ZstdCompressor()
-                        with open(tar_path, "rb") as f_in:
-                            with open(zst_path, "wb") as f_out:
-                                cctx.copy_stream(f_in, f_out)
-                        os.remove(tar_path)
-        finally:
+        def _log(msg: str):
             if progress:
-                progress.stop()
+                progress.console.print(msg)
+            else:
+                print(msg)
+
+        pool = Pool()
+        total_construct_time = 0.0
+        total_solve_time = 0.0
+
+        # Use imap_unordered for streaming results and progress updates
+        for (
+            gadget_results,
+            job_input_state,
+            job_metadata,
+            construct_time,
+            solver_time,
+        ) in pool.imap_unordered(_validate_gadget_worker, jobs):
+            total_construct_time += construct_time
+            total_solve_time += solver_time
+
+            success_inc = 0
+            for gadget, output_state in gadget_results:
+                validated_gadgets.append(
+                    (gadget, job_input_state, output_state, job_metadata)
+                )
+                success_inc = 1
+
+            if progress:
+                progress.update(task_id, advance=1, success=success_inc)
+
+        pool.close()
+        pool.join()
+
+        if jobs:
+            _log(
+                f"TOTAL construction time: {total_construct_time:.2f}s, TOTAL solver time: {total_solve_time:.2f}s"
+            )
+
+        # Phase 2.5: Compress tar files if smt2_dump_dir is set
+        if jobs and "smt2_dump_dir" in jobs[0][6]:
+            smt2_dump_dir = jobs[0][6]["smt2_dump_dir"]
+            stage_idx = jobs[0][6]["stage_idx"]
+            for filename in os.listdir(smt2_dump_dir):
+                if filename.startswith(f"stage{stage_idx}_") and filename.endswith(
+                    ".tar"
+                ):
+                    tar_path = os.path.join(smt2_dump_dir, filename)
+                    zst_path = tar_path + ".zst"
+                    cctx = zstd.ZstdCompressor()
+                    with open(tar_path, "rb") as f_in:
+                        with open(zst_path, "wb") as f_out:
+                            cctx.copy_stream(f_in, f_out)
+                    os.remove(tar_path)
 
         # Sort validated gadgets by a deterministic key to ensure consistent
         # dict insertion order downstream, regardless of imap_unordered return order.
@@ -2134,6 +2123,8 @@ class BitonicSuperVectorizer:
         stage_idx: int,
         all_candidates: list[tuple],
         max_unique_outputs: int = 3,
+        progress: SuccessProgress | None = None,
+        task_id=None,
     ) -> tuple[dict[tuple, list[SolutionNode]], dict[tuple, VectorState]]:
         """Process one stage: validate gadgets, group, create nodes.
 
@@ -2150,15 +2141,24 @@ class BitonicSuperVectorizer:
                 templates, independent of stage/input state.
             max_unique_outputs: Number of smallest unique output states to
                 enumerate per template for deterministic diversity.
+            progress: Optional SuccessProgress instance for live display.
+            task_id: Task ID within the progress instance for this stage.
 
         Returns:
             Tuple of (nodes_by_parent, unique_outputs) where nodes_by_parent maps
             parent_path to list of SolutionNodes and unique_outputs maps output
             state tuples to VectorState instances. Children on the nodes are empty.
         """
+
+        def _log(msg: str):
+            if progress:
+                progress.console.print(msg)
+            else:
+                print(msg)
+
         stage_pairs = self.bitonic_sorter.stages[stage_idx]
 
-        print(
+        _log(
             f"Stage {stage_idx}: Collecting candidates for {len(input_states_with_context)} nodes from the previous stage"
         )
 
@@ -2194,14 +2194,18 @@ class BitonicSuperVectorizer:
                     )
                 )
 
-        print(f"Stage {stage_idx}: Generated {len(all_jobs)} candidates to validate")
+        _log(f"Stage {stage_idx}: Generated {len(all_jobs)} candidates to validate")
+
+        # Set task total now that we know the job count
+        if progress and task_id is not None:
+            progress.update(task_id, total=len(all_jobs))
 
         # Phase 2: Validate all candidates in parallel with progress reporting
         validated_gadgets = self.synthesizer._validate_gadgets(
-            all_jobs, show_progress=True
+            all_jobs, progress=progress, task_id=task_id
         )
 
-        print(
+        _log(
             f"Stage {stage_idx}: Validated {len(validated_gadgets)}/{len(all_jobs)} gadgets"
         )
 
@@ -2218,7 +2222,7 @@ class BitonicSuperVectorizer:
                 gadgets_by_transition[key] = []
             gadgets_by_transition[key].append(gadget)
 
-        print(
+        _log(
             f"Stage {stage_idx}: Pruned to {len(gadgets_by_transition)} unique state transitions"
         )
 
@@ -2322,56 +2326,100 @@ class BitonicSuperVectorizer:
                 (state, ("canonical", out_tuple))
                 for out_tuple, state in unique_outputs.items()
             ]
-            print(
-                f"Resuming from stage {start_stage} with {len(current_inputs)} inputs"
-            )
+
+        # Create persistent multi-stage progress display
+        progress = SuccessProgress.create(
+            width=60,
+            success_style="green",
+            attempt_style="yellow",
+            success_label="Valid",
+        )
+
+        # Pre-create one task per stage
+        stage_task_ids = {}
+        for s in range(effective_limit):
+            if s < start_stage:
+                # Resumed stages: show as completed
+                tid = progress.add_task(
+                    f"Stage {s} (resumed)",
+                    total=1,
+                    completed=1,
+                    successes=1,
+                )
+                stage_task_ids[s] = tid
+            else:
+                # Pending stages: indeterminate until started
+                tid = progress.add_task(
+                    f"Stage {s}",
+                    total=None,
+                    start=False,
+                    successes=0,
+                )
+                stage_task_ids[s] = tid
 
         # Forward pass: iterate through stages
-        for stage_idx in range(start_stage, effective_limit):
-            nodes_by_parent, unique_outputs = self._process_single_stage(
-                current_inputs, stage_idx, all_candidates, max_unique_outputs
-            )
-            per_stage_data[stage_idx] = (nodes_by_parent, unique_outputs)
-
-            if nodes_by_parent:
-                self._stages_completed.add(stage_idx)
-
-            # Checkpoint save point
-            if checkpoint_dir is not None and checkpoint_config is not None:
-                try:
-                    from checkpoint import save_checkpoint, checkpoint_filename
-                except ImportError:
-                    from .checkpoint import save_checkpoint, checkpoint_filename  # type: ignore[no-redef]
-                ckpt_path = os.path.join(
-                    checkpoint_dir,
-                    checkpoint_filename(
-                        checkpoint_config.num_vecs,
-                        checkpoint_config.vm,
-                        checkpoint_config.prim_type,
-                        checkpoint_config.natural_order,
-                        stage_idx,
-                    ),
+        with progress:
+            if resume_data is not None:
+                progress.console.print(
+                    f"Resuming from stage {start_stage} with {len(current_inputs)} inputs"
                 )
-                save_checkpoint(
-                    ckpt_path,
-                    checkpoint_config,
-                    per_stage_data,
-                    sorted(self._stages_completed),
+
+            for stage_idx in range(start_stage, effective_limit):
+                task_id = stage_task_ids[stage_idx]
+                progress.start_task(task_id)
+
+                nodes_by_parent, unique_outputs = self._process_single_stage(
+                    current_inputs,
                     stage_idx,
+                    all_candidates,
+                    max_unique_outputs,
+                    progress=progress,
+                    task_id=task_id,
                 )
+                per_stage_data[stage_idx] = (nodes_by_parent, unique_outputs)
 
-            # Log deduplication and prepare inputs for next stage
-            if unique_outputs:
-                total_next = sum(len(nodes) for nodes in nodes_by_parent.values())
-                print(
-                    f"Stage {stage_idx}: Deduplicated {total_next} -> {len(unique_outputs)} next-stage inputs"
-                )
-                current_inputs = [
-                    (state, ("canonical", out_tuple))
-                    for out_tuple, state in unique_outputs.items()
-                ]
-            else:
-                break  # No valid outputs, can't continue
+                if nodes_by_parent:
+                    self._stages_completed.add(stage_idx)
+
+                # Checkpoint save point
+                if checkpoint_dir is not None and checkpoint_config is not None:
+                    try:
+                        from checkpoint import save_checkpoint, checkpoint_filename
+                    except ImportError:
+                        from .checkpoint import save_checkpoint, checkpoint_filename  # type: ignore[no-redef]
+                    ckpt_path = os.path.join(
+                        checkpoint_dir,
+                        checkpoint_filename(
+                            checkpoint_config.num_vecs,
+                            checkpoint_config.vm,
+                            checkpoint_config.prim_type,
+                            checkpoint_config.natural_order,
+                            stage_idx,
+                        ),
+                    )
+                    save_checkpoint(
+                        ckpt_path,
+                        checkpoint_config,
+                        per_stage_data,
+                        sorted(self._stages_completed),
+                        stage_idx,
+                    )
+
+                # Log deduplication and prepare inputs for next stage
+                if unique_outputs:
+                    total_next = sum(len(nodes) for nodes in nodes_by_parent.values())
+                    progress.console.print(
+                        f"Stage {stage_idx}: Deduplicated {total_next} -> {len(unique_outputs)} next-stage inputs"
+                    )
+                    current_inputs = [
+                        (state, ("canonical", out_tuple))
+                        for out_tuple, state in unique_outputs.items()
+                    ]
+                else:
+                    # Hide remaining stage tasks on early exit
+                    for s in range(stage_idx + 1, effective_limit):
+                        progress.update(stage_task_ids[s], visible=False)
+                    break  # No valid outputs, can't continue
 
         # Backward pass: wire children by iterating stages in reverse
         sorted_stages = sorted(per_stage_data.keys())

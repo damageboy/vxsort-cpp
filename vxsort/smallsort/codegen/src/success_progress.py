@@ -35,6 +35,10 @@ class DualBarColumn(BarColumn):
         # Determine bar width (use provided or fallback)
         total_width = self.bar_width - 2
 
+        # Indeterminate task (total not yet known)
+        if task.total is None:
+            return Text("[" + " " * total_width + "]", style="dim")
+
         # Safely get progress numbers
         total = task.total or 1  # avoid division by zero
         attempted_fraction = min(max(task.completed / total, 0.0), 1.0)
