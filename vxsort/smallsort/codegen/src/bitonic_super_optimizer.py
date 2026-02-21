@@ -2957,8 +2957,17 @@ class BitonicSuperVectorizer:
 
                         # Check threshold
                         if tracker.should_process_batch():
+                            threshold_pct = (
+                                _BATCH_THRESHOLDS[tracker.next_threshold_index] * 100
+                            )
                             new_outputs = self._process_batch(tracker)
                             if new_outputs and stage_idx + 1 < effective_limit:
+                                progress.console.print(
+                                    f"Stage {stage_idx} → {stage_idx + 1}: "
+                                    f"forwarding {len(new_outputs)} new unique outputs "
+                                    f"at {threshold_pct:.0f}% completion "
+                                    f"({tracker.completed_jobs}/{tracker.total_jobs_submitted} jobs)"
+                                )
                                 _forward_outputs(stage_idx + 1, new_outputs)
 
                         # Check completion
