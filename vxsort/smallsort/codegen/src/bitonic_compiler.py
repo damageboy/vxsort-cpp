@@ -51,6 +51,7 @@ def _run_verification(
     vm: vector_machine,
     prim_type: primitive_type,
     natural_order: bool,
+    max_workers: int | None = None,
 ):
     """Run Z3 end-to-end verification on a list of paths using multiprocessing.
 
@@ -76,7 +77,7 @@ def _run_verification(
 
     failures = []
     try:
-        with Pool() as pool:
+        with Pool(processes=max_workers) as pool:
             for path_index, result in pool.imap_unordered(_verify_path_worker, jobs):
                 progress.update(task_id, advance=1, success=1 if result.verified else 0)
                 if not result.verified:
@@ -100,6 +101,7 @@ def verify_only_from_json(
     target_cpu: str = "generic",
     estimate: bool = False,
     nasm_path: str | None = None,
+    max_workers: int | None = None,
 ):
     """Load solutions from a JSON file and verify them without re-running synthesis.
 
@@ -135,7 +137,9 @@ def verify_only_from_json(
     path_selector = PathSelector(cost_model)
     paths = path_selector.select_top_k_paths(bundle.roots, top_k or 10_000)
 
-    _run_verification(paths, vm, prim_type, bundle.natural_order)
+    _run_verification(
+        paths, vm, prim_type, bundle.natural_order, max_workers=max_workers
+    )
 
     if estimate:
         if bundle.num_vecs is None:
@@ -253,6 +257,7 @@ def generate_bitonic_sorter(
     estimate: bool = False,
     nasm_path: str | None = None,
     no_pipeline: bool = False,
+    max_workers: int | None = None,
 ):
     """
     Generate bitonic sorter with super-optimized permutation sequences.
@@ -343,6 +348,7 @@ def generate_bitonic_sorter(
         checkpoint_dir=checkpoint_dir,
         resume_data=resume_data,
         pipeline=not no_pipeline,
+        max_workers=max_workers,
     )
 
     print(f"Found {len(solutions)} root solutions")
@@ -407,7 +413,9 @@ def generate_bitonic_sorter(
                 solutions, top_k or 10_000
             )
 
-        _run_verification(paths_to_verify, vm, prim_type, natural_order)
+        _run_verification(
+            paths_to_verify, vm, prim_type, natural_order, max_workers=max_workers
+        )
 
     # OSACA performance estimation
     if estimate:
@@ -568,6 +576,14 @@ if __name__ == "__main__":
         help="Disable pipelined stage processing; use sequential stage barriers instead.",
     )
     parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Maximum number of worker processes for parallel synthesis and verification. "
+        "Defaults to os.cpu_count(). Use this to limit memory usage on large machines.",
+    )
+    parser.add_argument(
         "--list-cpus",
         action="store_true",
         default=False,
@@ -605,6 +621,7 @@ if __name__ == "__main__":
             target_cpu=args.target_cpu,
             estimate=args.estimate,
             nasm_path=args.nasm_path,
+            max_workers=args.max_workers,
         )
         raise SystemExit(0)
 
@@ -649,4 +666,5 @@ if __name__ == "__main__":
         estimate=args.estimate,
         nasm_path=args.nasm_path,
         no_pipeline=args.no_pipeline,
+        max_workers=args.max_workers,
     )

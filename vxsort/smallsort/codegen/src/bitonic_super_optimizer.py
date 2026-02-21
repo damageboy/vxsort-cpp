@@ -1272,6 +1272,7 @@ class GadgetSynthesizer:
         jobs: list[tuple],
         progress: SuccessProgress | None = None,
         task_id=None,
+        max_workers: int | None = None,
     ) -> list[tuple[PermutationGadget, VectorState, VectorState, dict]]:
         """
         Validate candidate gadgets using synthesis in parallel.
@@ -1288,7 +1289,7 @@ class GadgetSynthesizer:
             else:
                 print(msg)
 
-        pool = Pool()
+        pool = Pool(processes=max_workers)
         total_construct_time = 0.0
         total_solve_time = 0.0
 
@@ -2093,6 +2094,7 @@ class BitonicSuperVectorizer:
         checkpoint_dir: str | None = None,
         resume_data: dict | None = None,
         pipeline: bool = True,
+        max_workers: int | None = None,
     ) -> tuple[list[SolutionNode], bool]:
         """
         Iteratively explore all stage transitions to build solution tree.
@@ -2112,6 +2114,8 @@ class BitonicSuperVectorizer:
             pipeline: If True (default), use pipelined stage processing where
                 stage N+1 starts before stage N completes. If False, use the
                 sequential path with a hard barrier between stages.
+            max_workers: Maximum number of worker processes. If None, defaults
+                to os.cpu_count().
 
         Returns:
             Tuple of (root nodes, all_stages_complete) where all_stages_complete
@@ -2127,6 +2131,7 @@ class BitonicSuperVectorizer:
                 "Create a new instance for each synthesis run."
             )
         self._synthesis_started = True
+        self._max_workers = max_workers
 
         # Inject natural-order stage if requested
         self._natural_order_stage = None
@@ -2199,6 +2204,7 @@ class BitonicSuperVectorizer:
         max_unique_outputs: int = 3,
         progress: SuccessProgress | None = None,
         task_id=None,
+        max_workers: int | None = None,
     ) -> tuple[dict[tuple, list[SolutionNode]], dict[tuple, VectorState]]:
         """Process one stage: validate gadgets, group, create nodes.
 
@@ -2276,7 +2282,10 @@ class BitonicSuperVectorizer:
 
         # Phase 2: Validate all candidates in parallel with progress reporting
         validated_gadgets = self.synthesizer._validate_gadgets(
-            all_jobs, progress=progress, task_id=task_id
+            all_jobs,
+            progress=progress,
+            task_id=task_id,
+            max_workers=max_workers,
         )
 
         _log(
@@ -2605,6 +2614,7 @@ class BitonicSuperVectorizer:
                     max_unique_outputs,
                     progress=progress,
                     task_id=task_id,
+                    max_workers=self._max_workers,
                 )
                 per_stage_data[stage_idx] = (nodes_by_parent, unique_outputs)
 
@@ -2900,7 +2910,7 @@ class BitonicSuperVectorizer:
                 )
 
             # We need executor in the closures above, so use a mutable container
-            with ProcessPoolExecutor() as executor:
+            with ProcessPoolExecutor(max_workers=self._max_workers) as executor:
                 # Launch stage 0 (or first stage after resume)
                 if start_stage < effective_limit:
                     tracker0 = StageTracker(
@@ -3028,6 +3038,7 @@ class BitonicSuperVectorizer:
         checkpoint_dir: str | None = None,
         resume_data: dict | None = None,
         pipeline: bool = True,
+        max_workers: int | None = None,
     ) -> tuple[list[SolutionNode], bool]:
         """Entry point: builds solution tree for all stages.
 
@@ -3042,6 +3053,8 @@ class BitonicSuperVectorizer:
             resume_data: If provided, resume from a previous checkpoint. Expected
                 keys: ``per_stage_data`` and ``last_completed_stage``.
             pipeline: If True (default), use pipelined stage processing.
+            max_workers: Maximum number of worker processes. If None, defaults
+                to os.cpu_count().
 
         Returns:
             Tuple of (root nodes, all_stages_complete) where all_stages_complete
@@ -3059,6 +3072,7 @@ class BitonicSuperVectorizer:
             checkpoint_dir=checkpoint_dir,
             resume_data=resume_data,
             pipeline=pipeline,
+            max_workers=max_workers,
         )
 
 
