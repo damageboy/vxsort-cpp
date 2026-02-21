@@ -157,6 +157,62 @@ def verify_only_from_json(
         print_estimation_table(results, paths)
 
 
+def estimate_only_from_json(
+    json_path: str,
+    top_k: int | None = None,
+    target_cpu: str = "generic",
+    nasm_path: str | None = None,
+):
+    """Load solutions from a JSON file and run OSACA estimation without verification.
+
+    Args:
+        json_path: Path to a JSON solutions file.
+        top_k: Number of best paths to estimate. If None, estimate all paths.
+        target_cpu: Target CPU for cost model during path selection.
+        nasm_path: Path to nasm binary for assembly verification.
+    """
+    bundle = load_solutions_from_json(json_path)
+
+    if bundle.vm_name is None or bundle.prim_type_name is None:
+        raise SystemExit(
+            f"Error: {json_path} has no vector_machine/primitive_type metadata.\n"
+            "Re-export the solutions with a current version of the tool."
+        )
+
+    if bundle.num_vecs is None:
+        raise SystemExit(
+            f"Error: {json_path} has no num_vecs metadata. "
+            "Re-export the solutions with a current version of the tool."
+        )
+
+    vm = vector_machine[bundle.vm_name]
+    prim_type = primitive_type[bundle.prim_type_name]
+
+    print(
+        f"Loaded {len(bundle.roots)} roots from {json_path} "
+        f"({vm.name} {prim_type.name}, "
+        f"natural_order={bundle.natural_order})"
+    )
+
+    # Select paths
+    cost_model = CostModel(target_cpu)
+    path_selector = PathSelector(cost_model)
+    paths = path_selector.select_top_k_paths(bundle.roots, top_k or 10_000)
+
+    from osaca_estimator import estimate_solutions, print_estimation_table
+
+    results = estimate_solutions(
+        paths,
+        vm,
+        prim_type,
+        bundle.num_vecs,
+        bundle.natural_order,
+        target_cpu,
+        nasm_path,
+    )
+    print_estimation_table(results, paths)
+
+
 def _count_dag_paths(roots):
     """Count total root-to-leaf paths through the DAG using memoization.
 
@@ -495,6 +551,14 @@ if __name__ == "__main__":
         help="Path to nasm binary for assembly verification (used with --estimate)",
     )
     parser.add_argument(
+        "--estimate-only",
+        type=str,
+        default=None,
+        metavar="JSON_FILE",
+        help="Skip synthesis and verification; load solutions from a JSON file "
+        "and run OSACA performance estimation only.",
+    )
+    parser.add_argument(
         "--list-cpus",
         action="store_true",
         default=False,
@@ -531,6 +595,16 @@ if __name__ == "__main__":
             top_k=args.top_k,
             target_cpu=args.target_cpu,
             estimate=args.estimate,
+            nasm_path=args.nasm_path,
+        )
+        raise SystemExit(0)
+
+    # --estimate-only mode: load JSON and run OSACA estimation without synthesis or verification
+    if args.estimate_only is not None:
+        estimate_only_from_json(
+            args.estimate_only,
+            top_k=args.top_k,
+            target_cpu=args.target_cpu,
             nasm_path=args.nasm_path,
         )
         raise SystemExit(0)

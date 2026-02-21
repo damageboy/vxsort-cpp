@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import subprocess
 import sys
 import tempfile
@@ -416,6 +417,87 @@ def _verify_with_nasm(asm_path: str, nasm_path: str) -> bool:
             os.unlink(obj_path)
 
 
+def _build_mnemonic_fixups(arch: str) -> dict[str, str]:
+    """Build a mnemonic substitution table based on what the OSACA DB has.
+
+    OSACA databases are inconsistent about ``vmovdqa`` vs the EVEX-suffixed
+    ``vmovdqa32`` / ``vmovdqa64``:
+
+    - Older DBs (e.g. SKX) have 2-operand forms only under ``vmovdqa``;
+      their ``vmovdqa32`` entries are 3-operand masked forms we don't use.
+    - Newer DBs (e.g. ZEN5) have 2-operand forms only under ``vmovdqa32``
+      and lack ``vmovdqa`` entirely.
+
+    We probe the machine model to decide which direction to normalize.
+    """
+    from osaca.semantics import MachineModel
+
+    mm = MachineModel(arch=arch)
+
+    # Check which mnemonics have usable 2-operand (reg,reg or reg,mem) forms
+    has_bare_2op = False
+    has_32_2op = False
+
+    for e in mm["instruction_forms"]:
+        name = e.get("name", "").lower()
+        nops = len(e.get("operands", []))
+        if nops == 2:
+            if name == "vmovdqa":
+                has_bare_2op = True
+            elif name == "vmovdqa32":
+                has_32_2op = True
+
+    fixups: dict[str, str] = {}
+
+    if has_bare_2op and not has_32_2op:
+        # SKX-style: normalize suffixed → bare
+        fixups["vmovdqa32"] = "vmovdqa"
+        fixups["vmovdqa64"] = "vmovdqa"
+    elif has_32_2op and not has_bare_2op:
+        # ZEN5-style: normalize bare → suffixed
+        fixups["vmovdqa"] = "vmovdqa32"
+
+    return fixups
+
+
+def _sanitize_asm_for_osaca(code: str, arch: str) -> str:
+    """Pre-process NASM assembly text into forms OSACA's Intel parser accepts.
+
+    OSACA cannot parse NASM-specific ``[rel label]`` memory operands.
+    We replace them with ``[rdi]`` (register-indirect), which is
+    semantically equivalent for throughput / latency analysis.  Inline
+    comments are also stripped so that bracket characters inside comments
+    (e.g. ``; [7, 6, 5, 4, 3, 2, 1, 0]``) don't confuse the tokenizer,
+    while OSACA marker comments (``; OSACA-BEGIN`` / ``; OSACA-END``) are
+    preserved.
+
+    Mnemonic fixups (e.g. ``vmovdqa32`` → ``vmovdqa``) are applied only
+    when the target arch's OSACA database lacks the original form.
+    """
+    fixups = _build_mnemonic_fixups(arch)
+
+    out_lines: list[str] = []
+    for line in code.splitlines():
+        # Replace [rel <label>] with [rdi]
+        line = re.sub(r"\[rel\s+\w+\]", "[rdi]", line)
+
+        # Apply arch-specific mnemonic fixups
+        for src, dst in fixups.items():
+            line = re.sub(rf"\b{src}\b", dst, line)
+
+        # Strip inline comments, but keep OSACA markers
+        semi_pos = line.find(";")
+        if semi_pos >= 0:
+            comment = line[semi_pos:]
+            if "OSACA-BEGIN" in comment or "OSACA-END" in comment:
+                pass  # keep marker comments
+            else:
+                line = line[:semi_pos].rstrip()
+
+        out_lines.append(line)
+    return "\n".join(out_lines) + "\n"
+
+
 def _run_osaca(
     asm_path: str,
     arch: str,
@@ -443,8 +525,9 @@ def _run_osaca(
     warnings: list[str] = []
 
     try:
-        # Parse the assembly file
+        # Parse the assembly file, sanitizing NASM constructs OSACA can't handle
         code = Path(asm_path).read_text()
+        code = _sanitize_asm_for_osaca(code, arch)
         parser = get_asm_parser(arch, "intel")
         parsed = parser.parse_file(code)
 

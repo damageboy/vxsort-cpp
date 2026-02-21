@@ -265,7 +265,9 @@ class BitonicPathVerifier:
         # Use signed <= (bvsle) since the sorting network uses signed min/max
         start = time.perf_counter()
         solver = Solver()
-        sorted_ok = And([sorted_elems[i] <= sorted_elems[i + 1] for i in range(N - 1)])
+        sorted_ok = simplify(
+            And([sorted_elems[i] <= sorted_elems[i + 1] for i in range(N - 1)])
+        )
         solver.add(Not(sorted_ok))
         result = solver.check()
         solver_time = time.perf_counter() - start
@@ -308,7 +310,7 @@ class BitonicPathVerifier:
             vec = top_vec if vec_name == "top" else bottom_vec
             lo = lane * self.lane_width
             hi = lo + self.lane_width - 1
-            sorted_elems.append(Extract(hi, lo, vec))
+            sorted_elems.append(simplify(Extract(hi, lo, vec)))
 
         return sorted_elems
 
