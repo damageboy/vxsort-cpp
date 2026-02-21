@@ -5,7 +5,11 @@ import sys
 
 import pytest
 from bitonic_sorter import BitonicSorter
-from asm_exporter import RegisterAllocator, _format_instruction
+from asm_exporter import (
+    RegisterAllocator,
+    _emit_compare_swap_lines,
+    _format_instruction,
+)
 from bitonic_super_optimizer import (
     BitonicSuperVectorizer,
     GadgetSynthesizer,
@@ -678,6 +682,102 @@ def test_avx512_i32_synthesis_depth1():
     assert len(single) == 6, f"Expected 6 single-input templates, got {len(single)}"
     assert len(dual) == 12, f"Expected 12 dual-input templates, got {len(dual)}"
     print(f"AVX512 i32: {len(single)} single + {len(dual)} dual templates registered")
+
+
+def test_register_allocator_pair_alternation():
+    """Verify src/dst properties, swap behavior, and temp start at num_vecs*2."""
+    ra = RegisterAllocator(vector_machine.AVX2, primitive_type.i32, 2)
+
+    # Initial state: pair 0 is source
+    assert ra.src_top == "ymm0"
+    assert ra.src_bottom == "ymm1"
+    assert ra.dst_top == "ymm2"
+    assert ra.dst_bottom == "ymm3"
+    assert ra._pair_index == 0
+
+    # Temp registers start at num_vecs * 2 = 4
+    tmp = ra.allocate_temp()
+    assert tmp == "ymm4"
+    ra.reset_temps()
+
+    # After swap, pair 1 is source
+    ra.swap_pairs()
+    assert ra._pair_index == 1
+    assert ra.src_top == "ymm2"
+    assert ra.src_bottom == "ymm3"
+    assert ra.dst_top == "ymm0"
+    assert ra.dst_bottom == "ymm1"
+
+    # Swap back
+    ra.swap_pairs()
+    assert ra._pair_index == 0
+    assert ra.src_top == "ymm0"
+
+    # reset_temps preserves pair state
+    ra.swap_pairs()
+    ra.reset_temps()
+    assert ra._pair_index == 1  # preserved
+
+
+def test_compare_swap_lines_native_no_copy():
+    """AVX2 i32: exactly 2 instructions, no vmovdqa, writes to dst pair."""
+    ra = RegisterAllocator(vector_machine.AVX2, primitive_type.i32, 2)
+    lines = _emit_compare_swap_lines(ra)
+
+    assert len(lines) == 2, f"Expected 2 instructions, got {len(lines)}"
+    # No vmovdqa copy
+    for line in lines:
+        assert "vmovdqa" not in line, f"Unexpected vmovdqa in: {line}"
+    # First line is min writing to dst_top (ymm2)
+    assert "vpminsd" in lines[0]
+    assert "ymm2" in lines[0]  # dst_top
+    # Second line is max writing to dst_bottom (ymm3)
+    assert "vpmaxsd" in lines[1]
+    assert "ymm3" in lines[1]  # dst_bottom
+    # Both read from source pair
+    assert "ymm0" in lines[0] and "ymm1" in lines[0]
+    assert "ymm0" in lines[1] and "ymm1" in lines[1]
+
+
+def test_compare_swap_lines_emulated_no_copy():
+    """AVX2 i64: exactly 3 instructions (vpcmpgtq + 2x vblendvpd), no vmovdqa."""
+    ra = RegisterAllocator(vector_machine.AVX2, primitive_type.i64, 2)
+    lines = _emit_compare_swap_lines(ra)
+
+    assert len(lines) == 3, f"Expected 3 instructions, got {len(lines)}"
+    # No vmovdqa copy
+    for line in lines:
+        assert "vmovdqa" not in line, f"Unexpected vmovdqa in: {line}"
+    assert "vpcmpgtq" in lines[0]
+    assert "vblendvpd" in lines[1]
+    assert "vblendvpd" in lines[2]
+    # Writes to dst pair (ymm2, ymm3)
+    assert "ymm2" in lines[1]  # dst_top in blend
+    assert "ymm3" in lines[2]  # dst_bottom in blend
+
+
+def test_pair_swap_across_stages():
+    """Simulate 3 stages: verify pairs alternate correctly."""
+    ra = RegisterAllocator(vector_machine.AVX2, primitive_type.i32, 2)
+
+    # Stage 0: source = pair 0
+    assert ra.src_top == "ymm0"
+    lines0 = _emit_compare_swap_lines(ra)
+    assert "ymm2" in lines0[0]  # writes to dst pair
+    ra.swap_pairs()
+    ra.reset_temps()
+
+    # Stage 1: source = pair 1
+    assert ra.src_top == "ymm2"
+    assert ra.src_bottom == "ymm3"
+    lines1 = _emit_compare_swap_lines(ra)
+    assert "ymm0" in lines1[0]  # writes back to pair 0
+    ra.swap_pairs()
+    ra.reset_temps()
+
+    # Stage 2: source = pair 0 again
+    assert ra.src_top == "ymm0"
+    assert ra._pair_index == 0
 
 
 def run_all_tests():

@@ -19,6 +19,7 @@ from tabulate import tabulate
 
 from asm_exporter import (
     RegisterAllocator,
+    _emit_compare_swap_lines,
     _format_control_vector_bits,
     _get_compare_swap_mnemonics,
     _get_instruction_metadata,
@@ -256,37 +257,6 @@ def _emit_gadget_asm(
     return lines
 
 
-def _emit_compare_swap_lines(
-    reg_allocator: RegisterAllocator,
-    top_reg: str,
-    bottom_reg: str,
-) -> list[str]:
-    """Emit compare-swap (min/max) instructions, returning lines."""
-    lines: list[str] = []
-    mnemonics = _get_compare_swap_mnemonics(reg_allocator.dtype, reg_allocator.vm)
-
-    if mnemonics is not None:
-        mov, min_mn, max_mn = mnemonics
-        tmp = reg_allocator.allocate_temp()
-        lines.append(f"    {mov:20s} {tmp}, {top_reg}")
-        lines.append(f"    {min_mn:20s} {top_reg}, {top_reg}, {bottom_reg}")
-        lines.append(f"    {max_mn:20s} {bottom_reg}, {bottom_reg}, {tmp}")
-    else:
-        # AVX2 64-bit emulation: cmpgt + blendv
-        tmp1 = reg_allocator.allocate_temp()
-        tmp2 = reg_allocator.allocate_temp()
-        lines.append(f"    {'vmovdqa32':20s} {tmp1}, {top_reg}")
-        lines.append(f"    {'vpcmpgtq':20s} {tmp2}, {top_reg}, {bottom_reg}")
-        lines.append(
-            f"    {'vblendvpd':20s} {top_reg}, {top_reg}, {bottom_reg}, {tmp2}"
-        )
-        lines.append(
-            f"    {'vblendvpd':20s} {bottom_reg}, {bottom_reg}, {tmp1}, {tmp2}"
-        )
-
-    return lines
-
-
 def _generate_osaca_asm(
     path,
     vm: vector_machine,
@@ -330,12 +300,14 @@ def _generate_osaca_asm(
     ]
 
     reg_allocator = RegisterAllocator(vm, dtype, num_vecs)
-    top_reg = reg_allocator.get_data_reg(0)
-    bottom_reg = reg_allocator.get_data_reg(1) if num_vecs > 1 else None
 
     last_idx = len(path.steps) - 1
     for step_idx, step in enumerate(path.steps):
         text_lines.append(f"    ; -- Stage {step.node.stage} --")
+
+        # Gadget operates on source pair
+        top_reg = reg_allocator.src_top
+        bottom_reg = reg_allocator.src_bottom
 
         gadget = step.gadget
         gadget_lines = _emit_gadget_asm(
@@ -350,11 +322,23 @@ def _generate_osaca_asm(
 
         # Compare-swap (skip on final natural-order stage)
         is_natural_order_step = natural_order and step_idx == last_idx
-        if not is_natural_order_step and num_vecs > 1 and bottom_reg:
-            cs_lines = _emit_compare_swap_lines(reg_allocator, top_reg, bottom_reg)
+        if not is_natural_order_step and num_vecs > 1:
+            cs_lines = _emit_compare_swap_lines(reg_allocator)
             text_lines.extend(cs_lines)
+            reg_allocator.swap_pairs()
 
         reg_allocator.reset_temps()
+
+    # If results ended up in pair 1, move back to pair 0
+    if reg_allocator._pair_index != 0:
+        mnemonics = _get_compare_swap_mnemonics(dtype, vm)
+        mov = mnemonics[0] if mnemonics else "vmovdqa"
+        text_lines.append(
+            f"    {mov:20s} {reg_allocator.dst_top}, {reg_allocator.src_top}"
+        )
+        text_lines.append(
+            f"    {mov:20s} {reg_allocator.dst_bottom}, {reg_allocator.src_bottom}"
+        )
 
     text_lines.append("    ; OSACA-END")
     text_lines.append("    ret")
@@ -649,7 +633,7 @@ def estimate_solutions(
 
     # Create temp directory
     output_dir = tempfile.mkdtemp(prefix="vxsort_osaca_", dir="/tmp")
-    print(f"OSACA estimation: arch={arch}, output_dir={output_dir}")
+    print(f"OSACA estimation: arch: {arch}, output_dir: {output_dir}")
 
     results: list[OsacaResult] = []
     total = len(paths)

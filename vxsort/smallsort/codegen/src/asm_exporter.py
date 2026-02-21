@@ -80,7 +80,14 @@ def _get_compare_swap_mnemonics(
 
 
 class RegisterAllocator:
-    """Manages register allocation for assembly output."""
+    """Manages register allocation for assembly output.
+
+    Supports alternating register pairs to eliminate vmovdqa copies in
+    compare-swap stages.  Two pairs are reserved: pair 0 = (reg0, reg1),
+    pair 1 = (reg2, reg3).  Each compare-swap reads from the *source*
+    pair and writes to the *destination* pair, then the caller calls
+    ``swap_pairs()`` to flip roles.
+    """
 
     def __init__(self, vm: vector_machine, dtype: primitive_type, num_vecs: int):
         self.vm = vm
@@ -94,13 +101,44 @@ class RegisterAllocator:
         else:
             self.reg_prefix = "v"  # fallback
 
-        # First num_vecs registers are for data
-        self.next_temp_reg = num_vecs
+        # Reserve num_vecs * 2 registers for data (two pairs)
+        self._pair_index: int = 0
+        self.next_temp_reg = num_vecs * 2
         self.temp_regs_allocated = []
 
         # K-mask registers (k1-k7; k0 cannot be used as writemask)
         self.next_kmask_reg = 1
         self.kmask_regs_allocated = []
+
+    # -- Pair-alternation properties --
+
+    @property
+    def src_top(self) -> str:
+        """Source top register for the current pair."""
+        offset = self._pair_index * self.num_vecs
+        return f"{self.reg_prefix}{offset}"
+
+    @property
+    def src_bottom(self) -> str:
+        """Source bottom register for the current pair."""
+        offset = self._pair_index * self.num_vecs + 1
+        return f"{self.reg_prefix}{offset}"
+
+    @property
+    def dst_top(self) -> str:
+        """Destination top register (alternate pair)."""
+        offset = (1 - self._pair_index) * self.num_vecs
+        return f"{self.reg_prefix}{offset}"
+
+    @property
+    def dst_bottom(self) -> str:
+        """Destination bottom register (alternate pair)."""
+        offset = (1 - self._pair_index) * self.num_vecs + 1
+        return f"{self.reg_prefix}{offset}"
+
+    def swap_pairs(self):
+        """Toggle which register pair is the source vs destination."""
+        self._pair_index = 1 - self._pair_index
 
     def get_data_reg(self, vec_idx: int) -> str:
         """Get the register name for a data vector."""
@@ -123,8 +161,8 @@ class RegisterAllocator:
         return reg
 
     def reset_temps(self):
-        """Reset temporary register allocation."""
-        self.next_temp_reg = self.num_vecs
+        """Reset temporary register allocation (preserves pair state)."""
+        self.next_temp_reg = self.num_vecs * 2
         self.temp_regs_allocated = []
         self.next_kmask_reg = 1
         self.kmask_regs_allocated = []
@@ -371,59 +409,47 @@ def _format_vector_state_as_comment(state, prefix: str = "") -> str:
     return "\n".join(comment_lines)
 
 
-def _emit_compare_swap(
+def _emit_compare_swap_lines(
     reg_allocator: RegisterAllocator,
-    top_reg: str,
-    bottom_reg: str,
-    prefix: str = "",
-):
-    """Emit min/max compare-swap instructions between top and bottom vectors.
+) -> list[str]:
+    """Emit min/max compare-swap instructions using alternating register pairs.
+
+    Reads from the allocator's *source* pair and writes to the *destination*
+    pair, eliminating the vmovdqa copy that was previously needed.
+
+    Does NOT call ``swap_pairs()`` — the caller is responsible for that
+    (because the final natural-order stage skips compare-swap entirely).
 
     For types with native min/max (all except AVX2 64-bit):
-        mov  tmp, top
-        min  top, top, bottom
-        max  bottom, bottom, tmp
+        min  dst_top, src_top, src_bottom
+        max  dst_bottom, src_top, src_bottom
 
     For AVX2 64-bit (no native min/max):
-        mov       tmp1, top
-        cmpgt     tmp2, top, bottom      (signed comparison)
-        blendv    top, top, bottom, tmp2
-        blendv    bottom, bottom, tmp1, tmp2
-
-    Note: primitive_type aliases (i64/u64/f64 are same enum member) make it
-    impossible to distinguish signed vs unsigned at this level. Uses signed
-    comparison (vpcmpgtq) for the AVX2 64-bit emulation path.
+        cmpgt     tmp, src_top, src_bottom
+        blendvpd  dst_top, src_bottom, src_top, tmp      (min)
+        blendvpd  dst_bottom, src_top, src_bottom, tmp    (max)
     """
-    dtype = reg_allocator.dtype
-    vm = reg_allocator.vm
-    mnemonics = _get_compare_swap_mnemonics(dtype, vm)
+    lines: list[str] = []
+    src_top = reg_allocator.src_top
+    src_bot = reg_allocator.src_bottom
+    dst_top = reg_allocator.dst_top
+    dst_bot = reg_allocator.dst_bottom
+
+    mnemonics = _get_compare_swap_mnemonics(reg_allocator.dtype, reg_allocator.vm)
 
     if mnemonics is not None:
-        # Native min/max path
-        mov, min_mn, max_mn = mnemonics
-        tmp = reg_allocator.allocate_temp()
-        print(f"{prefix}; Compare-swap (min/max):")
-        print(f"{prefix}    {mov:20s} {tmp}, {top_reg}")
-        print(f"{prefix}    {min_mn:20s} {top_reg}, {top_reg}, {bottom_reg}")
-        print(f"{prefix}    {max_mn:20s} {bottom_reg}, {bottom_reg}, {tmp}")
+        # Native min/max path — 2 instructions, no copy
+        _mov, min_mn, max_mn = mnemonics
+        lines.append(f"    {min_mn:20s} {dst_top}, {src_top}, {src_bot}")
+        lines.append(f"    {max_mn:20s} {dst_bot}, {src_top}, {src_bot}")
     else:
-        # AVX2 64-bit emulation: cmpgt + blendv (signed comparison)
-        tmp1 = reg_allocator.allocate_temp()
-        tmp2 = reg_allocator.allocate_temp()
-        print(
-            f"{prefix}; Compare-swap "
-            f"(min/max via cmpgt+blend, no native 64-bit min/max on AVX2):"
-        )
-        print(f"{prefix}    {'vmovdqa':20s} {tmp1}, {top_reg}")
-        print(f"{prefix}    {'vpcmpgtq':20s} {tmp2}, {top_reg}, {bottom_reg}")
-        print(
-            f"{prefix}    {'vblendvpd':20s} "
-            f"{top_reg}, {top_reg}, {bottom_reg}, {tmp2}"
-        )
-        print(
-            f"{prefix}    {'vblendvpd':20s} "
-            f"{bottom_reg}, {bottom_reg}, {tmp1}, {tmp2}"
-        )
+        # AVX2 64-bit emulation: cmpgt + 2x blendv — 3 instructions, no copy
+        tmp = reg_allocator.allocate_temp()
+        lines.append(f"    {'vpcmpgtq':20s} {tmp}, {src_top}, {src_bot}")
+        lines.append(f"    {'vblendvpd':20s} {dst_top}, {src_bot}, {src_top}, {tmp}")
+        lines.append(f"    {'vblendvpd':20s} {dst_bot}, {src_top}, {src_bot}, {tmp}")
+
+    return lines
 
 
 def _print_solution_step_as_assembly(
@@ -451,25 +477,24 @@ def _print_solution_step_as_assembly(
     if step.score.control_vector_count > 0:
         print(f"{prefix}; Control vectors: {step.score.control_vector_count}")
 
-    # Get register names
-    top_reg = reg_allocator.get_data_reg(0)
-    bottom_reg = reg_allocator.get_data_reg(1) if reg_allocator.num_vecs > 1 else None
+    # Get register names from current source pair
+    top_reg = reg_allocator.src_top
+    bottom_reg = reg_allocator.src_bottom
 
     # Use the explicitly selected gadget from the step
     gadget = step.gadget
 
-    # Print top vector instructions
+    # Print top vector instructions (gadget operates in-place on source pair)
     if gadget.top_instructions:
         print(f"{prefix}; Top vector ({top_reg}) operations:")
         for inst in gadget.top_instructions:
-            effective_bottom = bottom_reg if bottom_reg else top_reg
             asm_line = _format_instruction(
-                inst, reg_allocator, top_reg, effective_bottom, is_top=True
+                inst, reg_allocator, top_reg, bottom_reg, is_top=True
             )
             print(f"{prefix}{asm_line}")
 
     # Print bottom vector instructions
-    if gadget.bottom_instructions and bottom_reg:
+    if gadget.bottom_instructions:
         print(f"{prefix}; Bottom vector ({bottom_reg}) operations:")
         for inst in gadget.bottom_instructions:
             asm_line = _format_instruction(
@@ -478,8 +503,12 @@ def _print_solution_step_as_assembly(
             print(f"{prefix}{asm_line}")
 
     # Emit compare-swap (min/max) after permutation instructions
-    if emit_compare_swap and reg_allocator.num_vecs > 1 and bottom_reg:
-        _emit_compare_swap(reg_allocator, top_reg, bottom_reg, prefix)
+    if emit_compare_swap:
+        cs_lines = _emit_compare_swap_lines(reg_allocator)
+        print(f"{prefix}; Compare-swap (min/max):")
+        for line in cs_lines:
+            print(f"{prefix}{line}")
+        reg_allocator.swap_pairs()
 
     # Print output state
     print(f"{prefix}; Output State:")
@@ -553,11 +582,13 @@ def export_solutions_to_asm(
             if truncated:
                 print(f"; NOTE: Showing {len(all_paths)} paths (may be capped)")
             print(";")
-            print("; Registers:")
+            print("; Registers (alternating pairs):")
             reg_prefix = "ymm" if vm == vector_machine.AVX2 else "zmm"
             for i in range(num_vecs):
-                print(f";   {reg_prefix}{i}: Input/output vector {i}")
-            print(f";   {reg_prefix}{num_vecs}+: Temporary registers as needed")
+                print(f";   {reg_prefix}{i}: Pair 0 vector {i} (input/output)")
+            for i in range(num_vecs):
+                print(f";   {reg_prefix}{num_vecs + i}: Pair 1 vector {i} (alternate)")
+            print(f";   {reg_prefix}{num_vecs * 2}+: Temporary registers as needed")
             print()
             print("=" * 80)
             print()
@@ -598,6 +629,19 @@ def export_solutions_to_asm(
                         cumulative_cost=running_cost,
                         emit_compare_swap=not is_natural_order_step,
                     )
+
+                # If results ended up in pair 1, move back to pair 0
+                if reg_allocator._pair_index != 0:
+                    mnemonics = _get_compare_swap_mnemonics(dtype, vm)
+                    mov = mnemonics[0] if mnemonics else "vmovdqa"
+                    src_t = reg_allocator.src_top
+                    src_b = reg_allocator.src_bottom
+                    dst_t = reg_allocator.dst_top
+                    dst_b = reg_allocator.dst_bottom
+                    print("; Move results back to pair 0:")
+                    print(f"    {mov:20s} {dst_t}, {src_t}")
+                    print(f"    {mov:20s} {dst_b}, {src_b}")
+                    print()
 
                 print("=" * 80)
                 print()
