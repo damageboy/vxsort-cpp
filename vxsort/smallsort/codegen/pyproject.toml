@@ -13,6 +13,7 @@ dependencies = [
     "zstandard>=0.25.0",
     "osaca @ git+https://github.com/RRZE-HPC/OSACA.git",
     "z3-solver>=4.15.8.0",
+    "psutil>=5.9.0",
 ]
 
 [dependency-groups]

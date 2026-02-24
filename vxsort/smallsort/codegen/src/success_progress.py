@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from time import sleep
 
-from rich.console import Console
+from rich.console import Console, RenderableType
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -11,7 +12,10 @@ from rich.progress import (
     TaskProgressColumn,
     TextColumn,
 )
+from rich.rule import Rule
 from rich.text import Text
+
+from memory_monitor import collect_memory_snapshot
 
 console = Console()
 
@@ -142,6 +146,23 @@ class TqdmColumn(ProgressColumn):
 
 class SuccessProgress(Progress):
     """A Progress subclass that automatically tracks cumulative successes."""
+
+    def __init__(self, *args, **kwargs):
+        self._memory_monitor_enabled = False
+        super().__init__(*args, **kwargs)
+
+    def enable_memory_monitor(self) -> None:
+        """Enable the memory usage status line below the progress bars."""
+        self._memory_monitor_enabled = True
+
+    def get_renderables(self) -> Iterable[RenderableType]:
+        """Yield standard progress table, optionally followed by memory stats."""
+        yield self.make_tasks_table(self.tasks)
+        if self._memory_monitor_enabled:
+            snapshot = collect_memory_snapshot()
+            if snapshot is not None:
+                yield Rule(style="dim")
+                yield Text(snapshot.format(), style="dim cyan")
 
     @staticmethod
     def create(

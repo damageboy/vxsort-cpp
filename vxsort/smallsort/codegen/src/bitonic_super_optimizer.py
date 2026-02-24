@@ -2573,6 +2573,7 @@ class BitonicSuperVectorizer:
             attempt_style="yellow",
             success_label="Valid",
         )
+        progress.enable_memory_monitor()
 
         # Pre-create one task per stage
         stage_task_ids = {}
@@ -2732,6 +2733,7 @@ class BitonicSuperVectorizer:
             attempt_style="yellow",
             success_label="Valid",
         )
+        progress.enable_memory_monitor()
 
         # Pre-create one task per stage
         stage_task_ids: dict[int, int] = {}

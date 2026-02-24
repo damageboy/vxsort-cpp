@@ -72,6 +72,7 @@ def _run_verification(
         attempt_style="red",
         success_label="Verified",
     )
+    progress.enable_memory_monitor()
     progress.start()
     task_id = progress.add_task("Verifying paths", total=total, successes=0)
 

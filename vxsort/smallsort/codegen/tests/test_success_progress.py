@@ -1,5 +1,9 @@
-from src.success_progress import DualBarColumn
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+
+from rich.rule import Rule
+from rich.text import Text
+
+from src.success_progress import DualBarColumn, SuccessProgress
 
 
 def test_dual_bar_column_width():
@@ -81,3 +85,52 @@ def test_dual_bar_column_large_numbers():
         assert (
             len(rendered) == bar_width
         ), f"Failed for large numbers: total={total}, completed={completed}, successes={successes}"
+
+
+class TestSuccessProgressMemoryMonitor:
+    def test_memory_monitor_disabled_by_default(self):
+        progress = SuccessProgress.create()
+        assert not progress._memory_monitor_enabled
+
+    def test_enable_memory_monitor(self):
+        progress = SuccessProgress.create()
+        progress.enable_memory_monitor()
+        assert progress._memory_monitor_enabled
+
+    def test_get_renderables_without_memory(self):
+        progress = SuccessProgress.create()
+        progress.add_task("test", total=10, successes=0)
+        renderables = list(progress.get_renderables())
+        # Should only have the tasks table
+        assert len(renderables) == 1
+
+    @patch("src.success_progress.collect_memory_snapshot")
+    def test_get_renderables_with_memory(self, mock_collect):
+        from src.memory_monitor import MemorySnapshot
+
+        mock_collect.return_value = MemorySnapshot(
+            main_rss_bytes=200 * 1024 * 1024,
+            worker_rss_bytes=400 * 1024 * 1024,
+            worker_count=4,
+        )
+
+        progress = SuccessProgress.create()
+        progress.enable_memory_monitor()
+        progress.add_task("test", total=10, successes=0)
+        renderables = list(progress.get_renderables())
+        # Tasks table + Rule + Text
+        assert len(renderables) == 3
+        assert isinstance(renderables[1], Rule)
+        assert isinstance(renderables[2], Text)
+        assert "Main 200 MB" in str(renderables[2])
+
+    @patch("src.success_progress.collect_memory_snapshot")
+    def test_get_renderables_snapshot_none(self, mock_collect):
+        mock_collect.return_value = None
+
+        progress = SuccessProgress.create()
+        progress.enable_memory_monitor()
+        progress.add_task("test", total=10, successes=0)
+        renderables = list(progress.get_renderables())
+        # Only tasks table when snapshot is None
+        assert len(renderables) == 1
