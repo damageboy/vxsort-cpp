@@ -5,7 +5,7 @@ import os
 import tarfile
 import io
 import zstandard as zstd
-from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
+import queue as queue_mod
 from dataclasses import dataclass, field
 from tabulate import tabulate
 from multiprocessing import Pool
@@ -1273,6 +1273,7 @@ class GadgetSynthesizer:
         progress: SuccessProgress | None = None,
         task_id=None,
         max_workers: int | None = None,
+        max_tasks_per_child: int | None = 1000,
     ) -> list[tuple[PermutationGadget, VectorState, VectorState, dict]]:
         """
         Validate candidate gadgets using synthesis in parallel.
@@ -1289,7 +1290,7 @@ class GadgetSynthesizer:
             else:
                 print(msg)
 
-        pool = Pool(processes=max_workers)
+        pool = Pool(processes=max_workers, maxtasksperchild=max_tasks_per_child)
         total_construct_time = 0.0
         total_solve_time = 0.0
 
@@ -2095,6 +2096,7 @@ class BitonicSuperVectorizer:
         resume_data: dict | None = None,
         pipeline: bool = True,
         max_workers: int | None = None,
+        max_tasks_per_child: int | None = 1000,
     ) -> tuple[list[SolutionNode], bool]:
         """
         Iteratively explore all stage transitions to build solution tree.
@@ -2116,6 +2118,8 @@ class BitonicSuperVectorizer:
                 sequential path with a hard barrier between stages.
             max_workers: Maximum number of worker processes. If None, defaults
                 to os.cpu_count().
+            max_tasks_per_child: Maximum tasks per worker process before recycling.
+                Limits memory growth in long runs. None disables recycling.
 
         Returns:
             Tuple of (root nodes, all_stages_complete) where all_stages_complete
@@ -2132,6 +2136,7 @@ class BitonicSuperVectorizer:
             )
         self._synthesis_started = True
         self._max_workers = max_workers
+        self._max_tasks_per_child = max_tasks_per_child
 
         # Inject natural-order stage if requested
         self._natural_order_stage = None
@@ -2205,6 +2210,7 @@ class BitonicSuperVectorizer:
         progress: SuccessProgress | None = None,
         task_id=None,
         max_workers: int | None = None,
+        max_tasks_per_child: int | None = 1000,
     ) -> tuple[dict[tuple, list[SolutionNode]], dict[tuple, VectorState]]:
         """Process one stage: validate gadgets, group, create nodes.
 
@@ -2286,6 +2292,7 @@ class BitonicSuperVectorizer:
             progress=progress,
             task_id=task_id,
             max_workers=max_workers,
+            max_tasks_per_child=max_tasks_per_child,
         )
 
         _log(
@@ -2405,16 +2412,26 @@ class BitonicSuperVectorizer:
 
     @staticmethod
     def _submit_stage_jobs(
-        executor: ProcessPoolExecutor,
+        pool: Pool,
         tracker: StageTracker,
         jobs: list[tuple],
-        future_to_stage: dict,
+        pending_count: list[int],
+        completion_queue: queue_mod.Queue,
     ) -> None:
-        """Submit jobs to the executor and register them in future_to_stage."""
+        """Submit jobs to the pool and register callbacks for completion."""
         for job in jobs:
-            fut = executor.submit(_validate_gadget_worker, job)
-            future_to_stage[fut] = tracker.stage_idx
+            pool.apply_async(
+                _validate_gadget_worker,
+                (job,),
+                callback=lambda result, s=tracker.stage_idx: completion_queue.put(
+                    (s, result, None)
+                ),
+                error_callback=lambda exc, s=tracker.stage_idx: completion_queue.put(
+                    (s, None, exc)
+                ),
+            )
         tracker.total_jobs_submitted += len(jobs)
+        pending_count[0] += len(jobs)
 
     @staticmethod
     def _process_batch(tracker: StageTracker) -> list[tuple[VectorState, tuple]]:
@@ -2500,19 +2517,19 @@ class BitonicSuperVectorizer:
     def _cancel_downstream_stages(
         from_stage: int,
         effective_limit: int,
-        future_to_stage: dict,
+        cancelled_stages: set[int],
+        pending_count: list[int],
+        trackers: dict,
         progress: SuccessProgress,
         stage_task_ids: dict[int, int],
     ) -> None:
-        """Cancel futures and hide progress for stages after an empty stage."""
-        # Cancel pending futures for downstream stages
-        for fut, s_idx in list(future_to_stage.items()):
-            if s_idx > from_stage:
-                fut.cancel()
-                del future_to_stage[fut]
-
-        # Hide progress bars for stages that won't produce results
+        """Mark downstream stages as cancelled and adjust pending count."""
         for s in range(from_stage + 1, effective_limit):
+            if s in trackers:
+                tracker = trackers[s]
+                remaining = tracker.total_jobs_submitted - tracker.completed_jobs
+                pending_count[0] -= remaining
+                cancelled_stages.add(s)
             if s in stage_task_ids:
                 progress.update(stage_task_ids[s], visible=False)
 
@@ -2616,6 +2633,7 @@ class BitonicSuperVectorizer:
                     progress=progress,
                     task_id=task_id,
                     max_workers=self._max_workers,
+                    max_tasks_per_child=self._max_tasks_per_child,
                 )
                 per_stage_data[stage_idx] = (nodes_by_parent, unique_outputs)
 
@@ -2755,7 +2773,9 @@ class BitonicSuperVectorizer:
             stage_task_ids[s] = tid
 
         trackers: dict[int, StageTracker] = {}
-        future_to_stage: dict = {}
+        completion_queue: queue_mod.Queue = queue_mod.Queue()
+        pending_count = [0]
+        cancelled_stages: set[int] = set()
         highest_checkpointed_stage = start_stage - 1
 
         def _maybe_checkpoint() -> None:
@@ -2822,7 +2842,9 @@ class BitonicSuperVectorizer:
                 self._cancel_downstream_stages(
                     stage_idx,
                     effective_limit,
-                    future_to_stage,
+                    cancelled_stages,
+                    pending_count,
+                    trackers,
                     progress,
                     stage_task_ids,
                 )
@@ -2868,7 +2890,9 @@ class BitonicSuperVectorizer:
                     all_candidates,
                     max_unique_outputs,
                 )
-                self._submit_stage_jobs(executor, tracker, jobs, future_to_stage)
+                self._submit_stage_jobs(
+                    pool, tracker, jobs, pending_count, completion_queue
+                )
 
                 if tracker.progress_task_id is not None:
                     progress.start_task(tracker.progress_task_id)
@@ -2891,7 +2915,9 @@ class BitonicSuperVectorizer:
                     all_candidates,
                     max_unique_outputs,
                 )
-                self._submit_stage_jobs(executor, tracker, jobs, future_to_stage)
+                self._submit_stage_jobs(
+                    pool, tracker, jobs, pending_count, completion_queue
+                )
 
                 if tracker.progress_task_id is not None:
                     progress.update(
@@ -2911,8 +2937,11 @@ class BitonicSuperVectorizer:
                     f"Resuming from stage {start_stage} with {len(current_inputs)} inputs"
                 )
 
-            # We need executor in the closures above, so use a mutable container
-            with ProcessPoolExecutor(max_workers=self._max_workers) as executor:
+            pool = Pool(
+                processes=self._max_workers,
+                maxtasksperchild=self._max_tasks_per_child,
+            )
+            try:
                 # Launch stage 0 (or first stage after resume)
                 if start_stage < effective_limit:
                     tracker0 = StageTracker(
@@ -2930,7 +2959,9 @@ class BitonicSuperVectorizer:
                         all_candidates,
                         max_unique_outputs,
                     )
-                    self._submit_stage_jobs(executor, tracker0, jobs, future_to_stage)
+                    self._submit_stage_jobs(
+                        pool, tracker0, jobs, pending_count, completion_queue
+                    )
                     tracker0.total_jobs_expected = tracker0.total_jobs_submitted
 
                     if tracker0.progress_task_id is not None:
@@ -2945,46 +2976,49 @@ class BitonicSuperVectorizer:
                         f"for {len(current_inputs)} inputs"
                     )
 
-                # Event loop: process completed futures
-                while future_to_stage:
-                    done, _ = wait(future_to_stage, return_when=FIRST_COMPLETED)
+                # Event loop: process completed results via callback queue
+                while pending_count[0] > 0:
+                    stage_idx, result, error = completion_queue.get()
+                    pending_count[0] -= 1
 
-                    for fut in done:
-                        stage_idx = future_to_stage.pop(fut)
-                        tracker = trackers[stage_idx]
+                    if stage_idx in cancelled_stages:
+                        continue
 
-                        result = fut.result()
-                        tracker.unprocessed_results.append(result)
-                        tracker.completed_jobs += 1
+                    if error is not None:
+                        raise error
 
-                        # Update progress
-                        gadget_results = result[0]
-                        success_inc = 1 if gadget_results else 0
-                        if tracker.progress_task_id is not None:
-                            progress.update(
-                                tracker.progress_task_id,
-                                advance=1,
-                                success=success_inc,
+                    tracker = trackers[stage_idx]
+                    tracker.unprocessed_results.append(result)
+                    tracker.completed_jobs += 1
+
+                    # Update progress
+                    gadget_results = result[0]
+                    success_inc = 1 if gadget_results else 0
+                    if tracker.progress_task_id is not None:
+                        progress.update(
+                            tracker.progress_task_id,
+                            advance=1,
+                            success=success_inc,
+                        )
+
+                    # Check threshold
+                    if tracker.should_process_batch():
+                        threshold_pct = (
+                            _BATCH_THRESHOLDS[tracker.next_threshold_index] * 100
+                        )
+                        new_outputs = self._process_batch(tracker)
+                        if new_outputs and stage_idx + 1 < effective_limit:
+                            progress.console.print(
+                                f"Stage {stage_idx} → {stage_idx + 1}: "
+                                f"forwarding {len(new_outputs)} new unique outputs "
+                                f"at {threshold_pct:.0f}% completion "
+                                f"({tracker.completed_jobs}/{tracker.total_jobs_submitted} jobs)"
                             )
+                            _forward_outputs(stage_idx + 1, new_outputs)
 
-                        # Check threshold
-                        if tracker.should_process_batch():
-                            threshold_pct = (
-                                _BATCH_THRESHOLDS[tracker.next_threshold_index] * 100
-                            )
-                            new_outputs = self._process_batch(tracker)
-                            if new_outputs and stage_idx + 1 < effective_limit:
-                                progress.console.print(
-                                    f"Stage {stage_idx} → {stage_idx + 1}: "
-                                    f"forwarding {len(new_outputs)} new unique outputs "
-                                    f"at {threshold_pct:.0f}% completion "
-                                    f"({tracker.completed_jobs}/{tracker.total_jobs_submitted} jobs)"
-                                )
-                                _forward_outputs(stage_idx + 1, new_outputs)
-
-                        # Check completion
-                        if tracker.is_complete and not tracker.finalized:
-                            _finalize_and_cascade(stage_idx)
+                    # Check completion
+                    if tracker.is_complete and not tracker.finalized:
+                        _finalize_and_cascade(stage_idx)
 
                 # Finalize any stages that haven't been finalized yet
                 # (e.g., stages with 0 jobs due to no inputs)
@@ -2995,6 +3029,9 @@ class BitonicSuperVectorizer:
                             s
                         ].total_jobs_submitted
                         _finalize_and_cascade(s)
+            finally:
+                pool.terminate()
+                pool.join()
 
             # Hide stages that were never launched
             for s in range(start_stage, effective_limit):
@@ -3041,6 +3078,7 @@ class BitonicSuperVectorizer:
         resume_data: dict | None = None,
         pipeline: bool = True,
         max_workers: int | None = None,
+        max_tasks_per_child: int | None = 1000,
     ) -> tuple[list[SolutionNode], bool]:
         """Entry point: builds solution tree for all stages.
 
@@ -3057,6 +3095,8 @@ class BitonicSuperVectorizer:
             pipeline: If True (default), use pipelined stage processing.
             max_workers: Maximum number of worker processes. If None, defaults
                 to os.cpu_count().
+            max_tasks_per_child: Maximum tasks per worker process before recycling.
+                Limits memory growth in long runs. None disables recycling.
 
         Returns:
             Tuple of (root nodes, all_stages_complete) where all_stages_complete
@@ -3075,6 +3115,7 @@ class BitonicSuperVectorizer:
             resume_data=resume_data,
             pipeline=pipeline,
             max_workers=max_workers,
+            max_tasks_per_child=max_tasks_per_child,
         )
 
 

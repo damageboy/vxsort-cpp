@@ -52,6 +52,7 @@ def _run_verification(
     prim_type: primitive_type,
     natural_order: bool,
     max_workers: int | None = None,
+    max_tasks_per_child: int | None = 1000,
 ):
     """Run Z3 end-to-end verification on a list of paths using multiprocessing.
 
@@ -78,7 +79,7 @@ def _run_verification(
 
     failures = []
     try:
-        with Pool(processes=max_workers) as pool:
+        with Pool(processes=max_workers, maxtasksperchild=max_tasks_per_child) as pool:
             for path_index, result in pool.imap_unordered(_verify_path_worker, jobs):
                 progress.update(task_id, advance=1, success=1 if result.verified else 0)
                 if not result.verified:
@@ -103,6 +104,7 @@ def verify_only_from_json(
     estimate: bool = False,
     nasm_path: str | None = None,
     max_workers: int | None = None,
+    max_tasks_per_child: int | None = 1000,
 ):
     """Load solutions from a JSON file and verify them without re-running synthesis.
 
@@ -139,7 +141,12 @@ def verify_only_from_json(
     paths = path_selector.select_top_k_paths(bundle.roots, top_k or 10_000)
 
     _run_verification(
-        paths, vm, prim_type, bundle.natural_order, max_workers=max_workers
+        paths,
+        vm,
+        prim_type,
+        bundle.natural_order,
+        max_workers=max_workers,
+        max_tasks_per_child=max_tasks_per_child,
     )
 
     if estimate:
@@ -259,6 +266,7 @@ def generate_bitonic_sorter(
     nasm_path: str | None = None,
     no_pipeline: bool = False,
     max_workers: int | None = None,
+    max_tasks_per_child: int | None = 1000,
 ):
     """
     Generate bitonic sorter with super-optimized permutation sequences.
@@ -286,6 +294,8 @@ def generate_bitonic_sorter(
         estimate: If True, run OSACA performance estimation on selected paths.
         nasm_path: Path to nasm binary for assembly verification (used with --estimate).
         no_pipeline: If True, disable pipelined stage processing.
+        max_tasks_per_child: Maximum tasks per worker process before recycling.
+            Limits memory growth in long runs. None disables recycling.
 
     Returns:
         List of SolutionNode trees representing different optimized solutions
@@ -350,6 +360,7 @@ def generate_bitonic_sorter(
         resume_data=resume_data,
         pipeline=not no_pipeline,
         max_workers=max_workers,
+        max_tasks_per_child=max_tasks_per_child,
     )
 
     print(f"Found {len(solutions)} root solutions")
@@ -415,7 +426,12 @@ def generate_bitonic_sorter(
             )
 
         _run_verification(
-            paths_to_verify, vm, prim_type, natural_order, max_workers=max_workers
+            paths_to_verify,
+            vm,
+            prim_type,
+            natural_order,
+            max_workers=max_workers,
+            max_tasks_per_child=max_tasks_per_child,
         )
 
     # OSACA performance estimation
@@ -585,6 +601,14 @@ if __name__ == "__main__":
         "Defaults to os.cpu_count(). Use this to limit memory usage on large machines.",
     )
     parser.add_argument(
+        "--max-tasks-per-child",
+        type=int,
+        default=1000,
+        metavar="N",
+        help="Maximum tasks per worker process before recycling (default: 1000). "
+        "Limits memory growth in long runs. Set to 0 to disable recycling.",
+    )
+    parser.add_argument(
         "--list-cpus",
         action="store_true",
         default=False,
@@ -592,6 +616,9 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+
+    # Convert 0 → None (Pool interprets None as "no limit")
+    max_tasks_per_child = args.max_tasks_per_child or None
 
     # --list-cpus mode: print supported architectures and exit
     if args.list_cpus:
@@ -623,6 +650,7 @@ if __name__ == "__main__":
             estimate=args.estimate,
             nasm_path=args.nasm_path,
             max_workers=args.max_workers,
+            max_tasks_per_child=max_tasks_per_child,
         )
         raise SystemExit(0)
 
@@ -668,4 +696,5 @@ if __name__ == "__main__":
         nasm_path=args.nasm_path,
         no_pipeline=args.no_pipeline,
         max_workers=args.max_workers,
+        max_tasks_per_child=max_tasks_per_child,
     )
