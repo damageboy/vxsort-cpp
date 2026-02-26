@@ -321,9 +321,17 @@ class BitonicPathVerifier:
 
         Simplified version of GadgetSynthesizer._apply_instructions without
         mux encoding or symbolic variables. All args are concrete.
+
+        Instruction arguments can reference:
+          - "top" / "bottom": original input registers (unchanged)
+          - "input" / "a": current running register (latest output)
+          - "prev": alias for current running register (same as "input")
+          - "result_N": output of the Nth instruction (0-indexed), allowing
+            3+ instruction chains to reference any earlier intermediate.
         """
         current_reg = top_reg if is_top else bottom_reg
         prev_output = None
+        results: list = []
 
         for inst in instructions:
             intrinsic = self.intrinsics.get(inst.intrinsic_name)
@@ -333,15 +341,31 @@ class BitonicPathVerifier:
             args = {}
             for key, value in inst.args.items():
                 args[key] = self._resolve_arg(
-                    key, value, top_reg, bottom_reg, current_reg, prev_output
+                    key,
+                    value,
+                    top_reg,
+                    bottom_reg,
+                    current_reg,
+                    prev_output,
+                    results,
                 )
 
             current_reg = self._dispatch_intrinsic(intrinsic, args)
             prev_output = current_reg
+            results.append(current_reg)
 
         return current_reg
 
-    def _resolve_arg(self, key, value, top_reg, bottom_reg, current_reg, prev_output):
+    def _resolve_arg(
+        self,
+        key,
+        value,
+        top_reg,
+        bottom_reg,
+        current_reg,
+        prev_output,
+        results=None,
+    ):
         """Resolve a concrete instruction argument to a Z3 value."""
         if isinstance(value, str):
             register_names = {
@@ -356,6 +380,13 @@ class BitonicPathVerifier:
                 if prev_output is None:
                     raise ValueError("'prev' referenced but no previous output")
                 return prev_output
+            if value.startswith("result_") and results is not None:
+                idx = int(value[len("result_") :])
+                if idx < 0 or idx >= len(results):
+                    raise ValueError(
+                        f"'{value}' out of range (only {len(results)} results available)"
+                    )
+                return results[idx]
 
         if isinstance(value, int):
             bit_widths = {
