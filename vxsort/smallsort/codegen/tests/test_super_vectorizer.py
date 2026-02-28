@@ -775,6 +775,159 @@ def test_pair_swap_across_stages():
     assert ra._pair_index == 0
 
 
+def test_expanded_mux_discovers_result_0_reference():
+    """Test that the expanded mux allows inst2 to reference result_0 (not just prev).
+
+    Creates a 3-instruction template [permutexvar, permute_pd, shuffle_pd] on the
+    top side. For the 3rd instruction (inst_idx=2), the mux offers {top, bottom,
+    result_0, result_1}. If Z3 discovers a solution where inst3 references result_0,
+    the extracted gadget will contain "result_0" in its args.
+    """
+    synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i64)
+    n = synthesizer.elements_per_vector  # 4
+
+    sorter = BitonicSorter(2 * n)
+    target_pairs = sorter.stages[0]
+
+    input_state = VectorState(
+        top=[p[0] for p in target_pairs],
+        bottom=[p[1] for p in target_pairs],
+    )
+
+    # 3-instruction template: [permutexvar, permutexvar, shuffle_pd]
+    # inst3 (shuffle_pd) takes two register operands "a" and "b".
+    # With expanded mux, Z3 can choose result_0 or result_1 for either operand.
+    top_template = [
+        InstructionSpec(
+            "_mm256_permutexvar_epi64",
+            {"a": "top", "op_idx": SymbolicPlaceholder("ctrl_inst1", 256)},
+        ),
+        InstructionSpec(
+            "_mm256_permutexvar_epi64",
+            {"a": "top", "op_idx": SymbolicPlaceholder("ctrl_inst2", 256)},
+        ),
+        InstructionSpec(
+            "_mm256_shuffle_pd",
+            {
+                "a": "top",
+                "b": "bottom",
+                "imm8": SymbolicPlaceholder("imm8_inst3", 8),
+            },
+        ),
+    ]
+    bottom_template = []
+
+    results, _, _ = synthesizer.synthesize_gadget_with_symbolic(
+        top_instructions_template=top_template,
+        bottom_instructions_template=bottom_template,
+        input_state=input_state,
+        target_pairs=target_pairs,
+        max_solutions=1,
+        max_unique_outputs=3,
+    )
+
+    assert len(results) > 0, "Should find at least one valid gadget"
+
+    # Verify all returned gadgets are validated and have resolved source names
+    for gadget, output_state in results:
+        assert gadget.validated
+        if len(gadget.top_instructions) == 3:
+            inst3 = gadget.top_instructions[2]
+            a_arg = inst3.args.get("a")
+            b_arg = inst3.args.get("b")
+            # For inst_idx=2: "prev" aliases result_1, "result_0" is earlier
+            for arg_val in [a_arg, b_arg]:
+                if isinstance(arg_val, str):
+                    assert arg_val in ("top", "bottom", "prev", "result_0"), (
+                        f"Unexpected source: {arg_val}. "
+                        "Expected one of: top, bottom, prev, result_0"
+                    )
+
+
+def test_unified_instruction_deduplication():
+    """Test that unified_instructions deduplicates shared instructions across sides."""
+    # Create a gadget where top and bottom share the first two instructions
+    inst_a = InstructionSpec("_mm256_permutexvar_epi64", {"a": "top", "op_idx": 42})
+    inst_b = InstructionSpec("_mm256_permute_pd", {"a": "prev", "imm8": 0x05})
+    inst_c = InstructionSpec(
+        "_mm256_shuffle_pd", {"a": "result_0", "b": "prev", "imm8": 0x88}
+    )
+    inst_d = InstructionSpec(
+        "_mm256_shuffle_pd", {"a": "result_0", "b": "prev", "imm8": 0xDD}
+    )
+
+    gadget = PermutationGadget(
+        top_instructions=[inst_a, inst_b, inst_c],
+        bottom_instructions=[inst_a, inst_b, inst_d],
+        validated=True,
+    )
+
+    unified, top_idx, bottom_idx = gadget.unified_instructions()
+
+    # inst_a and inst_b are shared, inst_c and inst_d are unique → 4 instructions
+    assert (
+        len(unified) == 4
+    ), f"Expected 4 deduplicated instructions, got {len(unified)}"
+    assert top_idx != bottom_idx, "Top and bottom outputs should have different indices"
+    # instruction_count should return the deduplicated count
+    assert (
+        gadget.instruction_count() == 4
+    ), f"Expected instruction_count() == 4, got {gadget.instruction_count()}"
+
+
+def test_unified_no_sharing():
+    """Test unified_instructions with no shared instructions."""
+    inst_a = InstructionSpec("_mm256_permutexvar_epi64", {"a": "top", "op_idx": 42})
+    inst_b = InstructionSpec("_mm256_permutexvar_epi64", {"a": "bottom", "op_idx": 99})
+
+    gadget = PermutationGadget(
+        top_instructions=[inst_a],
+        bottom_instructions=[inst_b],
+        validated=True,
+    )
+
+    unified, top_idx, bottom_idx = gadget.unified_instructions()
+    assert len(unified) == 2, f"Expected 2 instructions, got {len(unified)}"
+    assert top_idx == 0
+    assert bottom_idx == 1
+
+
+def test_cost_model_counts_deduplicated():
+    """Verify that calculate_gadget_cost returns cost of deduplicated instructions."""
+    from cost_model import CostModel
+
+    cost_model = CostModel("generic")
+
+    # Shared instruction
+    inst_shared = InstructionSpec(
+        "_mm256_permutexvar_epi64", {"a": "top", "op_idx": 42}
+    )
+    inst_top_only = InstructionSpec(
+        "_mm256_shuffle_pd", {"a": "prev", "b": "bottom", "imm8": 0x88}
+    )
+    inst_bot_only = InstructionSpec(
+        "_mm256_shuffle_pd", {"a": "prev", "b": "bottom", "imm8": 0xDD}
+    )
+
+    gadget = PermutationGadget(
+        top_instructions=[inst_shared, inst_top_only],
+        bottom_instructions=[inst_shared, inst_bot_only],
+        validated=True,
+    )
+
+    cost = cost_model.calculate_gadget_cost(gadget)
+    # Should be 3 instructions (shared + top_only + bot_only), not 4
+    unified, _, _ = gadget.unified_instructions()
+    assert (
+        len(unified) == 3
+    ), f"Expected 3 deduplicated instructions, got {len(unified)}"
+
+    expected = sum(
+        cost_model.get_instruction_cost(inst.intrinsic_name).latency for inst in unified
+    )
+    assert cost == expected, f"Cost {cost} != expected {expected}"
+
+
 def run_all_tests():
     """Run all tests."""
     print("=" * 60)

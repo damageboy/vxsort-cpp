@@ -289,9 +289,14 @@ class PermutationGadget:
     bottom_instructions: list[InstructionSpec]  # 0-3 instructions
     validated: bool = False
 
+    _unified_cache: tuple[list[InstructionSpec], int, int] | None = field(
+        default=None, repr=False, compare=False
+    )
+
     def instruction_count(self) -> int:
-        """Total number of instructions in this gadget."""
-        return len(self.top_instructions) + len(self.bottom_instructions)
+        """Total number of deduplicated instructions in this gadget."""
+        unified, _, _ = self.unified_instructions()
+        return len(unified)
 
     def sort_key(self) -> tuple:
         """Return a deterministic sort key for canonical ordering."""
@@ -299,6 +304,69 @@ class PermutationGadget:
             tuple(i.sort_key() for i in self.top_instructions),
             tuple(i.sort_key() for i in self.bottom_instructions),
         )
+
+    def unified_instructions(self) -> tuple[list[InstructionSpec], int, int]:
+        """Merge top/bottom into a unified deduplicated instruction list.
+
+        Two instructions are considered duplicates when they have the same
+        intrinsic name and the same structural arguments (recursively
+        resolving "prev"/"result_N" references to their dependency
+        signatures).
+
+        Returns:
+            (instructions, top_output_idx, bottom_output_idx) where
+            the indices point into the unified list.
+        """
+        if self._unified_cache is not None:
+            return self._unified_cache
+
+        unified: list[InstructionSpec] = []
+        sig_to_idx: dict[tuple, int] = {}
+
+        def _compute_sig(inst: InstructionSpec, prior_sigs: list[tuple]) -> tuple:
+            normalized = {}
+            for key, value in inst.args.items():
+                if isinstance(value, str):
+                    if value == "prev":
+                        normalized[key] = prior_sigs[-1] if prior_sigs else value
+                    elif value.startswith("result_"):
+                        idx = int(value[len("result_") :])
+                        normalized[key] = (
+                            prior_sigs[idx] if idx < len(prior_sigs) else value
+                        )
+                    else:
+                        normalized[key] = value
+                else:
+                    normalized[key] = value
+            return (inst.intrinsic_name, tuple(sorted(normalized.items())))
+
+        # Process top instructions
+        top_sigs: list[tuple] = []
+        top_unified_indices: list[int] = []
+        for inst in self.top_instructions:
+            sig = _compute_sig(inst, top_sigs)
+            top_sigs.append(sig)
+            if sig not in sig_to_idx:
+                sig_to_idx[sig] = len(unified)
+                unified.append(inst)
+            top_unified_indices.append(sig_to_idx[sig])
+
+        # Process bottom instructions, deduplicating against top
+        bottom_sigs: list[tuple] = []
+        bottom_unified_indices: list[int] = []
+        for inst in self.bottom_instructions:
+            sig = _compute_sig(inst, bottom_sigs)
+            bottom_sigs.append(sig)
+            if sig not in sig_to_idx:
+                sig_to_idx[sig] = len(unified)
+                unified.append(inst)
+            bottom_unified_indices.append(sig_to_idx[sig])
+
+        top_out = top_unified_indices[-1] if top_unified_indices else -1
+        bottom_out = bottom_unified_indices[-1] if bottom_unified_indices else -1
+
+        self._unified_cache = (unified, top_out, bottom_out)
+        return self._unified_cache
 
     def __repr__(self):
         return f"Gadget(top={len(self.top_instructions)}, bottom={len(self.bottom_instructions)}, validated={self.validated})"
@@ -746,7 +814,7 @@ class GadgetSynthesizer:
 
                 # Pin this wiring for the inner loop
                 wiring_constraints = [
-                    var == BitVecVal(wiring[name], 2)
+                    var == BitVecVal(wiring[name], var.size())
                     for name, var in select_vars.items()
                 ]
 
@@ -803,7 +871,7 @@ class GadgetSynthesizer:
                     wiring_blocks.append(
                         Or(
                             *(
-                                var != BitVecVal(wiring[name], 2)
+                                var != BitVecVal(wiring[name], var.size())
                                 for name, var in select_vars.items()
                             )
                         )
@@ -886,12 +954,12 @@ class GadgetSynthesizer:
 
         # Create concrete instructions by substituting symbolic values.
         # Select variables (from mux encoding) are resolved to source name
-        # strings ("top", "bottom", "prev") via _SELECT_TO_SOURCE.
+        # strings ("top", "bottom", "result_N") via _select_to_source().
         def concretize_instructions(
             instructions: list[InstructionSpec],
         ) -> list[InstructionSpec]:
             concrete_insts = []
-            for inst in instructions:
+            for inst_idx, inst in enumerate(instructions):
                 concrete_args = {}
                 for key, value in inst.args.items():
                     # Check if this arg has a corresponding select variable
@@ -900,7 +968,9 @@ class GadgetSynthesizer:
                         select_val = model.evaluate(
                             symbolic_vars[select_name], model_completion=True
                         ).as_long()
-                        concrete_args[key] = self._SELECT_TO_SOURCE[select_val]
+                        concrete_args[key] = self._select_to_source(
+                            select_val, inst_idx
+                        )
                     elif id(value) in symbolic_vars:
                         if hasattr(value, "size") and callable(
                             getattr(value, "size", None)
@@ -1071,54 +1141,86 @@ class GadgetSynthesizer:
                 return top_reg
             elif arg == "bottom":
                 return bottom_reg
+            elif arg == "prev":
+                return current_reg
+            elif arg.startswith("result_"):
+                return current_reg  # best-effort for concrete gadgets
             elif arg in ["input", "a"]:  # Generic input register
                 return current_reg
         return arg
 
-    # Map select variable values to source name strings for extraction
-    _SELECT_TO_SOURCE = {0: "top", 1: "bottom", 2: "prev"}
+    @staticmethod
+    def _select_to_source(select_val: int, inst_idx: int) -> str:
+        """Map a mux select value to a source name string.
+
+        0 → "top", 1 → "bottom".
+        For result references: the immediately preceding result (result_{inst_idx-1})
+        is called "prev" for backward compatibility. Earlier results use "result_N".
+        """
+        if select_val == 0:
+            return "top"
+        if select_val == 1:
+            return "bottom"
+        result_idx = select_val - 2
+        if result_idx == inst_idx - 1:
+            return "prev"
+        return f"result_{result_idx}"
 
     def _create_operand_mux(
         self,
         key: str,
         inst: InstructionSpec,
+        inst_idx: int,
         top_reg,
         bottom_reg,
-        prev_output,
+        results: list,
         symbolic_vars: dict | None,
         mux_constraints: list,
     ):
-        """Create a Z3 If-else chain selecting between {top, bottom, prev}.
+        """Create a Z3 If-else chain selecting between {top, bottom, result_0, ...}.
 
         For inst2+ in a multi-instruction chain, register operands ("a", "b")
-        get a 2-bit select variable that Z3 uses to pick the optimal source.
+        get a select variable that Z3 uses to pick the optimal source from
+        the original top/bottom registers or any prior instruction's output.
 
         Args:
             key: Argument key ("a" or "b")
             inst: The instruction spec (used for unique naming)
+            inst_idx: Index of this instruction in the sequence
             top_reg: Z3 register for original top input
             bottom_reg: Z3 register for original bottom input
-            prev_output: Z3 register from the previous instruction's output
+            results: List of Z3 registers from prior instructions' outputs
             symbolic_vars: Dict to track the select variable for later extraction
             mux_constraints: List to append range constraints to
 
         Returns:
-            Z3 If-expression selecting between the three sources
+            Z3 If-expression selecting between the sources
         """
+        # Number of options: top, bottom, plus one per prior result
+        num_options = 2 + len(results)
+        # Bit-width: 2 bits for up to 4 options, 3 bits for 5-8
+        bit_width = 2 if num_options <= 4 else 3
+
         select_name = f"sel_{key}_{inst.intrinsic_name}_{id(inst)}"
-        select_var = BitVec(select_name, 2)
+        select_var = BitVec(select_name, bit_width)
 
         if symbolic_vars is not None:
             symbolic_vars[select_name] = select_var
 
-        # Constrain to exactly {0, 1, 2} — a 2-bit var can be 0-3
-        mux_constraints.append(ULE(select_var, BitVecVal(2, 2)))
+        # Constrain to valid range
+        mux_constraints.append(ULE(select_var, BitVecVal(num_options - 1, bit_width)))
 
-        mux = If(
-            select_var == 0,
-            top_reg,
-            If(select_var == 1, bottom_reg, If(select_var == 2, prev_output, top_reg)),
-        )  # unreachable due to constraint
+        # Build If-chain: 0→top, 1→bottom, 2→result_0, 3→result_1, ...
+        # Start from the last option (fallback) and build backwards
+        mux = results[-1]  # last result is the default/fallback
+        for i in range(num_options - 2, -1, -1):
+            if i == 0:
+                source = top_reg
+            elif i == 1:
+                source = bottom_reg
+            else:
+                source = results[i - 2]
+            mux = If(select_var == i, source, mux)
 
         return mux
 
@@ -1136,7 +1238,7 @@ class GadgetSynthesizer:
 
         For multi-instruction sequences, inst2+ register operands get
         multiplexer select variables so Z3 can choose whether each operand
-        reads from the original top/bottom registers or from the previous
+        reads from the original top/bottom registers or from any prior
         instruction's output.
 
         Args:
@@ -1153,7 +1255,7 @@ class GadgetSynthesizer:
         """
         # Start with the appropriate input register
         current_reg = top_reg if is_top else bottom_reg
-        prev_output = None
+        results = []
         mux_constraints = []
 
         for inst_idx, inst in enumerate(instructions):
@@ -1166,7 +1268,7 @@ class GadgetSynthesizer:
             for key, value in inst.args.items():
                 if (
                     inst_idx > 0
-                    and prev_output is not None
+                    and results
                     and key in ("a", "b")
                     and isinstance(value, str)
                     and value in ("top", "bottom")
@@ -1175,9 +1277,10 @@ class GadgetSynthesizer:
                     args[key] = self._create_operand_mux(
                         key,
                         inst,
+                        inst_idx,
                         top_reg,
                         bottom_reg,
-                        prev_output,
+                        results,
                         symbolic_vars,
                         mux_constraints,
                     )
@@ -1194,7 +1297,7 @@ class GadgetSynthesizer:
 
             current_reg = _dispatch_intrinsic_by_signature(intrinsic, args)
 
-            prev_output = current_reg
+            results.append(current_reg)
 
         return current_reg, mux_constraints
 
@@ -1243,11 +1346,15 @@ class GadgetSynthesizer:
                 for inst2 in self.dual_insts_top_bottom:
                     sequences.append([inst1, inst2])
         elif depth == 3:
-            # Try triples: (single, single, single)
-            for inst1 in single_insts:
-                for inst2 in single_insts:
-                    for inst3 in single_insts:
-                        sequences.append([inst1, inst2, inst3])
+            inst_lists = [single_insts, self.dual_insts_top_bottom]
+            # All 2^3 = 8 combinations of (single|dual, single|dual, single|dual)
+            for list1 in inst_lists:
+                for list2 in inst_lists:
+                    for list3 in inst_lists:
+                        for inst1 in list1:
+                            for inst2 in list2:
+                                for inst3 in list3:
+                                    sequences.append([inst1, inst2, inst3])
 
         return sequences
 

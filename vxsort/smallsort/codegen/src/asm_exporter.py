@@ -471,7 +471,7 @@ def _print_solution_step_as_assembly(
     """
     prefix = "  " * indent
 
-    # Print stage header
+    # Print stage header with register mapping
     print(f"{prefix}; Stage {step.node.stage}")
     print(f"{prefix}; Cost: {cumulative_cost:.2f} (step: {step.score.total_score:.2f})")
     if step.score.control_vector_count > 0:
@@ -480,6 +480,12 @@ def _print_solution_step_as_assembly(
     # Get register names from current source pair
     top_reg = reg_allocator.src_top
     bottom_reg = reg_allocator.src_bottom
+
+    # Show register mapping: which register is top/bottom for this stage
+    print(
+        f"{prefix}; Registers: {top_reg} = top, {bottom_reg} = bottom"
+        f"  →  {reg_allocator.dst_top} = top, {reg_allocator.dst_bottom} = bottom"
+    )
 
     # Use the explicitly selected gadget from the step
     gadget = step.gadget
@@ -505,7 +511,11 @@ def _print_solution_step_as_assembly(
     # Emit compare-swap (min/max) after permutation instructions
     if emit_compare_swap:
         cs_lines = _emit_compare_swap_lines(reg_allocator)
-        print(f"{prefix}; Compare-swap (min/max):")
+        print(
+            f"{prefix}; Compare-swap: "
+            f"min → {reg_allocator.dst_top} (top), "
+            f"max → {reg_allocator.dst_bottom} (bottom)"
+        )
         for line in cs_lines:
             print(f"{prefix}{line}")
         reg_allocator.swap_pairs()
@@ -582,12 +592,17 @@ def export_solutions_to_asm(
             if truncated:
                 print(f"; NOTE: Showing {len(all_paths)} paths (may be capped)")
             print(";")
-            print("; Registers (alternating pairs):")
+            print(
+                "; Registers (alternating pairs — roles swap after each compare-swap):"
+            )
             reg_prefix = "ymm" if vm == vector_machine.AVX2 else "zmm"
+            vec_labels = ["top", "bottom"] + [f"vec{i}" for i in range(2, num_vecs)]
             for i in range(num_vecs):
-                print(f";   {reg_prefix}{i}: Pair 0 vector {i} (input/output)")
+                label = vec_labels[i] if i < len(vec_labels) else f"vec{i}"
+                print(f";   {reg_prefix}{i}: Pair 0 — {label}")
             for i in range(num_vecs):
-                print(f";   {reg_prefix}{num_vecs + i}: Pair 1 vector {i} (alternate)")
+                label = vec_labels[i] if i < len(vec_labels) else f"vec{i}"
+                print(f";   {reg_prefix}{num_vecs + i}: Pair 1 — {label}")
             print(f";   {reg_prefix}{num_vecs * 2}+: Temporary registers as needed")
             print()
             print("=" * 80)

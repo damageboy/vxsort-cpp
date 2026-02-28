@@ -118,9 +118,10 @@ def _is_control_vector_instruction(inst) -> bool:
 
 
 def _count_control_vectors(gadget: "PermutationGadget") -> int:
-    """Count control vector instructions in a gadget."""
+    """Count control vector instructions in a gadget (deduplicated)."""
+    unified, _, _ = gadget.unified_instructions()
     count = 0
-    for inst in gadget.top_instructions + gadget.bottom_instructions:
+    for inst in unified:
         if _is_control_vector_instruction(inst):
             count += 1
     return count

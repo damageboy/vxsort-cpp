@@ -245,11 +245,10 @@ class CostModel:
     def calculate_gadget_cost(self, gadget) -> float:
         """Calculate cost for a permutation gadget (sum of latencies).
 
-        Uses simple latency sum. More sophisticated models could account
-        for instruction-level parallelism.
+        Uses the deduplicated unified instruction list so that shared
+        instructions between top and bottom sides are counted only once.
         """
-        all_instructions = gadget.top_instructions + gadget.bottom_instructions
+        unified, _, _ = gadget.unified_instructions()
         return sum(
-            self.get_instruction_cost(inst.intrinsic_name).latency
-            for inst in all_instructions
+            self.get_instruction_cost(inst.intrinsic_name).latency for inst in unified
         )

@@ -31,6 +31,7 @@ def export_solutions_to_json(
     """
 
     def gadget_to_dict(gadget: PermutationGadget) -> dict:
+        unified, top_out_idx, bottom_out_idx = gadget.unified_instructions()
         return {
             "top_instructions": [
                 {"name": inst.intrinsic_name, "args": inst.args}
@@ -40,6 +41,11 @@ def export_solutions_to_json(
                 {"name": inst.intrinsic_name, "args": inst.args}
                 for inst in gadget.bottom_instructions
             ],
+            "unified_instructions": [
+                {"name": inst.intrinsic_name, "args": inst.args} for inst in unified
+            ],
+            "top_output_index": top_out_idx,
+            "bottom_output_index": bottom_out_idx,
         }
 
     # Assign stable ids and serialize each node exactly once.
