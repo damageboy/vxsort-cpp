@@ -21,12 +21,14 @@ from asm_exporter import (
     RegisterAllocator,
     _emit_compare_swap_lines,
     _format_control_vector_bits,
+    _format_vector_state_as_comment,
     _get_compare_swap_mnemonics,
     _get_instruction_metadata,
     _intrinsic_to_asm_mnemonic,
     _is_masked_intrinsic,
     _resolve_source,
 )
+from z3_avx import mm_shuffle2_str, mm_shuffle_str
 from cost_model import get_supported_cpus, resolve_osaca_arch
 from utils import primitive_type, vector_machine, width_dict
 
@@ -228,11 +230,19 @@ def _emit_gadget_asm(
                 )
                 operands.append(src)
 
-            # Immediate values
+            # Immediate values and their comments
+            comment_parts: list[str] = []
             if "imm8" in args:
                 imm_val = args["imm8"]
                 if isinstance(imm_val, int):
+                    imm_type = metadata["imm_type"]
                     operands.append(f"0x{imm_val:02x}")
+                    if imm_type == "binary":
+                        comment_parts.append(f"0b{imm_val:08b}")
+                    elif imm_type == "shuffle2":
+                        comment_parts.append(mm_shuffle2_str(imm_val))
+                    elif imm_type == "shuffle4":
+                        comment_parts.append(mm_shuffle_str(imm_val))
             elif "imm" in args:
                 imm_val = args["imm"]
                 if isinstance(imm_val, int):
@@ -244,14 +254,35 @@ def _emit_gadget_asm(
                 elif ctrl_reg is not None:
                     operands.append(ctrl_reg)
 
-            lines.append(f"    {mnemonic:20s} {', '.join(operands)}")
+            # Add control vector comment on the main instruction
+            # (CV load line already has its own comment)
+            if ctrl_val is not None:
+                element_bits = ctrl_element_width or (reg_allocator.dtype.value[0] * 8)
+                comment_parts.append(
+                    _format_control_vector_bits(ctrl_val, total_bits, element_bits)
+                )
+
+            # Add k-mask value comment
+            if kmask_val is not None:
+                if isinstance(kmask_val, int):
+                    comment_parts.insert(0, f"k=0x{kmask_val:02x}")
+                else:
+                    comment_parts.insert(0, f"k={kmask_val}")
+
+            comment = ", ".join(comment_parts) if comment_parts else None
+            inst_line = f"    {mnemonic:20s} {', '.join(operands)}"
+            if comment:
+                inst_line += f"  ; {comment}"
+            lines.append(inst_line)
 
     # Emit top instructions
     if gadget.top_instructions:
+        lines.append(f"    ; Top vector ({top_reg}) operations:")
         _emit_instructions(gadget.top_instructions, is_top=True, side_label="top")
 
     # Emit bottom instructions
     if gadget.bottom_instructions and bottom_reg:
+        lines.append(f"    ; Bottom vector ({bottom_reg}) operations:")
         _emit_instructions(gadget.bottom_instructions, is_top=False, side_label="bot")
 
     return lines
@@ -283,6 +314,10 @@ def _generate_osaca_asm(
     header_lines = [
         f"; OSACA bitonic sort solution -- {vm.name} {dtype.name} {num_vecs}-vec, "
         f"solution {solution_index} of {total_solutions}",
+        f"; Total latency: {path.total_latency:.2f}",
+        f"; Total score: {path.total_score:.2f}",
+        f"; Control vectors: {path.total_cv_count}",
+        f"; Natural order: {'yes' if natural_order else 'no'}",
         "bits 64",
         "default rel",
         "",
@@ -301,13 +336,40 @@ def _generate_osaca_asm(
 
     reg_allocator = RegisterAllocator(vm, dtype, num_vecs)
 
+    # Print initial input state
+    if path.steps:
+        text_lines.append("    ; Initial Input State:")
+        state_comment = _format_vector_state_as_comment(
+            path.steps[0].node.input_state, "    "
+        )
+        text_lines.extend(state_comment.split("\n"))
+        text_lines.append("")
+
+    running_cost = 0.0
     last_idx = len(path.steps) - 1
     for step_idx, step in enumerate(path.steps):
-        text_lines.append(f"    ; -- Stage {step.node.stage} --")
+        running_cost += step.score.total_score
+
+        # Stage header with cost and register mapping
+        text_lines.append(f"    ; Stage {step.node.stage}")
+        text_lines.append(
+            f"    ; Cost: {running_cost:.2f} (step: {step.score.total_score:.2f})"
+        )
+        if step.score.control_vector_count > 0:
+            text_lines.append(
+                f"    ; Control vectors: {step.score.control_vector_count}"
+            )
 
         # Gadget operates on source pair
         top_reg = reg_allocator.src_top
         bottom_reg = reg_allocator.src_bottom
+
+        # Register transition
+        text_lines.append(
+            f"    ; Registers: {top_reg} = top, {bottom_reg} = bottom"
+            f"  →  {reg_allocator.dst_top} = top, "
+            f"{reg_allocator.dst_bottom} = bottom"
+        )
 
         gadget = step.gadget
         gadget_lines = _emit_gadget_asm(
@@ -323,9 +385,20 @@ def _generate_osaca_asm(
         # Compare-swap (skip on final natural-order stage)
         is_natural_order_step = natural_order and step_idx == last_idx
         if not is_natural_order_step and num_vecs > 1:
+            text_lines.append(
+                f"    ; Compare-swap: "
+                f"min → {reg_allocator.dst_top} (top), "
+                f"max → {reg_allocator.dst_bottom} (bottom)"
+            )
             cs_lines = _emit_compare_swap_lines(reg_allocator)
             text_lines.extend(cs_lines)
             reg_allocator.swap_pairs()
+
+        # Output state
+        text_lines.append("    ; Output State:")
+        state_comment = _format_vector_state_as_comment(step.node.output_state, "    ")
+        text_lines.extend(state_comment.split("\n"))
+        text_lines.append("")
 
         reg_allocator.reset_temps()
 
