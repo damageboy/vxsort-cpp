@@ -507,19 +507,47 @@ def get_available_intrinsics(
 class GadgetSynthesizer:
     """Synthesizes permutation gadgets using Z3."""
 
-    def __init__(self, vm: vector_machine, prim_type: primitive_type):
+    def __init__(
+        self,
+        vm: vector_machine,
+        prim_type: primitive_type,
+        intrinsic_filter: set[str] | None = None,
+    ):
         self.vm = vm
         self.prim_type = prim_type
         self.elements_per_vector = width_dict[vm] // int(prim_type.value[0])
         self.lane_width = int(prim_type.value[0]) * 8  # 16, 32, or 64 bits per element
         self.available_intrinsics = get_available_intrinsics(vm, prim_type)
 
+        if intrinsic_filter is not None:
+            unknown = intrinsic_filter - set(self.available_intrinsics)
+            if unknown:
+                raise ValueError(
+                    f"Intrinsics not available for {vm}/{prim_type}: {sorted(unknown)}"
+                )
+            self.available_intrinsics = {
+                k: v
+                for k, v in self.available_intrinsics.items()
+                if k in intrinsic_filter
+            }
+
         # Memoize instruction templates - these are reused across all gadget generation
-        self.single_insts_top = self._enumerate_single_input_instructions("top")
-        self.single_insts_bottom = self._enumerate_single_input_instructions("bottom")
-        self.dual_insts_top_bottom = self._enumerate_dual_input_instructions(
-            "top", "bottom"
-        )
+        allowed = set(self.available_intrinsics)
+        self.single_input_insts_top = [
+            i
+            for i in self._enumerate_single_input_instructions("top")
+            if i.intrinsic_name in allowed
+        ]
+        self.single_input_insts_bottom = [
+            i
+            for i in self._enumerate_single_input_instructions("bottom")
+            if i.intrinsic_name in allowed
+        ]
+        self.dual_input_insts_top_bottom = [
+            i
+            for i in self._enumerate_dual_input_instructions("top", "bottom")
+            if i.intrinsic_name in allowed
+        ]
 
     def _create_input_registers(
         self,
@@ -1301,7 +1329,7 @@ class GadgetSynthesizer:
 
         return current_reg, mux_constraints
 
-    def _generate_candidate_gadgets(
+    def _generate_candidate_gadgets_at_depth(
         self, top_depth: int, bottom_depth: int
     ) -> list[tuple[list[InstructionSpec], list[InstructionSpec]]]:
         """
@@ -1309,10 +1337,10 @@ class GadgetSynthesizer:
         Returns list of (top_sequence, bottom_sequence) tuples.
         """
         top_sequences = self._build_instruction_sequences(
-            top_depth, self.single_insts_top
+            top_depth, self.single_input_insts_top
         )
         bottom_sequences = self._build_instruction_sequences(
-            bottom_depth, self.single_insts_bottom
+            bottom_depth, self.single_input_insts_bottom
         )
 
         # Generate all combinations
@@ -1333,29 +1361,20 @@ class GadgetSynthesizer:
         sequences = []
         if depth == 1:
             sequences = [[inst] for inst in single_insts]
-            sequences.extend([[inst] for inst in self.dual_insts_top_bottom])
+            sequences.extend([[inst] for inst in self.dual_input_insts_top_bottom])
         elif depth == 2:
             # Try pairs: (single, single), (dual, single), (single, dual)
             for inst1 in single_insts:
                 for inst2 in single_insts:
                     sequences.append([inst1, inst2])
-            for inst1 in self.dual_insts_top_bottom:
+            for inst1 in self.dual_input_insts_top_bottom:
                 for inst2 in single_insts:
                     sequences.append([inst1, inst2])
             for inst1 in single_insts:
-                for inst2 in self.dual_insts_top_bottom:
+                for inst2 in self.dual_input_insts_top_bottom:
                     sequences.append([inst1, inst2])
-        elif depth == 3:
-            inst_lists = [single_insts, self.dual_insts_top_bottom]
-            # All 2^3 = 8 combinations of (single|dual, single|dual, single|dual)
-            for list1 in inst_lists:
-                for list2 in inst_lists:
-                    for list3 in inst_lists:
-                        for inst1 in list1:
-                            for inst2 in list2:
-                                for inst3 in list3:
-                                    sequences.append([inst1, inst2, inst3])
-
+        elif depth > 2:
+            raise ValueError(f"Instruction depth {depth} is not supported (max is 2)")
         return sequences
 
     def precompute_all_candidates(
@@ -1370,7 +1389,9 @@ class GadgetSynthesizer:
         all_candidates = []
         for top_depth in range(gadget_depth + 1):
             for bottom_depth in range(gadget_depth + 1):
-                candidates = self._generate_candidate_gadgets(top_depth, bottom_depth)
+                candidates = self._generate_candidate_gadgets_at_depth(
+                    top_depth, bottom_depth
+                )
                 all_candidates.extend(candidates)
         return all_candidates
 
@@ -1694,15 +1715,13 @@ class GadgetSynthesizer:
         )
 
     def _enumerate_dual_input_instructions(
-        self, reg1_name: str = "top", reg2_name: str = "bottom"
+        self, reg1: str = "top", reg2: str = "bottom"
     ) -> list[InstructionSpec]:
         """
         Generate dual-input instruction templates with symbolic immediates.
         Z3 will solve for the concrete immediate values.
         """
         if self.vm == vector_machine.AVX2 and self.prim_type == primitive_type.i32:
-            reg1 = reg1_name
-            reg2 = reg2_name
             unique_id = f"{id(reg1)}_{id(reg2)}"
 
             # Shuffle: select elements from both inputs within 128-bit lanes
@@ -1760,8 +1779,6 @@ class GadgetSynthesizer:
             return [shuffle_ps, unpacklo, unpackhi, permute2x128, blend_ps, alignr]
 
         if self.vm == vector_machine.AVX2 and self.prim_type == primitive_type.i64:
-            reg1 = reg1_name
-            reg2 = reg2_name
             unique_id = f"{id(reg1)}_{id(reg2)}"
 
             # Shuffle: select 64-bit elements from both inputs within 128-bit lanes (pd variant)
@@ -1819,8 +1836,6 @@ class GadgetSynthesizer:
             return [shuffle_pd, unpacklo, unpackhi, permute2x128, blend_pd, alignr]
 
         if self.vm == vector_machine.AVX512 and self.prim_type == primitive_type.i64:
-            reg1 = reg1_name
-            reg2 = reg2_name
             unique_id = f"{id(reg1)}_{id(reg2)}"
 
             # --- Unmasked ---
@@ -1943,8 +1958,6 @@ class GadgetSynthesizer:
             ]
 
         if self.vm == vector_machine.AVX512 and self.prim_type == primitive_type.i32:
-            reg1 = reg1_name
-            reg2 = reg2_name
             unique_id = f"{id(reg1)}_{id(reg2)}"
 
             # --- Unmasked ---

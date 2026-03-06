@@ -156,21 +156,25 @@ def test_generate_candidate_gadgets_order_and_counts():
 
     top_depth = 2
     bottom_depth = 1
-    candidates = synthesizer._generate_candidate_gadgets(top_depth, bottom_depth)
+    candidates = synthesizer._generate_candidate_gadgets_at_depth(
+        top_depth, bottom_depth
+    )
 
     top_sequences = []
-    for inst1 in synthesizer.single_insts_top:
-        for inst2 in synthesizer.single_insts_top:
+    for inst1 in synthesizer.single_input_insts_top:
+        for inst2 in synthesizer.single_input_insts_top:
             top_sequences.append([inst1, inst2])
-    for inst1 in synthesizer.dual_insts_top_bottom:
-        for inst2 in synthesizer.single_insts_top:
+    for inst1 in synthesizer.dual_input_insts_top_bottom:
+        for inst2 in synthesizer.single_input_insts_top:
             top_sequences.append([inst1, inst2])
-    for inst1 in synthesizer.single_insts_top:
-        for inst2 in synthesizer.dual_insts_top_bottom:
+    for inst1 in synthesizer.single_input_insts_top:
+        for inst2 in synthesizer.dual_input_insts_top_bottom:
             top_sequences.append([inst1, inst2])
 
-    bottom_sequences = [[inst] for inst in synthesizer.single_insts_bottom]
-    bottom_sequences.extend([[inst] for inst in synthesizer.dual_insts_top_bottom])
+    bottom_sequences = [[inst] for inst in synthesizer.single_input_insts_bottom]
+    bottom_sequences.extend(
+        [[inst] for inst in synthesizer.dual_input_insts_top_bottom]
+    )
 
     expected = []
     for top_seq in top_sequences:
@@ -178,8 +182,8 @@ def test_generate_candidate_gadgets_order_and_counts():
             expected.append((top_seq, bottom_seq))
 
     assert candidates == expected
-    assert synthesizer._generate_candidate_gadgets(0, 0) == [([], [])]
-    assert synthesizer._generate_candidate_gadgets(-1, 1) == [
+    assert synthesizer._generate_candidate_gadgets_at_depth(0, 0) == [([], [])]
+    assert synthesizer._generate_candidate_gadgets_at_depth(-1, 1) == [
         ([], bottom_seq) for bottom_seq in bottom_sequences
     ]
 
@@ -892,117 +896,6 @@ def test_unified_no_sharing():
     assert bottom_idx == 1
 
 
-def test_synthesize_blacher_stage9_and_cse():
-    """Synthesize Blacher stage 9 with depth-1.5 template, verify CSE deduplication.
-
-    Stage 9 of the Blacher AVX2/i32 network transforms:
-      top:    [1,9,6,14,2,10,5,13]   →  [1,9,3,11,5,13,7,15]
-      bottom: [3,11,8,16,4,12,7,15]  →  [2,10,4,12,6,14,8,16]
-
-    "Depth 1.5" template: a shared permutation prefix (same SymbolicPlaceholder
-    names for both top and bottom) piped into an independent single instruction.
-    By construction, the permutexvar CVs are the same Z3 variable for both sides,
-    guaranteeing identical concrete values. Only the shuffle_ps imm8 differs.
-
-    This models the production strategy: after depth-1 search, generate a shared
-    first permutation instruction, then pipe results into independent second
-    instructions — two stages of 1 instruction piped together.
-
-    After synthesis we verify:
-    1. Both sides have identical permutexvar instructions (shared by construction)
-    2. The shuffle_ps imm8 values differ between top and bottom
-    3. unified_instructions() discovers the shared prefix → 4 instructions (not 6)
-    """
-    synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i32)
-
-    input_state = VectorState(
-        top=[1, 9, 6, 14, 2, 10, 5, 13],
-        bottom=[3, 11, 8, 16, 4, 12, 7, 15],
-    )
-    target_pairs = [
-        (1, 2),
-        (9, 10),
-        (3, 4),
-        (11, 12),
-        (5, 6),
-        (13, 14),
-        (7, 8),
-        (15, 16),
-    ]
-
-    # Depth 1.5 template: shared permutation prefix + independent tail.
-    # Same placeholder names ("cv0", "cv1") in both top and bottom templates
-    # means Z3 treats them as the same variable — shared by construction.
-    # Only the shuffle_ps imm8 gets independent names per side.
-    shared_cv0 = SymbolicPlaceholder("cv0", 256)
-    shared_cv1 = SymbolicPlaceholder("cv1", 256)
-
-    top_template = [
-        InstructionSpec(
-            "_mm256_permutexvar_epi32",
-            {"a": "top", "op_idx": shared_cv0},
-        ),
-        InstructionSpec(
-            "_mm256_permutexvar_epi32",
-            {"a": "bottom", "op_idx": shared_cv1},
-        ),
-        InstructionSpec(
-            "_mm256_shuffle_ps",
-            {"a": "top", "b": "bottom", "imm8": SymbolicPlaceholder("imm_top", 8)},
-        ),
-    ]
-    bottom_template = [
-        InstructionSpec(
-            "_mm256_permutexvar_epi32",
-            {"a": "top", "op_idx": shared_cv0},
-        ),
-        InstructionSpec(
-            "_mm256_permutexvar_epi32",
-            {"a": "bottom", "op_idx": shared_cv1},
-        ),
-        InstructionSpec(
-            "_mm256_shuffle_ps",
-            {"a": "top", "b": "bottom", "imm8": SymbolicPlaceholder("imm_bot", 8)},
-        ),
-    ]
-
-    results, _, _ = synthesizer.synthesize_gadget_with_symbolic(
-        top_instructions_template=top_template,
-        bottom_instructions_template=bottom_template,
-        input_state=input_state,
-        target_pairs=target_pairs,
-        max_solutions=1,
-        allow_any_lane_order=False,
-    )
-    assert len(results) > 0, "Synthesis should find a solution"
-    gadget, _ = results[0]
-
-    assert len(gadget.top_instructions) == 3
-    assert len(gadget.bottom_instructions) == 3
-
-    # -- Step 1: shared prefix is identical by construction --
-    # Same SymbolicPlaceholder names → same Z3 variable → same concrete values.
-    for i in range(2):
-        assert (
-            gadget.top_instructions[i].args == gadget.bottom_instructions[i].args
-        ), f"Instruction {i}: shared prefix should be identical by construction"
-
-    # -- Step 2: tail instructions diverge (same intrinsic, different imm8) --
-    assert gadget.top_instructions[2].intrinsic_name == "_mm256_shuffle_ps"
-    assert gadget.bottom_instructions[2].intrinsic_name == "_mm256_shuffle_ps"
-    assert (
-        gadget.top_instructions[2].args["imm8"]
-        != gadget.bottom_instructions[2].args["imm8"]
-    ), "Top and bottom shuffle_ps should have different imm8 values"
-
-    # -- Step 3: CSE deduplicates the shared prefix --
-    # 6 raw instructions (3+3) → 4 unified (2 shared + 2 unique)
-    unified, top_out, bottom_out = gadget.unified_instructions()
-    assert len(unified) == 4, f"Expected 4 after CSE, got {len(unified)}"
-    assert gadget.instruction_count() == 4
-    assert top_out != bottom_out
-
-
 def test_cost_model_counts_deduplicated():
     """Verify that calculate_gadget_cost returns cost of deduplicated instructions."""
     from cost_model import CostModel
@@ -1037,6 +930,36 @@ def test_cost_model_counts_deduplicated():
         cost_model.get_instruction_cost(inst.intrinsic_name).latency for inst in unified
     )
     assert cost == expected, f"Cost {cost} != expected {expected}"
+
+
+def test_intrinsic_filter_restricts_enumeration():
+    """intrinsic_filter limits which instructions are enumerated."""
+    only_two = {"_mm256_permutexvar_epi32", "_mm256_shuffle_ps"}
+    synth = GadgetSynthesizer(
+        vector_machine.AVX2,
+        primitive_type.i32,
+        intrinsic_filter=only_two,
+    )
+
+    all_names = set()
+    for inst in synth.single_input_insts_top:
+        all_names.add(inst.intrinsic_name)
+    for inst in synth.single_input_insts_bottom:
+        all_names.add(inst.intrinsic_name)
+    for inst in synth.dual_input_insts_top_bottom:
+        all_names.add(inst.intrinsic_name)
+
+    assert all_names == only_two, f"Expected only {only_two}, got {all_names}"
+
+
+def test_intrinsic_filter_rejects_unknown():
+    """intrinsic_filter raises ValueError for intrinsics not in the VM/type."""
+    with pytest.raises(ValueError, match="not available"):
+        GadgetSynthesizer(
+            vector_machine.AVX2,
+            primitive_type.i32,
+            intrinsic_filter={"_mm512_permutexvar_epi64"},
+        )
 
 
 def run_all_tests():

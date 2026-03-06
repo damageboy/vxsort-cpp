@@ -16,6 +16,12 @@ import pytest
 from z3 import BitVecVal, Concat, Extract, simplify
 
 import z3_avx
+from bitonic_super_optimizer import (
+    GadgetSynthesizer,
+    InstructionSpec,
+    SymbolicPlaceholder,
+    VectorState,
+)
 from bitonic_verifier import (
     BitonicPathVerifier,
     VerifyStep,
@@ -194,3 +200,293 @@ class TestBlacherSortingNetwork:
         rng.shuffle(values)
         result = _apply_sorting_network(verifier, steps, values, natural_order)
         assert result == sorted(values)
+
+
+def test_synthesize_blacher_stage9_and_cse():
+    """Synthesize Blacher stage 9 with depth-2 template, verify CSE deduplication.
+
+    Stage 9 of the Blacher AVX2/i32 network transforms:
+      top:    [1,9,6,14,2,10,5,13]   ->  [1,9,3,11,5,13,7,15]
+      bottom: [3,11,8,16,4,12,7,15]  ->  [2,10,4,12,6,14,8,16]
+
+    "Depth 1.5" template: a shared permutation prefix (same SymbolicPlaceholder
+    names for both top and bottom) piped into an independent single instruction.
+    By construction, the permutexvar CVs are the same Z3 variable for both sides,
+    guaranteeing identical concrete values. Only the shuffle_ps imm8 differs.
+
+    After synthesis we verify:
+    1. Both sides have identical permutexvar instructions (shared by construction)
+    2. The shuffle_ps imm8 values differ between top and bottom
+    3. unified_instructions() discovers the shared prefix -> 4 instructions (not 6)
+    """
+    synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i32)
+
+    input_state = VectorState(
+        top=[1, 9, 6, 14, 2, 10, 5, 13],
+        bottom=[3, 11, 8, 16, 4, 12, 7, 15],
+    )
+    target_pairs = [
+        (1, 2),
+        (9, 10),
+        (3, 4),
+        (11, 12),
+        (5, 6),
+        (13, 14),
+        (7, 8),
+        (15, 16),
+    ]
+
+    shared_cv0 = SymbolicPlaceholder("cv0", 256)
+    shared_cv1 = SymbolicPlaceholder("cv1", 256)
+
+    top_template = [
+        InstructionSpec(
+            "_mm256_permutexvar_epi32",
+            {"a": "top", "op_idx": shared_cv0},
+        ),
+        InstructionSpec(
+            "_mm256_permutexvar_epi32",
+            {"a": "bottom", "op_idx": shared_cv1},
+        ),
+        InstructionSpec(
+            "_mm256_shuffle_ps",
+            {"a": "top", "b": "bottom", "imm8": SymbolicPlaceholder("imm_top", 8)},
+        ),
+    ]
+    bottom_template = [
+        InstructionSpec(
+            "_mm256_permutexvar_epi32",
+            {"a": "top", "op_idx": shared_cv0},
+        ),
+        InstructionSpec(
+            "_mm256_permutexvar_epi32",
+            {"a": "bottom", "op_idx": shared_cv1},
+        ),
+        InstructionSpec(
+            "_mm256_shuffle_ps",
+            {"a": "top", "b": "bottom", "imm8": SymbolicPlaceholder("imm_bot", 8)},
+        ),
+    ]
+
+    results, _, _ = synthesizer.synthesize_gadget_with_symbolic(
+        top_instructions_template=top_template,
+        bottom_instructions_template=bottom_template,
+        input_state=input_state,
+        target_pairs=target_pairs,
+        max_solutions=1,
+        allow_any_lane_order=False,
+    )
+    assert len(results) > 0, "Synthesis should find a solution"
+    gadget, _ = results[0]
+
+    assert len(gadget.top_instructions) == 3
+    assert len(gadget.bottom_instructions) == 3
+
+    # Shared prefix is identical by construction
+    for i in range(2):
+        assert (
+            gadget.top_instructions[i].args == gadget.bottom_instructions[i].args
+        ), f"Instruction {i}: shared prefix should be identical by construction"
+
+    # Tail instructions diverge (same intrinsic, different imm8)
+    assert gadget.top_instructions[2].intrinsic_name == "_mm256_shuffle_ps"
+    assert gadget.bottom_instructions[2].intrinsic_name == "_mm256_shuffle_ps"
+    assert (
+        gadget.top_instructions[2].args["imm8"]
+        != gadget.bottom_instructions[2].args["imm8"]
+    ), "Top and bottom shuffle_ps should have different imm8 values"
+
+    # CSE deduplicates the shared prefix: 6 raw -> 4 unified
+    unified, top_out, bottom_out = gadget.unified_instructions()
+    assert len(unified) == 4, f"Expected 4 after CSE, got {len(unified)}"
+    assert gadget.instruction_count() == 4
+    assert top_out != bottom_out
+
+
+def test_filtered_synthesis_blacher_stage9_cse():
+    """Synthesize Blacher stage 9 with only permutexvar+shuffle_ps, verify CSE.
+
+    Uses intrinsic_filter to restrict synthesis to just two instructions,
+    drastically reducing search space and solve time. The depth-1.5 template
+    (shared permutation prefix + independent shuffle tail) should still find
+    a solution and produce CSE deduplication (4 instructions instead of 6).
+    """
+    synth = GadgetSynthesizer(
+        vector_machine.AVX2,
+        primitive_type.i32,
+        intrinsic_filter={"_mm256_permutexvar_epi32", "_mm256_shuffle_ps"},
+    )
+
+    input_state = VectorState(
+        top=[1, 9, 6, 14, 2, 10, 5, 13],
+        bottom=[3, 11, 8, 16, 4, 12, 7, 15],
+    )
+    target_pairs = [
+        (1, 2),
+        (9, 10),
+        (3, 4),
+        (11, 12),
+        (5, 6),
+        (13, 14),
+        (7, 8),
+        (15, 16),
+    ]
+
+    shared_cv0 = SymbolicPlaceholder("cv0", 256)
+    shared_cv1 = SymbolicPlaceholder("cv1", 256)
+
+    top_template = [
+        InstructionSpec(
+            "_mm256_permutexvar_epi32",
+            {"a": "top", "op_idx": shared_cv0},
+        ),
+        InstructionSpec(
+            "_mm256_permutexvar_epi32",
+            {"a": "bottom", "op_idx": shared_cv1},
+        ),
+        InstructionSpec(
+            "_mm256_shuffle_ps",
+            {"a": "top", "b": "bottom", "imm8": SymbolicPlaceholder("imm_top", 8)},
+        ),
+    ]
+    bottom_template = [
+        InstructionSpec(
+            "_mm256_permutexvar_epi32",
+            {"a": "top", "op_idx": shared_cv0},
+        ),
+        InstructionSpec(
+            "_mm256_permutexvar_epi32",
+            {"a": "bottom", "op_idx": shared_cv1},
+        ),
+        InstructionSpec(
+            "_mm256_shuffle_ps",
+            {"a": "top", "b": "bottom", "imm8": SymbolicPlaceholder("imm_bot", 8)},
+        ),
+    ]
+
+    results, _, _ = synth.synthesize_gadget_with_symbolic(
+        top_instructions_template=top_template,
+        bottom_instructions_template=bottom_template,
+        input_state=input_state,
+        target_pairs=target_pairs,
+        max_solutions=1,
+        allow_any_lane_order=False,
+    )
+    assert len(results) > 0, "Synthesis should find a solution"
+    gadget, output_state = results[0]
+
+    # Verify output correctness
+    assert sorted(output_state.top) != sorted(output_state.bottom)
+
+    # Shared prefix is identical by construction
+    for i in range(2):
+        assert (
+            gadget.top_instructions[i].args == gadget.bottom_instructions[i].args
+        ), f"Instruction {i}: shared prefix should be identical"
+
+    # Tail instructions diverge
+    assert gadget.top_instructions[2].intrinsic_name == "_mm256_shuffle_ps"
+    assert gadget.bottom_instructions[2].intrinsic_name == "_mm256_shuffle_ps"
+    assert (
+        gadget.top_instructions[2].args["imm8"]
+        != gadget.bottom_instructions[2].args["imm8"]
+    ), "Top and bottom shuffle_ps should have different imm8 values"
+
+    # CSE deduplicates: 6 raw -> 4 unified
+    unified, top_out, bottom_out = gadget.unified_instructions()
+    assert len(unified) == 4, f"Expected 4 after CSE, got {len(unified)}"
+    assert gadget.instruction_count() == 4
+    assert top_out != bottom_out
+
+
+def test_filtered_synthesis_blacher_stage10_natural_order():
+    """Synthesize Blacher stage 10 (natural order) with permute_ps+blend_ps.
+
+    Stage 10 restores natural element order after sorting:
+      top:    [1,9,3,11,5,13,7,15]  ->  [1,2,3,4,5,6,7,8]
+      bottom: [2,10,4,12,6,14,8,16] ->  [9,10,11,12,13,14,15,16]
+
+    Classical depth-2 gadget: each side permutes the OTHER register to bring
+    interleaved values into adjacent lanes, then blends with its own register
+    to pick the right elements. Each inst1 (the blend) only references prev
+    and the original top/bottom registers via the mux encoding.
+
+    Unlike stage 9 where both sides permute the SAME registers (enabling a
+    shared prefix and CSE), here the top side must permute bottom and the
+    bottom side must permute top -- no sharing is possible.
+    """
+    synth = GadgetSynthesizer(
+        vector_machine.AVX2,
+        primitive_type.i32,
+        intrinsic_filter={"_mm256_permute_ps", "_mm256_blend_ps"},
+    )
+
+    input_state = VectorState(
+        top=[1, 9, 3, 11, 5, 13, 7, 15],
+        bottom=[2, 10, 4, 12, 6, 14, 8, 16],
+    )
+    # Natural order: pair element i with element i+8 in lane i
+    target_pairs = [
+        (1, 9),
+        (2, 10),
+        (3, 11),
+        (4, 12),
+        (5, 13),
+        (6, 14),
+        (7, 15),
+        (8, 16),
+    ]
+
+    # Top side: permute bottom to bring even values adjacent, then blend
+    top_template = [
+        InstructionSpec(
+            "_mm256_permute_ps",
+            {"a": "bottom", "imm8": SymbolicPlaceholder("imm_perm_top", 8)},
+        ),
+        InstructionSpec(
+            "_mm256_blend_ps",
+            {
+                "a": "top",
+                "b": "bottom",
+                "imm8": SymbolicPlaceholder("imm_blend_top", 8),
+            },
+        ),
+    ]
+    # Bottom side: permute top to bring odd values adjacent, then blend
+    bottom_template = [
+        InstructionSpec(
+            "_mm256_permute_ps",
+            {"a": "top", "imm8": SymbolicPlaceholder("imm_perm_bot", 8)},
+        ),
+        InstructionSpec(
+            "_mm256_blend_ps",
+            {
+                "a": "top",
+                "b": "bottom",
+                "imm8": SymbolicPlaceholder("imm_blend_bot", 8),
+            },
+        ),
+    ]
+
+    results, _, _ = synth.synthesize_gadget_with_symbolic(
+        top_instructions_template=top_template,
+        bottom_instructions_template=bottom_template,
+        input_state=input_state,
+        target_pairs=target_pairs,
+        max_solutions=1,
+        allow_any_lane_order=False,
+    )
+    assert len(results) > 0, "Synthesis should find a solution"
+    gadget, _ = results[0]
+
+    assert len(gadget.top_instructions) == 2
+    assert len(gadget.bottom_instructions) == 2
+
+    # Each side is permute then blend
+    assert gadget.top_instructions[0].intrinsic_name == "_mm256_permute_ps"
+    assert gadget.top_instructions[1].intrinsic_name == "_mm256_blend_ps"
+    assert gadget.bottom_instructions[0].intrinsic_name == "_mm256_permute_ps"
+    assert gadget.bottom_instructions[1].intrinsic_name == "_mm256_blend_ps"
+
+    # Top permutes bottom, bottom permutes top -- no CSE possible
+    assert gadget.instruction_count() == 4
