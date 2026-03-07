@@ -1,3 +1,6 @@
+# Install both pre-commit and commit-msg hooks
+default_install_hook_types: [pre-commit, commit-msg]
+
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.
@@ -10,3 +13,7 @@ repos:
       # Run the formatter.
       - id: ruff-format
         exclude: ^vxsort/smallsort/codegen-old/
+  - repo: https://github.com/tmr232/precommit-ad-blocker
+    rev: v1.0.0
+    hooks:
+      - id: ad-blocker

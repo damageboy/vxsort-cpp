@@ -699,35 +699,35 @@ class BitonicSuperVectorizer:
             try:
                 # Launch stage 0 (or first stage after resume)
                 if start_stage < effective_limit:
-                    tracker0 = StageTracker(
+                    new_tracker = StageTracker(
                         stage_idx=start_stage,
                         stage_pairs=self.bitonic_sorter.stages[start_stage],
                     )
-                    tracker0.progress_task_id = stage_task_ids.get(start_stage)
-                    tracker0.all_inputs_received = True  # first stage has all inputs
-                    trackers[start_stage] = tracker0
+                    new_tracker.progress_task_id = stage_task_ids.get(start_stage)
+                    new_tracker.all_inputs_received = True  # first stage has all inputs
+                    trackers[start_stage] = new_tracker
 
                     jobs = self._make_jobs_for_inputs(
                         current_inputs,
                         start_stage,
-                        tracker0.stage_pairs,
+                        new_tracker.stage_pairs,
                         all_candidates,
                         max_unique_outputs,
                     )
                     self._submit_stage_jobs(
-                        pool, tracker0, jobs, pending_count, completion_queue
+                        pool, new_tracker, jobs, pending_count, completion_queue
                     )
-                    tracker0.total_jobs_expected = tracker0.total_jobs_submitted
+                    new_tracker.total_jobs_expected = new_tracker.total_jobs_submitted
 
-                    if tracker0.progress_task_id is not None:
-                        progress.start_task(tracker0.progress_task_id)
+                    if new_tracker.progress_task_id is not None:
+                        progress.start_task(new_tracker.progress_task_id)
                         progress.update(
-                            tracker0.progress_task_id,
-                            total=tracker0.total_jobs_submitted,
+                            new_tracker.progress_task_id,
+                            total=new_tracker.total_jobs_submitted,
                         )
 
                     progress.console.print(
-                        f"Stage {start_stage}: Launched {tracker0.total_jobs_submitted} jobs "
+                        f"Stage {start_stage}: Launched {new_tracker.total_jobs_submitted} jobs "
                         f"for {len(current_inputs)} inputs"
                     )
 
