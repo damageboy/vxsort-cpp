@@ -1,0 +1,173 @@
+"""Shared data types for the bitonic sort super-optimizer."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from tabulate import tabulate
+
+
+@dataclass
+class VectorState:
+    """Tracks which elements are in which lanes of top/bottom vectors."""
+
+    top: list[int]  # element indices in top vector
+    bottom: list[int]  # element indices in bottom vector
+
+    def __repr__(self):
+        # Create transposed table: Top and Bottom as rows, lanes as columns
+        max_len = max(len(self.top), len(self.bottom))
+
+        # Pad vectors if needed
+        top_vals = self.top + [""] * (max_len - len(self.top))
+        bottom_vals = self.bottom + [""] * (max_len - len(self.bottom))
+
+        # Create table data: each row is [label, val0, val1, val2, ...]
+        table_data = [["Top"] + top_vals, ["Bottom"] + bottom_vals]
+
+        # Headers are lane indices
+        headers = [""] + list(range(max_len))
+        return tabulate(table_data, headers=headers, tablefmt="rounded_outline")
+
+    def copy(self):
+        return VectorState(top=self.top.copy(), bottom=self.bottom.copy())
+
+    def as_tuple(self) -> tuple[tuple[int, ...], tuple[int, ...]]:
+        """Return a hashable tuple representation for grouping/deduplication."""
+        return (tuple(self.top), tuple(self.bottom))
+
+
+@dataclass
+class SymbolicPlaceholder:
+    """Represents a symbolic Z3 variable that can be safely pickled."""
+
+    name: str
+    size: int
+
+
+@dataclass
+class InstructionSpec:
+    """Represents a single AVX instruction with its arguments."""
+
+    intrinsic_name: str
+    args: dict  # operands, immediates, masks, etc.
+
+    def sort_key(self) -> tuple:
+        """Return a deterministic sort key for canonical ordering."""
+        return (
+            self.intrinsic_name,
+            tuple(sorted((k, str(v)) for k, v in self.args.items())),
+        )
+
+    def __repr__(self):
+        return f"{self.intrinsic_name}({self.args})"
+
+
+@dataclass
+class PermutationGadget:
+    """Encapsulates instruction sequence for top/bottom vectors."""
+
+    top_instructions: list[InstructionSpec]  # 0-3 instructions
+    bottom_instructions: list[InstructionSpec]  # 0-3 instructions
+    validated: bool = False
+
+    _unified_cache: tuple[list[InstructionSpec], int, int] | None = field(
+        default=None, repr=False, compare=False
+    )
+
+    def instruction_count(self) -> int:
+        """Total number of deduplicated instructions in this gadget."""
+        unified, _, _ = self.unified_instructions()
+        return len(unified)
+
+    def sort_key(self) -> tuple:
+        """Return a deterministic sort key for canonical ordering."""
+        return (
+            tuple(i.sort_key() for i in self.top_instructions),
+            tuple(i.sort_key() for i in self.bottom_instructions),
+        )
+
+    def unified_instructions(self) -> tuple[list[InstructionSpec], int, int]:
+        """Merge top/bottom into a unified deduplicated instruction list.
+
+        Two instructions are considered duplicates when they have the same
+        intrinsic name and the same structural arguments (recursively
+        resolving "prev"/"result_N" references to their dependency
+        signatures).
+
+        Returns:
+            (instructions, top_output_idx, bottom_output_idx) where
+            the indices point into the unified list.
+        """
+        if self._unified_cache is not None:
+            return self._unified_cache
+
+        unified: list[InstructionSpec] = []
+        sig_to_idx: dict[tuple, int] = {}
+
+        def _compute_sig(inst: InstructionSpec, prior_sigs: list[tuple]) -> tuple:
+            normalized = {}
+            for key, value in inst.args.items():
+                if isinstance(value, str):
+                    if value == "prev":
+                        normalized[key] = prior_sigs[-1] if prior_sigs else value
+                    elif value.startswith("result_"):
+                        idx = int(value[len("result_") :])
+                        normalized[key] = (
+                            prior_sigs[idx] if idx < len(prior_sigs) else value
+                        )
+                    else:
+                        normalized[key] = value
+                else:
+                    normalized[key] = value
+            return (inst.intrinsic_name, tuple(sorted(normalized.items())))
+
+        # Process top instructions
+        top_sigs: list[tuple] = []
+        top_unified_indices: list[int] = []
+        for inst in self.top_instructions:
+            sig = _compute_sig(inst, top_sigs)
+            top_sigs.append(sig)
+            if sig not in sig_to_idx:
+                sig_to_idx[sig] = len(unified)
+                unified.append(inst)
+            top_unified_indices.append(sig_to_idx[sig])
+
+        # Process bottom instructions, deduplicating against top
+        bottom_sigs: list[tuple] = []
+        bottom_unified_indices: list[int] = []
+        for inst in self.bottom_instructions:
+            sig = _compute_sig(inst, bottom_sigs)
+            bottom_sigs.append(sig)
+            if sig not in sig_to_idx:
+                sig_to_idx[sig] = len(unified)
+                unified.append(inst)
+            bottom_unified_indices.append(sig_to_idx[sig])
+
+        top_out = top_unified_indices[-1] if top_unified_indices else -1
+        bottom_out = bottom_unified_indices[-1] if bottom_unified_indices else -1
+
+        self._unified_cache = (unified, top_out, bottom_out)
+        return self._unified_cache
+
+    def __repr__(self):
+        return f"Gadget(top={len(self.top_instructions)}, bottom={len(self.bottom_instructions)}, validated={self.validated})"
+
+
+@dataclass
+class SolutionNode:
+    """Tree node for one stage's solutions.
+
+    Each node represents a unique (input_state, output_state) transition.
+    Multiple gadgets that achieve the same transition are stored together,
+    allowing pruning of semantically equivalent paths.
+    """
+
+    stage: int
+    input_state: VectorState
+    output_state: VectorState
+    gadgets: list[PermutationGadget]  # All gadgets that produce this transition
+    children: list["SolutionNode"]
+
+    def __repr__(self):
+        return f"SolutionNode(stage={self.stage}, gadgets={len(self.gadgets)}, children={len(self.children)})"

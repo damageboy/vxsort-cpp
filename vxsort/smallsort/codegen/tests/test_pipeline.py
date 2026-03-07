@@ -9,32 +9,10 @@ from bitonic_super_optimizer import (
     StageTracker,
     VectorState,
     PermutationGadget,
-    SolutionNode,
     InstructionSpec,
     _BATCH_THRESHOLDS,
 )
 from utils import primitive_type, vector_machine
-
-
-# ---------------------------------------------------------------------------
-# Helper: collect per-stage output state tuples for comparison
-# ---------------------------------------------------------------------------
-
-
-def _collect_output_states(roots: list[SolutionNode]) -> dict[int, set[tuple]]:
-    """Walk the solution tree and collect output state tuples per stage."""
-    result: dict[int, set[tuple]] = {}
-
-    def _walk(nodes: list[SolutionNode]):
-        for node in nodes:
-            stage = node.stage
-            if stage not in result:
-                result[stage] = set()
-            result[stage].add(node.output_state.as_tuple())
-            _walk(node.children)
-
-    _walk(roots)
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -242,80 +220,21 @@ class TestFinalizeStage:
 
 
 # ---------------------------------------------------------------------------
-# Integration: pipelined vs sequential determinism
+# Integration: pipelined execution
 # ---------------------------------------------------------------------------
 
 
-class TestPipelinedDeterminism:
-    """Verify pipelined path produces identical results to sequential."""
+class TestPipelinedExecution:
+    """Verify pipelined execution works correctly."""
 
     @pytest.mark.slow
-    def test_avx2_i64_pipelined_matches_sequential(self):
-        """Run both paths with AVX2 i64 depth 3, compare output states."""
-        # Sequential run
-        sv_seq = BitonicSuperVectorizer(2, primitive_type.i64, vector_machine.AVX2)
-        seq_roots, seq_complete = sv_seq.build_solution_tree(
-            depth_limit=3,
-            gadget_depth=1,
-            max_unique_outputs=3,
-            pipeline=False,
-        )
-        seq_outputs = _collect_output_states(seq_roots)
-
-        # Pipelined run
-        sv_pipe = BitonicSuperVectorizer(2, primitive_type.i64, vector_machine.AVX2)
-        pipe_roots, pipe_complete = sv_pipe.build_solution_tree(
-            depth_limit=3,
-            gadget_depth=1,
-            max_unique_outputs=3,
-            pipeline=True,
-        )
-        pipe_outputs = _collect_output_states(pipe_roots)
-
-        # Both should complete
-        assert seq_complete == pipe_complete
-
-        # Same stages should be present
-        assert set(seq_outputs.keys()) == set(pipe_outputs.keys())
-
-        # Same output states per stage
-        for stage in seq_outputs:
-            assert (
-                seq_outputs[stage] == pipe_outputs[stage]
-            ), f"Stage {stage}: output states differ"
-
-        # Same number of root nodes
-        assert len(seq_roots) == len(pipe_roots)
-
-    @pytest.mark.slow
-    def test_avx2_i64_single_stage_pipelined(self):
-        """Single-stage pipelined run should work correctly."""
+    def test_avx2_i64_single_stage(self):
+        """Single-stage run should work correctly."""
         sv = BitonicSuperVectorizer(2, primitive_type.i64, vector_machine.AVX2)
         roots, complete = sv.build_solution_tree(
             depth_limit=1,
             gadget_depth=1,
             max_unique_outputs=1,
-            pipeline=True,
         )
         assert len(roots) > 0
         assert complete
-
-
-# ---------------------------------------------------------------------------
-# Edge case: empty stage
-# ---------------------------------------------------------------------------
-
-
-class TestPipelinedEdgeCases:
-    """Edge cases for pipelined processing."""
-
-    def test_pipeline_false_falls_back_to_sequential(self):
-        """pipeline=False should use the sequential path without error."""
-        sv = BitonicSuperVectorizer(2, primitive_type.i64, vector_machine.AVX2)
-        roots, _ = sv.build_solution_tree(
-            depth_limit=1,
-            gadget_depth=1,
-            max_unique_outputs=1,
-            pipeline=False,
-        )
-        assert len(roots) > 0

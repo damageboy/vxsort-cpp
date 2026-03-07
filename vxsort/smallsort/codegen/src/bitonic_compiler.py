@@ -264,7 +264,6 @@ def generate_bitonic_sorter(
     resume_file: str | None = None,
     estimate: bool = False,
     nasm_path: str | None = None,
-    no_pipeline: bool = False,
     max_workers: int | None = None,
     max_tasks_per_child: int | None = 1000,
 ):
@@ -293,7 +292,6 @@ def generate_bitonic_sorter(
             stages are skipped and synthesis continues from where it left off.
         estimate: If True, run OSACA performance estimation on selected paths.
         nasm_path: Path to nasm binary for assembly verification (used with --estimate).
-        no_pipeline: If True, disable pipelined stage processing.
         max_tasks_per_child: Maximum tasks per worker process before recycling.
             Limits memory growth in long runs. None disables recycling.
 
@@ -358,7 +356,6 @@ def generate_bitonic_sorter(
         max_unique_outputs=max_gadget_solutions,
         checkpoint_dir=checkpoint_dir,
         resume_data=resume_data,
-        pipeline=not no_pipeline,
         max_workers=max_workers,
         max_tasks_per_child=max_tasks_per_child,
     )
@@ -587,12 +584,6 @@ if __name__ == "__main__":
         "and run OSACA performance estimation only.",
     )
     parser.add_argument(
-        "--no-pipeline",
-        action="store_true",
-        default=False,
-        help="Disable pipelined stage processing; use sequential stage barriers instead.",
-    )
-    parser.add_argument(
         "--max-workers",
         type=int,
         default=None,
@@ -694,7 +685,6 @@ if __name__ == "__main__":
         resume_file=args.resume,
         estimate=args.estimate,
         nasm_path=args.nasm_path,
-        no_pipeline=args.no_pipeline,
         max_workers=args.max_workers,
         max_tasks_per_child=max_tasks_per_child,
     )
