@@ -504,6 +504,76 @@ def get_available_intrinsics(
     return intrinsics
 
 
+"""
+mermaid
+title Gadget Synthesis Pipeline
+flowchart TD
+    subgraph INIT["Initialization (once per GadgetSynthesizer)"]
+        direction TB
+        avx["get_available_intrinsics(vm, prim_type)"]
+        avx --> single["_enumerate_single_input_instructions<br/>e.g. permute_ps(a, imm8)"]
+        avx --> dual["_enumerate_dual_input_instructions<br/>e.g. shuffle_ps(a, b, imm8)"]
+        single --> templates["Instruction templates<br/>(with SymbolicPlaceholder immediates)"]
+        dual --> templates
+    end
+
+    subgraph CANDIDATES["Candidate Enumeration (precompute_all_candidates)"]
+        direction TB
+        templates2["templates"] --> build["_build_instruction_sequences(depth)"]
+        build --> d0["depth 0: identity"]
+        build --> d1["depth 1: single inst"]
+        build --> d2["depth 2: inst pairs<br/>(single,single) (dual,single) (single,dual)"]
+        d0 --> combine["_generate_candidate_gadgets_at_depth<br/>cartesian product: top_seq × bottom_seq"]
+        d1 --> combine
+        d2 --> combine
+    end
+
+    subgraph SYNTHESIS["Per-Candidate Synthesis (synthesize_gadget_with_symbolic)"]
+        direction TB
+        regs["_create_input_registers<br/>Z3 bitvecs with concrete element labels"]
+        resolve["_resolve_symbolic_instruction_args<br/>SymbolicPlaceholder → Z3 BitVec"]
+        regs --> apply
+        resolve --> apply["_apply_instructions (top + bottom sides)"]
+
+        subgraph APPLY["_apply_instructions"]
+            direction TB
+            inst0["inst0: resolve args via<br/>_substitute_register_names"]
+            inst0 --> inst1["inst1+: register args get<br/>_create_operand_mux<br/>(Z3 If-chain over top/bottom/result_0)"]
+            inst1 --> prune["_prune_depth2_mux<br/>(for 2-inst sequences only)"]
+            prune --> prune_s["1 mux var: force to result_0"]
+            prune --> prune_d["2 mux vars: Or(a≥result_0, b≥result_0)"]
+        end
+
+        apply --> coex["Add COEX constraints<br/>output = min/max of top_out, bottom_out"]
+        coex --> distinct["Add Distinct constraint<br/>(no element duplication)"]
+        distinct --> solve["Z3 Solver.check()"]
+        solve -->|sat| extract["concretize_instructions<br/>model → concrete imm8/cv values<br/>mux select → 'prev'/'top'/'bottom'"]
+        solve -->|unsat| discard["discard candidate"]
+        extract --> gadget["PermutationGadget + VectorState"]
+    end
+
+    subgraph PARALLEL["Parallel Validation (_validate_gadgets)"]
+        direction TB
+        pool["multiprocessing.Pool"]
+        pool --> workers["_validate_gadget_worker × N<br/>(each runs synthesize_gadget_with_symbolic)"]
+        workers --> collect["collect validated gadgets"]
+    end
+
+    subgraph TREE["Solution Tree (build_solution_tree)"]
+        direction TB
+        stages["for each bitonic sort stage"]
+        stages --> input_states["for each unique input VectorState"]
+        input_states --> jobs["create jobs: candidate × input_state"]
+        jobs --> validate["_validate_gadgets (parallel)"]
+        validate --> nodes["build SolutionNode DAG<br/>(parent → children across stages)"]
+    end
+
+    INIT --> CANDIDATES
+    CANDIDATES --> PARALLEL
+    PARALLEL --> TREE
+"""
+
+
 class GadgetSynthesizer:
     """Synthesizes permutation gadgets using Z3."""
 
@@ -1264,24 +1334,22 @@ class GadgetSynthesizer:
         """
         Apply a sequence of instructions to compute output register.
 
-        For multi-instruction sequences, inst2+ register operands get
-        multiplexer select variables so Z3 can choose whether each operand
-        reads from the original top/bottom registers or from any prior
-        instruction's output.
+        For multi-instruction sequences, inst1+ register operands ("a", "b"
+        referencing "top"/"bottom") get a mux select variable so Z3 can pick
+        from {top, bottom, result_0, ...}.
 
-        Args:
-            top_reg: Input top register
-            bottom_reg: Input bottom register
-            instructions: List of instructions to apply
-            is_top: True if computing top output, False for bottom output
-            solver: Optional Z3 solver (unused but kept for API compatibility)
-            symbolic_vars: Optional dict to track symbolic variables
+        For exactly-2-instruction sequences (auto-generated depth-2), the mux
+        is then constrained to prevent degeneration to depth-1:
+        - Single-input inst1: mux forced to result_0 (picking top/bottom
+          would discard inst0, duplicating a depth-1 gadget).
+        - Dual-input inst1: at least one of (a, b) must select result_0.
+
+        For 3+ instruction sequences (user templates with arbitrary wiring),
+        mux variables are left unconstrained.
 
         Returns:
-            (output_register, mux_constraints) tuple. The caller must add
-            mux_constraints to the solver before solving.
+            (output_register, mux_constraints) tuple.
         """
-        # Start with the appropriate input register
         current_reg = top_reg if is_top else bottom_reg
         results = []
         mux_constraints = []
@@ -1291,7 +1359,6 @@ class GadgetSynthesizer:
             if intrinsic is None:
                 raise ValueError(f"Unknown intrinsic: {inst.intrinsic_name}")
 
-            # Substitute register names in arguments with actual Z3 registers
             args = {}
             for key, value in inst.args.items():
                 if (
@@ -1301,7 +1368,6 @@ class GadgetSynthesizer:
                     and isinstance(value, str)
                     and value in ("top", "bottom")
                 ):
-                    # inst2+: create mux for register operands
                     args[key] = self._create_operand_mux(
                         key,
                         inst,
@@ -1313,7 +1379,6 @@ class GadgetSynthesizer:
                         mux_constraints,
                     )
                 else:
-                    # First instruction or non-register arg: resolve normally
                     args[key] = self._substitute_register_names(
                         value,
                         top_reg,
@@ -1324,10 +1389,47 @@ class GadgetSynthesizer:
                     )
 
             current_reg = _dispatch_intrinsic_by_signature(intrinsic, args)
-
             results.append(current_reg)
 
+        # For depth-2 sequences, constrain inst1's mux to prevent
+        # degeneration to a depth-1 gadget.
+        if len(instructions) == 2 and symbolic_vars is not None:
+            self._prune_depth2_mux(instructions[1], mux_constraints, symbolic_vars)
+
         return current_reg, mux_constraints
+
+    @staticmethod
+    def _prune_depth2_mux(
+        inst1: InstructionSpec,
+        mux_constraints: list,
+        symbolic_vars: dict,
+    ):
+        """Constrain inst1's mux in a depth-2 sequence to use result_0.
+
+        Mux encoding: 0=top, 1=bottom, 2=result_0, ...
+        Without constraints, Z3 can pick top/bottom for all operands,
+        making inst0 dead code — equivalent to a depth-1 gadget.
+
+        - 1 mux var (single-input inst1): force it to result_0.
+        - 2 mux vars (dual-input inst1): at least one must be >= result_0.
+        """
+        FIRST_RESULT = 2
+
+        sel_vars = []
+        for key in ("a", "b"):
+            name = f"sel_{key}_{inst1.intrinsic_name}_{id(inst1)}"
+            if name in symbolic_vars:
+                sel_vars.append(symbolic_vars[name])
+
+        if len(sel_vars) == 1:
+            mux_constraints.append(sel_vars[0] == FIRST_RESULT)
+        elif len(sel_vars) >= 2:
+            mux_constraints.append(
+                Or(
+                    ULE(BitVecVal(FIRST_RESULT, sel_vars[0].size()), sel_vars[0]),
+                    ULE(BitVecVal(FIRST_RESULT, sel_vars[1].size()), sel_vars[1]),
+                )
+            )
 
     def _generate_candidate_gadgets_at_depth(
         self, top_depth: int, bottom_depth: int
@@ -1384,37 +1486,29 @@ class GadgetSynthesizer:
                 end
             end
 
-            subgraph D2["2 inst per side (dotted = mux choices)"]
-                subgraph C["Shape C: single, single"]
+            subgraph D2["2 inst per side"]
+                subgraph C["Shape C: single → single (hardwired chain)"]
                     direction TB
                     c_top["top reg"]
                     c_bot["bottom reg"]
-                    c_top --> c_i0["inst0(a, imm8/cv)<br/>single-input"]
-                    c_i0 --> c_r0((result_0))
-                    c_r0 -.-> c_mux{{mux a}}
-                    c_top -.-> c_mux
-                    c_bot -.-> c_mux
-                    c_mux --> c_i1["inst1(a, imm8/cv)<br/>single-input"]
+                    c_top --> c_i0["inst0(a, imm8/cv)"]
+                    c_i0 --> c_i1["inst1(result_0, imm8/cv)"]
                     c_i1 --> c_COEX["COEX"]
                 end
-                subgraph D["Shape D: dual, single"]
+                subgraph D["Shape D: dual → single (hardwired chain)"]
                     direction TB
                     d_top["top reg"]
                     d_bot["bottom reg"]
-                    d_top --> d_i0["inst0(a, b, imm8)<br/>dual-input"]
+                    d_top --> d_i0["inst0(a, b, imm8)"]
                     d_bot --> d_i0
-                    d_i0 --> d_r0((result_0))
-                    d_r0 -.-> d_mux{{mux a}}
-                    d_top -.-> d_mux
-                    d_bot -.-> d_mux
-                    d_mux --> d_i1["inst1(a, imm8/cv)<br/>single-input"]
+                    d_i0 --> d_i1["inst1(result_0, imm8/cv)"]
                     d_i1 --> d_COEX["COEX"]
                 end
-                subgraph E["Shape E: single, dual"]
+                subgraph E["Shape E: single → dual (mux, ≥1 must use result_0)"]
                     direction TB
                     e_top["top reg"]
                     e_bot["bottom reg"]
-                    e_top --> e_i0["inst0(a, imm8/cv)<br/>single-input"]
+                    e_top --> e_i0["inst0(a, imm8/cv)"]
                     e_i0 --> e_r0((result_0))
                     e_r0 -.-> e_mux_a{{mux a}}
                     e_top -.-> e_mux_a
@@ -1422,7 +1516,7 @@ class GadgetSynthesizer:
                     e_r0 -.-> e_mux_b{{mux b}}
                     e_top -.-> e_mux_b
                     e_bot -.-> e_mux_b
-                    e_mux_a --> e_i1["inst1(a, b, imm8)<br/>dual-input"]
+                    e_mux_a --> e_i1["inst1(a, b, imm8)"]
                     e_mux_b --> e_i1
                     e_i1 --> e_COEX["COEX"]
                 end

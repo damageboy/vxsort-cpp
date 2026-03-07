@@ -469,9 +469,9 @@ def test_mux_encoding_chains_instructions():
 
     # Build a 2-instruction template: [permute_ps, permute_ps] for top side.
     # The first instruction operates on "top" directly.
-    # The second instruction's "a" arg is "top" -- but since it is inst2
-    # (inst_idx > 0), _apply_instructions will create a mux select variable
-    # choosing between {top_reg, bottom_reg, prev_output}.
+    # The second instruction is single-input at inst_idx=1 in a 2-instruction
+    # sequence, so its "a" operand is hardwired to the previous result (no
+    # mux variable created — selecting top/bottom would degenerate to depth-1).
     top_template = [
         InstructionSpec(
             "_mm256_permute_ps",
@@ -505,37 +505,22 @@ def test_mux_encoding_chains_instructions():
     for gadget, output_state in results:
         assert gadget.validated, f"Gadget should be validated: {gadget}"
 
-    # At least one result should have inst2 with args["a"] == "prev",
-    # proving the mux selected the chained output from inst1
-    prev_results = [
-        (gadget, output_state)
-        for gadget, output_state in results
-        if len(gadget.top_instructions) == 2
-        and gadget.top_instructions[1].args.get("a") == "prev"
-    ]
-    assert len(prev_results) > 0, (
-        'Expected at least one gadget with inst2 args[\'a\'] == \'prev\', '
-        f'but got: {[(g.top_instructions[1].args.get("a") if len(g.top_instructions) == 2 else "N/A") for g, _ in results]}'
-    )
-
-    print(
-        f"  Found {len(results)} total results, {len(prev_results)} with prev chaining"
-    )
-    for gadget, output_state in prev_results:
-        inst2 = gadget.top_instructions[1]
-        a_val = inst2.args["a"]
-        imm8_val = inst2.args["imm8"]
-        print(f"    inst2: {inst2.intrinsic_name}(a={a_val}, imm8={imm8_val})")
-    print("  All gadgets validated: True")
+    # All results must have inst2 with args["a"] == "prev" (hardwired chain)
+    for gadget, output_state in results:
+        assert len(gadget.top_instructions) == 2
+        assert (
+            gadget.top_instructions[1].args["a"] == "prev"
+        ), f"Expected hardwired 'prev', got '{gadget.top_instructions[1].args['a']}'"
 
 
 def test_single_dual_template_combination():
-    """Test that (single, dual) 2-instruction templates work with mux encoding.
+    """Test shape E: (single, dual) 2-instruction template with constrained mux.
 
     Creates a depth-2 gadget with a single-input instruction (permute_ps)
     followed by a dual-input instruction (shuffle_ps). The mux encoding
     lets Z3 decide whether inst2's "a" and "b" operands read from top,
-    bottom, or prev (the output of inst1).
+    bottom, or prev (the output of inst1), but at least one must use prev
+    to avoid degenerating to a depth-1 gadget.
     """
     synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i32)
     n = synthesizer.elements_per_vector
