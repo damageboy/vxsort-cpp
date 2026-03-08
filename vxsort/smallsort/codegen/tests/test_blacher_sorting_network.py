@@ -18,10 +18,9 @@ from z3 import BitVecVal, Concat, Extract, simplify
 import z3_avx
 from bitonic_super_optimizer import (
     GadgetSynthesizer,
-    InstructionSpec,
-    SymbolicPlaceholder,
     VectorState,
 )
+from bitonic_types import GadgetGraph, InputRef, IntrinsicNode, Mux, Symbolic
 from bitonic_verifier import (
     BitonicPathVerifier,
     VerifyStep,
@@ -209,8 +208,8 @@ def test_synthesize_blacher_stage9_and_cse():
       top:    [1,9,6,14,2,10,5,13]   ->  [1,9,3,11,5,13,7,15]
       bottom: [3,11,8,16,4,12,7,15]  ->  [2,10,4,12,6,14,8,16]
 
-    "Depth 1.5" template: a shared permutation prefix (same SymbolicPlaceholder
-    names for both top and bottom) piped into an independent single instruction.
+    "Depth 1.5" template: a shared permutation prefix (same Symbolic
+    nodes for both top and bottom) piped into an independent single instruction.
     By construction, the permutexvar CVs are the same Z3 variable for both sides,
     guaranteeing identical concrete values. Only the shuffle_ps imm8 differs.
 
@@ -236,43 +235,35 @@ def test_synthesize_blacher_stage9_and_cse():
         (15, 16),
     ]
 
-    shared_cv0 = SymbolicPlaceholder("cv0", 256)
-    shared_cv1 = SymbolicPlaceholder("cv1", 256)
+    shared_cv0 = Symbolic("cv0", 256)
+    shared_cv1 = Symbolic("cv1", 256)
 
-    top_template = [
-        InstructionSpec(
-            "_mm256_permutexvar_epi32",
-            {"a": "top", "op_idx": shared_cv0},
-        ),
-        InstructionSpec(
-            "_mm256_permutexvar_epi32",
-            {"a": "bottom", "op_idx": shared_cv1},
-        ),
-        InstructionSpec(
-            "_mm256_shuffle_ps",
-            {"a": "top", "b": "bottom", "imm8": SymbolicPlaceholder("imm_top", 8)},
-        ),
-    ]
-    bottom_template = [
-        InstructionSpec(
-            "_mm256_permutexvar_epi32",
-            {"a": "top", "op_idx": shared_cv0},
-        ),
-        InstructionSpec(
-            "_mm256_permutexvar_epi32",
-            {"a": "bottom", "op_idx": shared_cv1},
-        ),
-        InstructionSpec(
-            "_mm256_shuffle_ps",
-            {"a": "top", "b": "bottom", "imm8": SymbolicPlaceholder("imm_bot", 8)},
-        ),
-    ]
+    # Shared prefix nodes (same Python objects for both sides → CSE)
+    perm_top_input = IntrinsicNode(
+        "_mm256_permutexvar_epi32",
+        {"a": InputRef("top"), "op_idx": shared_cv0},
+    )
+    perm_bot_input = IntrinsicNode(
+        "_mm256_permutexvar_epi32",
+        {"a": InputRef("bottom"), "op_idx": shared_cv1},
+    )
+
+    # Tail nodes: each side shuffles the shared prefix results with a different imm8
+    top_node = IntrinsicNode(
+        "_mm256_shuffle_ps",
+        {"a": perm_top_input, "b": perm_bot_input, "imm8": Symbolic("imm_top", 8)},
+    )
+    bottom_node = IntrinsicNode(
+        "_mm256_shuffle_ps",
+        {"a": perm_top_input, "b": perm_bot_input, "imm8": Symbolic("imm_bot", 8)},
+    )
+
+    graph = GadgetGraph(top=top_node, bottom=bottom_node)
 
     results, _, _ = synthesizer.synthesize_gadget_with_symbolic(
-        top_instructions_template=top_template,
-        bottom_instructions_template=bottom_template,
-        input_state=input_state,
-        target_pairs=target_pairs,
+        graph,
+        input_state,
+        target_pairs,
         max_solutions=1,
         allow_any_lane_order=False,
     )
@@ -332,43 +323,35 @@ def test_filtered_synthesis_blacher_stage9_cse():
         (15, 16),
     ]
 
-    shared_cv0 = SymbolicPlaceholder("cv0", 256)
-    shared_cv1 = SymbolicPlaceholder("cv1", 256)
+    shared_cv0 = Symbolic("cv0", 256)
+    shared_cv1 = Symbolic("cv1", 256)
 
-    top_template = [
-        InstructionSpec(
-            "_mm256_permutexvar_epi32",
-            {"a": "top", "op_idx": shared_cv0},
-        ),
-        InstructionSpec(
-            "_mm256_permutexvar_epi32",
-            {"a": "bottom", "op_idx": shared_cv1},
-        ),
-        InstructionSpec(
-            "_mm256_shuffle_ps",
-            {"a": "top", "b": "bottom", "imm8": SymbolicPlaceholder("imm_top", 8)},
-        ),
-    ]
-    bottom_template = [
-        InstructionSpec(
-            "_mm256_permutexvar_epi32",
-            {"a": "top", "op_idx": shared_cv0},
-        ),
-        InstructionSpec(
-            "_mm256_permutexvar_epi32",
-            {"a": "bottom", "op_idx": shared_cv1},
-        ),
-        InstructionSpec(
-            "_mm256_shuffle_ps",
-            {"a": "top", "b": "bottom", "imm8": SymbolicPlaceholder("imm_bot", 8)},
-        ),
-    ]
+    # Shared prefix nodes (same Python objects for both sides → CSE)
+    perm_top_input = IntrinsicNode(
+        "_mm256_permutexvar_epi32",
+        {"a": InputRef("top"), "op_idx": shared_cv0},
+    )
+    perm_bot_input = IntrinsicNode(
+        "_mm256_permutexvar_epi32",
+        {"a": InputRef("bottom"), "op_idx": shared_cv1},
+    )
+
+    # Tail nodes: each side shuffles the shared prefix results with a different imm8
+    top_node = IntrinsicNode(
+        "_mm256_shuffle_ps",
+        {"a": perm_top_input, "b": perm_bot_input, "imm8": Symbolic("imm_top", 8)},
+    )
+    bottom_node = IntrinsicNode(
+        "_mm256_shuffle_ps",
+        {"a": perm_top_input, "b": perm_bot_input, "imm8": Symbolic("imm_bot", 8)},
+    )
+
+    graph = GadgetGraph(top=top_node, bottom=bottom_node)
 
     results, _, _ = synth.synthesize_gadget_with_symbolic(
-        top_instructions_template=top_template,
-        bottom_instructions_template=bottom_template,
-        input_state=input_state,
-        target_pairs=target_pairs,
+        graph,
+        input_state,
+        target_pairs,
         max_solutions=1,
         allow_any_lane_order=False,
     )
@@ -437,42 +420,59 @@ def test_filtered_synthesis_blacher_stage10_natural_order():
         (8, 16),
     ]
 
+    top_input = InputRef("top")
+    bottom_input = InputRef("bottom")
+
     # Top side: permute bottom to bring even values adjacent, then blend
-    top_template = [
-        InstructionSpec(
-            "_mm256_permute_ps",
-            {"a": "bottom", "imm8": SymbolicPlaceholder("imm_perm_top", 8)},
-        ),
-        InstructionSpec(
-            "_mm256_blend_ps",
-            {
-                "a": "top",
-                "b": "bottom",
-                "imm8": SymbolicPlaceholder("imm_blend_top", 8),
-            },
-        ),
-    ]
+    perm_top = IntrinsicNode(
+        "_mm256_permute_ps",
+        {"a": bottom_input, "imm8": Symbolic("imm_perm_top", 8)},
+    )
+    blend_top = IntrinsicNode(
+        "_mm256_blend_ps",
+        {
+            "a": Mux(
+                select=Symbolic("sel_a_blend_top", 2),
+                sources=(top_input, bottom_input, perm_top),
+                pruning="at_least_one_last",
+            ),
+            "b": Mux(
+                select=Symbolic("sel_b_blend_top", 2),
+                sources=(top_input, bottom_input, perm_top),
+                pruning="at_least_one_last",
+            ),
+            "imm8": Symbolic("imm_blend_top", 8),
+        },
+    )
+
     # Bottom side: permute top to bring odd values adjacent, then blend
-    bottom_template = [
-        InstructionSpec(
-            "_mm256_permute_ps",
-            {"a": "top", "imm8": SymbolicPlaceholder("imm_perm_bot", 8)},
-        ),
-        InstructionSpec(
-            "_mm256_blend_ps",
-            {
-                "a": "top",
-                "b": "bottom",
-                "imm8": SymbolicPlaceholder("imm_blend_bot", 8),
-            },
-        ),
-    ]
+    perm_bot = IntrinsicNode(
+        "_mm256_permute_ps",
+        {"a": top_input, "imm8": Symbolic("imm_perm_bot", 8)},
+    )
+    blend_bot = IntrinsicNode(
+        "_mm256_blend_ps",
+        {
+            "a": Mux(
+                select=Symbolic("sel_a_blend_bot", 2),
+                sources=(top_input, bottom_input, perm_bot),
+                pruning="at_least_one_last",
+            ),
+            "b": Mux(
+                select=Symbolic("sel_b_blend_bot", 2),
+                sources=(top_input, bottom_input, perm_bot),
+                pruning="at_least_one_last",
+            ),
+            "imm8": Symbolic("imm_blend_bot", 8),
+        },
+    )
+
+    graph = GadgetGraph(top=blend_top, bottom=blend_bot)
 
     results, _, _ = synth.synthesize_gadget_with_symbolic(
-        top_instructions_template=top_template,
-        bottom_instructions_template=bottom_template,
-        input_state=input_state,
-        target_pairs=target_pairs,
+        graph,
+        input_state,
+        target_pairs,
         max_solutions=1,
         allow_any_lane_order=False,
     )

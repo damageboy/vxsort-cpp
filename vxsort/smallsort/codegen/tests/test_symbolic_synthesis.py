@@ -4,8 +4,8 @@
 import sys
 
 from utils import vector_machine, primitive_type
-from bitonic_super_optimizer import GadgetSynthesizer, VectorState, InstructionSpec
-from z3 import BitVec
+from bitonic_super_optimizer import GadgetSynthesizer, VectorState
+from bitonic_types import InputRef, Symbolic, IntrinsicNode, GadgetGraph
 
 
 def test_symbolic_synthesis():
@@ -38,8 +38,9 @@ def test_symbolic_synthesis():
     # Try with no instructions (should succeed)
     # Returns (results, construction_time, solver_time)
     # where results is list of (gadget, output_state) tuples
+    graph = GadgetGraph(top=None, bottom=None)
     results, _, _ = synthesizer.synthesize_gadget_with_symbolic(
-        [], [], input_state, target_pairs
+        graph, input_state, target_pairs
     )
 
     print(f"Found {len(results)} gadget(s)")
@@ -75,18 +76,20 @@ def test_symbolic_synthesis():
         (3, 15),
     ]
 
-    inst_template = InstructionSpec(
+    top_ref = InputRef("top")
+    node = IntrinsicNode(
         "_mm256_permute2x128_si256",
-        {"a": "top", "b": "top", "imm8": BitVec("test_imm8_perm2x128", 8)},
+        {"a": top_ref, "b": top_ref, "imm8": Symbolic("test_imm8_perm2x128", 8)},
     )
+    graph2 = GadgetGraph(top=node, bottom=None)
 
     print(f"Target pairs: {target_pairs2}")
-    print(f"Instruction template: {inst_template.intrinsic_name}")
+    print(f"Instruction template: {node.name}")
 
     # Returns (results, construction_time, solver_time)
     # where results is list of (gadget, output_state) tuples
     results2, _, _ = synthesizer.synthesize_gadget_with_symbolic(
-        [inst_template], [], input_state2, target_pairs2
+        graph2, input_state2, target_pairs2
     )
 
     print(f"Found {len(results2)} gadget(s)")
@@ -117,22 +120,24 @@ def test_enumerate_instruction_count():
     synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i32)
 
     # Get single input instructions
-    single_insts = synthesizer._enumerate_single_input_instructions("test")
+    single_insts = synthesizer._enumerate_single_input_intrinsics(InputRef("test"))
     print(f"Single-input instruction templates: {len(single_insts)}")
-    for inst in single_insts:
-        print(f"  - {inst.intrinsic_name}")
+    for n in single_insts:
+        print(f"  - {n.name}")
         # Check if it has symbolic immediate
-        for key, val in inst.args.items():
-            if hasattr(val, "decl"):
+        for key, val in n.operands.items():
+            if isinstance(val, Symbolic):
                 print(f"    Symbolic {key}: {val}")
 
     # Get dual input instructions
-    dual_insts = synthesizer._enumerate_dual_input_instructions("top", "bottom")
+    dual_insts = synthesizer._enumerate_dual_input_intrinsics(
+        InputRef("top"), InputRef("bottom")
+    )
     print(f"\nDual-input instruction templates: {len(dual_insts)}")
-    for inst in dual_insts:
-        print(f"  - {inst.intrinsic_name}")
-        for key, val in inst.args.items():
-            if hasattr(val, "decl"):
+    for n in dual_insts:
+        print(f"  - {n.name}")
+        for key, val in n.operands.items():
+            if isinstance(val, Symbolic):
                 print(f"    Symbolic {key}: {val}")
 
     print("\n✓ Instruction enumeration test passed!")
@@ -170,21 +175,25 @@ def test_multi_solution_enumeration():
 
     target_pairs = [(1, 5), (2, 6), (3, 7), (4, 8)]
 
-    blend_top = InstructionSpec(
+    top_ref = InputRef("top")
+    bottom_ref = InputRef("bottom")
+
+    blend_top = IntrinsicNode(
         "_mm256_blend_pd",
-        {"a": "top", "b": "bottom", "imm8": BitVec("test_blend_top", 8)},
+        {"a": top_ref, "b": bottom_ref, "imm8": Symbolic("test_blend_top", 8)},
     )
-    blend_bottom = InstructionSpec(
+    blend_bottom = IntrinsicNode(
         "_mm256_blend_pd",
-        {"a": "top", "b": "bottom", "imm8": BitVec("test_blend_bot", 8)},
+        {"a": top_ref, "b": bottom_ref, "imm8": Symbolic("test_blend_bot", 8)},
     )
+
+    graph = GadgetGraph(top=blend_top, bottom=blend_bottom)
 
     # Top: blend(top, bottom, sym_top)
     # Bottom: blend(top, bottom, sym_bot)
     # For each lane, exactly one blend selects top and the other selects bottom.
     results, _, _ = synthesizer.synthesize_gadget_with_symbolic(
-        [blend_top],
-        [blend_bottom],
+        graph,
         input_state,
         target_pairs,
         max_solutions=20,

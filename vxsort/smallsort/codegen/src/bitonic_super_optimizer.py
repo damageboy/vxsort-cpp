@@ -11,7 +11,6 @@ try:
     from .utils import vector_machine, primitive_type, width_dict
     from .bitonic_types import (
         VectorState,
-        SymbolicPlaceholder,
         InstructionSpec,
         PermutationGadget,
         SolutionNode,
@@ -29,7 +28,6 @@ except ImportError:
     from utils import vector_machine, primitive_type, width_dict
     from bitonic_types import (  # type: ignore
         VectorState,
-        SymbolicPlaceholder,
         InstructionSpec,
         PermutationGadget,
         SolutionNode,
@@ -45,7 +43,6 @@ except ImportError:
 # Re-export all public names so existing importers keep working.
 __all__ = [
     "VectorState",
-    "SymbolicPlaceholder",
     "InstructionSpec",
     "PermutationGadget",
     "SolutionNode",
@@ -303,7 +300,7 @@ class BitonicSuperVectorizer:
         input_states_with_context: list[tuple[VectorState, tuple]],
         stage_idx: int,
         stage_pairs: list,
-        all_candidates: list[tuple],
+        perm_gadget_candidates: list[tuple],
         max_unique_outputs: int,
     ) -> list[tuple]:
         """Create validation jobs for a set of input states (Phase 1)."""
@@ -323,11 +320,10 @@ class BitonicSuperVectorizer:
             if self.smt2_dump_dir:
                 metadata["smt2_dump_dir"] = self.smt2_dump_dir
 
-            for top_seq, bottom_seq in all_candidates:
+            for graph in perm_gadget_candidates:
                 jobs.append(
                     (
-                        top_seq,
-                        bottom_seq,
+                        graph,
                         input_state,
                         stage_pairs,
                         self.vm,

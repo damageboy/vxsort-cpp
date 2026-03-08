@@ -15,8 +15,14 @@ from bitonic_super_optimizer import (
     GadgetSynthesizer,
     InstructionSpec,
     PermutationGadget,
-    SymbolicPlaceholder,
     VectorState,
+)
+from bitonic_types import (
+    GadgetGraph,
+    InputRef,
+    IntrinsicNode,
+    Mux,
+    Symbolic,
 )
 from functional import seq
 from utils import primitive_type, vector_machine
@@ -133,13 +139,15 @@ def test_instruction_enumeration():
     synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i32)
 
     # Test single input instructions
-    single_insts = synthesizer._enumerate_single_input_instructions("test_reg")
+    single_insts = synthesizer._enumerate_single_input_intrinsics(InputRef("test_reg"))
     print(f"  Single input instructions: {len(single_insts)}")
     for inst in single_insts[:5]:  # Show first 5
         print(f"    - {inst}")
 
     # Test dual input instructions
-    dual_insts = synthesizer._enumerate_dual_input_instructions("reg1", "reg2")
+    dual_insts = synthesizer._enumerate_dual_input_intrinsics(
+        InputRef("reg1"), InputRef("reg2")
+    )
     print(f"  Dual input instructions: {len(dual_insts)}")
     for inst in dual_insts[:5]:  # Show first 5
         print(f"    - {inst}")
@@ -150,42 +158,45 @@ def test_instruction_enumeration():
     print("✓ Instruction enumeration test passed\n")
 
 
-def test_generate_candidate_gadgets_order_and_counts():
-    """Candidate gadget generation keeps legacy ordering/count semantics."""
+def test_generate_candidate_graphs_order_and_counts():
+    """Candidate graph generation produces expected counts and structure."""
     synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i64)
 
     top_depth = 2
     bottom_depth = 1
-    candidates = synthesizer._generate_candidate_gadgets_at_depth(
+    candidates = synthesizer._generate_candidate_graphs_at_depth(
         top_depth, bottom_depth
     )
 
-    top_sequences = []
-    for inst1 in synthesizer.single_input_insts_top:
-        for inst2 in synthesizer.single_input_insts_top:
-            top_sequences.append([inst1, inst2])
-    for inst1 in synthesizer.dual_input_insts_top_bottom:
-        for inst2 in synthesizer.single_input_insts_top:
-            top_sequences.append([inst1, inst2])
-    for inst1 in synthesizer.single_input_insts_top:
-        for inst2 in synthesizer.dual_input_insts_top_bottom:
-            top_sequences.append([inst1, inst2])
-
-    bottom_sequences = [[inst] for inst in synthesizer.single_input_insts_bottom]
-    bottom_sequences.extend(
-        [[inst] for inst in synthesizer.dual_input_insts_top_bottom]
+    # Top depth-2 graphs: (single,single) + (dual,single) + (single,dual)
+    n_single_top = len(synthesizer.single_intrinsics_top)
+    n_dual = len(synthesizer.dual_intrinsics)
+    expected_top_count = (
+        n_single_top * n_single_top  # single → single
+        + n_dual * n_single_top  # dual → single
+        + n_single_top * n_dual  # single → dual
     )
 
-    expected = []
-    for top_seq in top_sequences:
-        for bottom_seq in bottom_sequences:
-            expected.append((top_seq, bottom_seq))
+    # Bottom depth-1 graphs: single + dual
+    n_single_bottom = len(synthesizer.single_intrinsics_bottom)
+    expected_bottom_count = n_single_bottom + n_dual
 
-    assert candidates == expected
-    assert synthesizer._generate_candidate_gadgets_at_depth(0, 0) == [([], [])]
-    assert synthesizer._generate_candidate_gadgets_at_depth(-1, 1) == [
-        ([], bottom_seq) for bottom_seq in bottom_sequences
-    ]
+    expected_total = expected_top_count * expected_bottom_count
+    assert (
+        len(candidates) == expected_total
+    ), f"Expected {expected_total} candidates, got {len(candidates)}"
+
+    # All candidates should be GadgetGraph instances
+    for g in candidates:
+        assert isinstance(g, GadgetGraph)
+        assert isinstance(g.top, IntrinsicNode)  # depth-2 top is never None
+        assert isinstance(g.bottom, IntrinsicNode)  # depth-1 bottom is never None
+
+    # Depth (0, 0) should produce a single identity graph
+    identity_candidates = synthesizer._generate_candidate_graphs_at_depth(0, 0)
+    assert len(identity_candidates) == 1
+    assert identity_candidates[0].top is None
+    assert identity_candidates[0].bottom is None
 
 
 def test_output_state_computation():
@@ -281,9 +292,9 @@ def test_natural_order_identity():
     target_pairs = [(i + 1, n + i + 1) for i in range(n)]
 
     # Empty gadget (0 instructions) should satisfy strict constraints
+    graph = GadgetGraph(top=None, bottom=None)
     results, _, _ = synthesizer.synthesize_gadget_with_symbolic(
-        top_instructions_template=[],
-        bottom_instructions_template=[],
+        graph,
         input_state=input_state,
         target_pairs=target_pairs,
         allow_any_lane_order=False,
@@ -309,25 +320,19 @@ def test_natural_order_strict_constraints():
     input_state = VectorState(top=[3, 1, 4, 2], bottom=[7, 5, 8, 6])
     target_pairs = [(i + 1, n + i + 1) for i in range(n)]
 
-    # Build InstructionSpec templates with symbolic placeholders
-    from bitonic_super_optimizer import InstructionSpec, SymbolicPlaceholder
-
-    top_template = [
-        InstructionSpec(
-            "_mm256_permutexvar_epi64",
-            {"a": "top", "op_idx": SymbolicPlaceholder("ctrl_top", 256)},
-        )
-    ]
-    bottom_template = [
-        InstructionSpec(
-            "_mm256_permutexvar_epi64",
-            {"a": "bottom", "op_idx": SymbolicPlaceholder("ctrl_bottom", 256)},
-        )
-    ]
+    # Build graph with IntrinsicNode templates and Symbolic immediates
+    top_node = IntrinsicNode(
+        "_mm256_permutexvar_epi64",
+        {"a": InputRef("top"), "op_idx": Symbolic("ctrl_top", 256)},
+    )
+    bottom_node = IntrinsicNode(
+        "_mm256_permutexvar_epi64",
+        {"a": InputRef("bottom"), "op_idx": Symbolic("ctrl_bottom", 256)},
+    )
+    graph = GadgetGraph(top=top_node, bottom=bottom_node)
 
     results, _, _ = synthesizer.synthesize_gadget_with_symbolic(
-        top_instructions_template=top_template,
-        bottom_instructions_template=bottom_template,
+        graph,
         input_state=input_state,
         target_pairs=target_pairs,
         max_solutions=1,
@@ -397,24 +402,18 @@ def test_natural_order_integration():
     scrambled_input = VectorState(top=[3, 1, 4, 2], bottom=[7, 5, 8, 6])
     synthesizer = super_opt.synthesizer
 
-    from bitonic_super_optimizer import InstructionSpec, SymbolicPlaceholder
-
-    top_template = [
-        InstructionSpec(
-            "_mm256_permutexvar_epi64",
-            {"a": "top", "op_idx": SymbolicPlaceholder("ctrl_top", 256)},
-        )
-    ]
-    bottom_template = [
-        InstructionSpec(
-            "_mm256_permutexvar_epi64",
-            {"a": "bottom", "op_idx": SymbolicPlaceholder("ctrl_bottom", 256)},
-        )
-    ]
+    top_node = IntrinsicNode(
+        "_mm256_permutexvar_epi64",
+        {"a": InputRef("top"), "op_idx": Symbolic("ctrl_top", 256)},
+    )
+    bottom_node = IntrinsicNode(
+        "_mm256_permutexvar_epi64",
+        {"a": InputRef("bottom"), "op_idx": Symbolic("ctrl_bottom", 256)},
+    )
+    graph = GadgetGraph(top=top_node, bottom=bottom_node)
 
     results, _, _ = synthesizer.synthesize_gadget_with_symbolic(
-        top_instructions_template=top_template,
-        bottom_instructions_template=bottom_template,
+        graph,
         input_state=scrambled_input,
         target_pairs=expected_pairs,
         max_solutions=1,
@@ -441,16 +440,15 @@ def test_natural_order_integration():
 
 
 def test_mux_encoding_chains_instructions():
-    """Test that the multiplexer-based operand selection in 2-instruction gadgets works.
+    """Test that depth-2 single→single gadgets hardwire the chain correctly.
 
-    Creates a 2-instruction template [permute_ps, permute_ps] on the top side
-    with an empty bottom sequence. For the second instruction, the synthesizer
-    creates a Z3 select variable that chooses between {top, bottom, prev}. After
-    synthesis, the select variable is resolved to a source name string stored in
-    InstructionSpec.args.
+    Creates a 2-instruction graph [permute_ps → permute_ps] on the top side
+    with an identity bottom. The second instruction's register operand is
+    hardwired to the first instruction's output (no mux — selecting top/bottom
+    would degenerate to depth-1).
 
-    We verify that at least one result has inst2 with args["a"] == "prev",
-    proving the mux actually selected the chained output from inst1.
+    We verify that all results have inst2 with args["a"] == "prev",
+    proving the hardwired chain from inst1.
     """
     synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i32)
     n = synthesizer.elements_per_vector  # 8 for AVX2 i32
@@ -467,32 +465,27 @@ def test_mux_encoding_chains_instructions():
         bottom=[p[1] for p in target_pairs],
     )
 
-    # Build a 2-instruction template: [permute_ps, permute_ps] for top side.
+    # Build a depth-2 graph: permute_ps → permute_ps for top side (hardwired).
     # The first instruction operates on "top" directly.
-    # The second instruction is single-input at inst_idx=1 in a 2-instruction
-    # sequence, so its "a" operand is hardwired to the previous result (no
-    # mux variable created — selecting top/bottom would degenerate to depth-1).
-    top_template = [
-        InstructionSpec(
-            "_mm256_permute_ps",
-            {
-                "a": "top",
-                "imm8": SymbolicPlaceholder("imm8_permute_ps_inst1", 8),
-            },
-        ),
-        InstructionSpec(
-            "_mm256_permute_ps",
-            {
-                "a": "top",
-                "imm8": SymbolicPlaceholder("imm8_permute_ps_inst2", 8),
-            },
-        ),
-    ]
-    bottom_template = []
+    # The second instruction's "a" operand is hardwired to inst1's output.
+    inst1_node = IntrinsicNode(
+        "_mm256_permute_ps",
+        {
+            "a": InputRef("top"),
+            "imm8": Symbolic("imm8_permute_ps_inst1", 8),
+        },
+    )
+    inst2_node = IntrinsicNode(
+        "_mm256_permute_ps",
+        {
+            "a": inst1_node,
+            "imm8": Symbolic("imm8_permute_ps_inst2", 8),
+        },
+    )
+    graph = GadgetGraph(top=inst2_node, bottom=None)
 
     results, _, _ = synthesizer.synthesize_gadget_with_symbolic(
-        top_instructions_template=top_template,
-        bottom_instructions_template=bottom_template,
+        graph,
         input_state=input_state,
         target_pairs=target_pairs,
         max_solutions=1,
@@ -514,12 +507,12 @@ def test_mux_encoding_chains_instructions():
 
 
 def test_single_dual_template_combination():
-    """Test shape E: (single, dual) 2-instruction template with constrained mux.
+    """Test shape E: (single, dual) 2-instruction graph with constrained mux.
 
     Creates a depth-2 gadget with a single-input instruction (permute_ps)
     followed by a dual-input instruction (shuffle_ps). The mux encoding
     lets Z3 decide whether inst2's "a" and "b" operands read from top,
-    bottom, or prev (the output of inst1), but at least one must use prev
+    bottom, or inst1's output, but at least one must use inst1's output
     to avoid degenerating to a depth-1 gadget.
     """
     synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i32)
@@ -533,36 +526,52 @@ def test_single_dual_template_combination():
         bottom=[p[1] for p in target_pairs],
     )
 
-    inst1 = InstructionSpec(
+    top_ref = InputRef("top")
+    bottom_ref = InputRef("bottom")
+
+    # First instruction: single-input permute on top
+    inst1_node = IntrinsicNode(
         "_mm256_permute_ps",
         {
-            "a": "top",
-            "imm8": SymbolicPlaceholder("imm8_permute_ps_sd_test", 8),
+            "a": top_ref,
+            "imm8": Symbolic("imm8_permute_ps_sd_test", 8),
         },
     )
-    inst2 = InstructionSpec(
+
+    # Second instruction: dual-input shuffle with muxed operands
+    # Mux over {top, bottom, inst1_node} with at_least_one_last pruning
+    mux_a = Mux(
+        select=Symbolic("sel_a_shuffle_ps_sd_test", 2),
+        sources=(top_ref, bottom_ref, inst1_node),
+        pruning="at_least_one_last",
+    )
+    mux_b = Mux(
+        select=Symbolic("sel_b_shuffle_ps_sd_test", 2),
+        sources=(top_ref, bottom_ref, inst1_node),
+        pruning="at_least_one_last",
+    )
+    inst2_node = IntrinsicNode(
         "_mm256_shuffle_ps",
         {
-            "a": "top",
-            "b": "bottom",
-            "imm8": SymbolicPlaceholder("imm8_shuffle_ps_sd_test", 8),
+            "a": mux_a,
+            "b": mux_b,
+            "imm8": Symbolic("imm8_shuffle_ps_sd_test", 8),
         },
     )
 
-    top_template = [inst1, inst2]
-    bottom_template = [
-        InstructionSpec(
-            "_mm256_permute_ps",
-            {
-                "a": "bottom",
-                "imm8": SymbolicPlaceholder("imm8_permute_ps_sd_bottom", 8),
-            },
-        )
-    ]
+    # Bottom: single-input permute on bottom
+    bottom_node = IntrinsicNode(
+        "_mm256_permute_ps",
+        {
+            "a": bottom_ref,
+            "imm8": Symbolic("imm8_permute_ps_sd_bottom", 8),
+        },
+    )
+
+    graph = GadgetGraph(top=inst2_node, bottom=bottom_node)
 
     results, _, _ = synthesizer.synthesize_gadget_with_symbolic(
-        top_instructions_template=top_template,
-        bottom_instructions_template=bottom_template,
+        graph,
         input_state=input_state,
         target_pairs=target_pairs,
         max_solutions=1,
@@ -661,8 +670,10 @@ def test_avx512_i32_synthesis_depth1():
     # Verify intrinsics are registered
     assert len(super_opt.synthesizer.available_intrinsics) > 0
     # Verify single and dual templates enumerate without error
-    single = super_opt.synthesizer._enumerate_single_input_instructions("test")
-    dual = super_opt.synthesizer._enumerate_dual_input_instructions("top", "bottom")
+    single = super_opt.synthesizer._enumerate_single_input_intrinsics(InputRef("test"))
+    dual = super_opt.synthesizer._enumerate_dual_input_intrinsics(
+        InputRef("top"), InputRef("bottom")
+    )
     assert len(single) == 6, f"Expected 6 single-input templates, got {len(single)}"
     assert len(dual) == 12, f"Expected 12 dual-input templates, got {len(dual)}"
     print(f"AVX512 i32: {len(single)} single + {len(dual)} dual templates registered")
@@ -765,11 +776,11 @@ def test_pair_swap_across_stages():
 
 
 def test_expanded_mux_discovers_result_0_reference():
-    """Test that the expanded mux allows inst2 to reference result_0 (not just prev).
+    """Test that the expanded mux allows inst3 to reference result_0 (not just prev).
 
-    Creates a 3-instruction template [permutexvar, permute_pd, shuffle_pd] on the
-    top side. For the 3rd instruction (inst_idx=2), the mux offers {top, bottom,
-    result_0, result_1}. If Z3 discovers a solution where inst3 references result_0,
+    Creates a 3-instruction graph [permutexvar, permutexvar, shuffle_pd] on the
+    top side. For the 3rd instruction, the mux offers {top, bottom, inst1, inst2}.
+    If Z3 discovers a solution where inst3 references inst1 (result_0),
     the extracted gadget will contain "result_0" in its args.
     """
     synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i64)
@@ -783,32 +794,46 @@ def test_expanded_mux_discovers_result_0_reference():
         bottom=[p[1] for p in target_pairs],
     )
 
-    # 3-instruction template: [permutexvar, permutexvar, shuffle_pd]
-    # inst3 (shuffle_pd) takes two register operands "a" and "b".
-    # With expanded mux, Z3 can choose result_0 or result_1 for either operand.
-    top_template = [
-        InstructionSpec(
-            "_mm256_permutexvar_epi64",
-            {"a": "top", "op_idx": SymbolicPlaceholder("ctrl_inst1", 256)},
-        ),
-        InstructionSpec(
-            "_mm256_permutexvar_epi64",
-            {"a": "top", "op_idx": SymbolicPlaceholder("ctrl_inst2", 256)},
-        ),
-        InstructionSpec(
-            "_mm256_shuffle_pd",
-            {
-                "a": "top",
-                "b": "bottom",
-                "imm8": SymbolicPlaceholder("imm8_inst3", 8),
-            },
-        ),
-    ]
-    bottom_template = []
+    top_ref = InputRef("top")
+    bottom_ref = InputRef("bottom")
+
+    # 3-instruction graph: [permutexvar, permutexvar, shuffle_pd]
+    # inst1 and inst2 operate on "top" directly.
+    # inst3 (shuffle_pd) gets muxed operands that can choose from
+    # {top, bottom, inst1, inst2}.
+    inst1_node = IntrinsicNode(
+        "_mm256_permutexvar_epi64",
+        {"a": top_ref, "op_idx": Symbolic("ctrl_inst1", 256)},
+    )
+    inst2_node = IntrinsicNode(
+        "_mm256_permutexvar_epi64",
+        {"a": top_ref, "op_idx": Symbolic("ctrl_inst2", 256)},
+    )
+
+    # Muxes for inst3's register operands: {top, bottom, inst1, inst2}
+    mux_a = Mux(
+        select=Symbolic("sel_a_shuffle_pd_inst3", 2),
+        sources=(top_ref, bottom_ref, inst1_node, inst2_node),
+        pruning="at_least_one_last",
+    )
+    mux_b = Mux(
+        select=Symbolic("sel_b_shuffle_pd_inst3", 2),
+        sources=(top_ref, bottom_ref, inst1_node, inst2_node),
+        pruning="at_least_one_last",
+    )
+    inst3_node = IntrinsicNode(
+        "_mm256_shuffle_pd",
+        {
+            "a": mux_a,
+            "b": mux_b,
+            "imm8": Symbolic("imm8_inst3", 8),
+        },
+    )
+
+    graph = GadgetGraph(top=inst3_node, bottom=None)
 
     results, _, _ = synthesizer.synthesize_gadget_with_symbolic(
-        top_instructions_template=top_template,
-        bottom_instructions_template=bottom_template,
+        graph,
         input_state=input_state,
         target_pairs=target_pairs,
         max_solutions=1,
@@ -927,12 +952,12 @@ def test_intrinsic_filter_restricts_enumeration():
     )
 
     all_names = set()
-    for inst in synth.single_input_insts_top:
-        all_names.add(inst.intrinsic_name)
-    for inst in synth.single_input_insts_bottom:
-        all_names.add(inst.intrinsic_name)
-    for inst in synth.dual_input_insts_top_bottom:
-        all_names.add(inst.intrinsic_name)
+    for inst in synth.single_intrinsics_top:
+        all_names.add(inst.name)
+    for inst in synth.single_intrinsics_bottom:
+        all_names.add(inst.name)
+    for inst in synth.dual_intrinsics:
+        all_names.add(inst.name)
 
     assert all_names == only_two, f"Expected only {only_two}, got {all_names}"
 

@@ -6,7 +6,6 @@ available intrinsics registry, and the parallel validation worker.
 
 from __future__ import annotations
 
-import copy
 import io
 import os
 import tarfile
@@ -35,18 +34,26 @@ try:
     from .utils import vector_machine, primitive_type, width_dict
     from .bitonic_types import (
         VectorState,
-        SymbolicPlaceholder,
         InstructionSpec,
         PermutationGadget,
+        InputRef,
+        Symbolic,
+        Mux,
+        IntrinsicNode,
+        GadgetGraph,
     )
 except ImportError:
     import z3_avx  # type: ignore
     from utils import vector_machine, primitive_type, width_dict
     from bitonic_types import (  # type: ignore
         VectorState,
-        SymbolicPlaceholder,
         InstructionSpec,
         PermutationGadget,
+        InputRef,
+        Symbolic,
+        Mux,
+        IntrinsicNode,
+        GadgetGraph,
     )
 
 
@@ -357,66 +364,68 @@ flowchart TD
     subgraph INIT["Initialization (once per GadgetSynthesizer)"]
         direction TB
         avx["get_available_intrinsics(vm, prim_type)"]
-        avx --> single["_enumerate_single_input_instructions<br/>e.g. permute_ps(a, imm8)"]
-        avx --> dual["_enumerate_dual_input_instructions<br/>e.g. shuffle_ps(a, b, imm8)"]
-        single --> templates["Instruction templates<br/>(with SymbolicPlaceholder immediates)"]
-        dual --> templates
+        avx --> single["_enumerate_single_input_intrinsics<br/>→ list[IntrinsicNode]"]
+        avx --> dual["_enumerate_dual_input_intrinsics<br/>→ list[IntrinsicNode]"]
     end
 
     subgraph CANDIDATES["Candidate Enumeration (precompute_all_candidates)"]
         direction TB
-        templates2["templates"] --> build["_build_instruction_sequences(depth)"]
-        build --> d0["depth 0: identity"]
-        build --> d1["depth 1: single inst"]
-        build --> d2["depth 2: inst pairs<br/>(single,single) (dual,single) (single,dual)"]
-        d0 --> combine["_generate_candidate_gadgets_at_depth<br/>cartesian product: top_seq × bottom_seq"]
+        intrinsics["IntrinsicNode templates"] --> build["_build_gadget_graphs(depth)"]
+        build --> d0["depth 0: identity (None)"]
+        build --> d1["depth 1: single IntrinsicNode"]
+        build --> d2["depth 2: _wire_hardwired or<br/>_wire_with_muxes<br/>(explicit Mux nodes in graph)"]
+        d0 --> combine["_generate_candidate_graphs_at_depth<br/>cartesian product → list[GadgetGraph]"]
         d1 --> combine
         d2 --> combine
-    end
-
-    subgraph SYNTH["synthesize_gadget_with_symbolic (per job)"]
-        direction TB
-        create_in["_create_input_registers<br/>concrete element values"]
-        resolve["_resolve_symbolic_instruction_args<br/>SymbolicPlaceholder → Z3 BitVec"]
-        create_in --> apply
-        resolve --> apply["_apply_instructions (top + bottom sides)"]
-
-        subgraph APPLY["_apply_instructions"]
-            direction TB
-            inst0["inst0: resolve args via<br/>_substitute_register_names"]
-            inst0 --> inst1["inst1+: register args get<br/>_create_operand_mux<br/>(Z3 If-chain over top/bottom/result_0)"]
-            inst1 --> prune["_prune_depth2_mux<br/>(for 2-inst sequences only)"]
-            prune --> prune_s["1 mux var: force to result_0"]
-            prune --> prune_d["2 mux vars: Or(a≥result_0, b≥result_0)"]
-        end
-
-        apply --> constrain["_constrain_output_lanes_to_target_pairs<br/>+ Distinct"]
-        constrain --> kpw["K-per-wiring algorithm<br/>(Optimize with minimize)"]
-        kpw -->|sat| extract["_extract_solution_from_model<br/>model → concrete imm8/cv values<br/>mux select → 'prev'/'top'/'bottom'"]
-        kpw -->|unsat| discard["discard candidate"]
-        extract --> gadget["PermutationGadget + VectorState"]
-    end
-
-    subgraph PARALLEL["Parallel Validation (pipelined via apply_async)"]
-        direction TB
-        pool["multiprocessing.Pool"]
-        pool --> workers["_validate_gadget_worker × N<br/>(each calls synthesize_gadget_with_symbolic)"]
-        workers --> collect["collect validated gadgets"]
     end
 
     subgraph TREE["Solution Tree (build_solution_tree)"]
         direction TB
         stages["for each bitonic sort stage"]
         stages --> input_states["for each unique input VectorState"]
-        input_states --> jobs["create jobs: candidate × input_state"]
-        jobs --> validate["apply_async → _validate_gadget_worker"]
-        validate --> nodes["build SolutionNode DAG<br/>(parent → children across stages)"]
+        input_states --> jobs["create jobs: GadgetGraph × input_state"]
+        jobs --> dispatch["apply_async → multiprocessing.Pool"]
+        dispatch --> collect["collect validated gadgets<br/>via completion_queue"]
+        collect --> nodes["build SolutionNode DAG<br/>(parent → children across stages)"]
+    end
+
+    subgraph WORKER["_validate_gadget_worker (per subprocess)"]
+        direction TB
+        synth_create["GadgetSynthesizer(vm, prim_type)"]
+
+        subgraph SYNTH["synthesize_gadget_with_symbolic"]
+            direction TB
+            create_in["_create_input_registers<br/>concrete element values"]
+
+            subgraph EVAL["_evaluate (recursive graph walk)"]
+                direction TB
+                input_ref["InputRef → registers dict"]
+                symbolic["Symbolic → BitVec (created on first visit)"]
+                mux_node["Mux → If-chain + range constraint<br/>pruning applied by parent IntrinsicNode"]
+                intr_node["IntrinsicNode → dispatch intrinsic(args)<br/>+ _apply_mux_pruning for Mux children"]
+            end
+
+            create_in --> EVAL
+            EVAL --> constrain["_constrain_output_lanes_to_target_pairs<br/>+ Distinct"]
+            constrain --> kpw["K-per-wiring algorithm<br/>(Optimize with minimize)"]
+            kpw -->|sat| extract["_extract_solution_from_graph<br/>_concretize_graph → list[InstructionSpec]<br/>mux select → 'prev'/'top'/'bottom'"]
+            kpw -->|unsat| discard["discard candidate"]
+            extract --> gadget["PermutationGadget + VectorState"]
+        end
+
+        synth_create --> SYNTH
     end
 
     INIT --> CANDIDATES
-    CANDIDATES --> SYNTH
-    SYNTH --> PARALLEL
-    PARALLEL --> TREE
+    CANDIDATES --> TREE
+    TREE --> WORKER
+
+    style INIT fill:#e8f0fe,stroke:#4285f4
+    style CANDIDATES fill:#e8f0fe,stroke:#4285f4
+    style TREE fill:#e8f0fe,stroke:#4285f4
+    style WORKER fill:#fef7e0,stroke:#f9ab00
+    style SYNTH fill:#fef7e0,stroke:#f9ab00
+    style EVAL fill:#fef7e0,stroke:#f9ab00
 """
 
 
@@ -447,22 +456,26 @@ class GadgetSynthesizer:
                 if k in intrinsic_filter
             }
 
-        # Memoize instruction templates - these are reused across all gadget generation
+        # Memoize graph-based instruction templates
         allowed = set(self.available_intrinsics)
-        self.single_input_insts_top = [
-            i
-            for i in self._enumerate_single_input_instructions("top")
-            if i.intrinsic_name in allowed
+        self._top_ref = InputRef("top")
+        self._bottom_ref = InputRef("bottom")
+        self.single_intrinsics_top = [
+            n
+            for n in self._enumerate_single_input_intrinsics(self._top_ref)
+            if n.name in allowed
         ]
-        self.single_input_insts_bottom = [
-            i
-            for i in self._enumerate_single_input_instructions("bottom")
-            if i.intrinsic_name in allowed
+        self.single_intrinsics_bottom = [
+            n
+            for n in self._enumerate_single_input_intrinsics(self._bottom_ref)
+            if n.name in allowed
         ]
-        self.dual_input_insts_top_bottom = [
-            i
-            for i in self._enumerate_dual_input_instructions("top", "bottom")
-            if i.intrinsic_name in allowed
+        self.dual_intrinsics = [
+            n
+            for n in self._enumerate_dual_input_intrinsics(
+                self._top_ref, self._bottom_ref
+            )
+            if n.name in allowed
         ]
 
     def _create_input_registers(
@@ -502,34 +515,6 @@ class GadgetSynthesizer:
             solver.add(bottom_lane == BitVecVal(bottom_elem, self.lane_width, ctx=ctx))
 
         return top_reg, bottom_reg
-
-    def _resolve_symbolic_instruction_args(
-        self,
-        instructions: list[InstructionSpec],
-        ctx: Context,
-        symbolic_vars: dict,
-    ) -> None:
-        """Resolve placeholders to concrete Z3 terms and track symbolic args."""
-        # SymbolicPlaceholder is used to communicate with multiprocessing.
-        # In tests, Z3 expressions may be passed directly.
-        for inst in instructions:
-            for key, value in inst.args.items():
-                if isinstance(value, SymbolicPlaceholder):
-                    if value.size == 8:
-                        actual_val = BitVec(value.name, 8, ctx=ctx)
-                    elif value.size == 16:
-                        actual_val = BitVec(value.name, 16, ctx=ctx)
-                    elif value.size == 256:
-                        actual_val = z3_avx.ymm_reg(value.name, ctx=ctx)
-                    elif value.size == 512:
-                        actual_val = z3_avx.zmm_reg(value.name, ctx=ctx)
-                    else:
-                        actual_val = BitVec(value.name, value.size, ctx=ctx)
-
-                    inst.args[key] = actual_val
-                    symbolic_vars[id(actual_val)] = actual_val
-                elif hasattr(value, "decl") and callable(getattr(value, "decl", None)):
-                    symbolic_vars[id(value)] = value
 
     def _constrain_output_lanes_to_target_pairs(
         self,
@@ -584,8 +569,7 @@ class GadgetSynthesizer:
 
     def synthesize_gadget_with_symbolic(
         self,
-        top_instructions_template: list[InstructionSpec],
-        bottom_instructions_template: list[InstructionSpec],
+        graph: GadgetGraph,
         input_state: VectorState,
         target_pairs: list[tuple[int, int]],
         max_solutions: int = 1,
@@ -593,34 +577,23 @@ class GadgetSynthesizer:
         solver_callback: callable | None = None,
         allow_any_lane_order: bool = True,
     ) -> tuple[list[tuple[PermutationGadget, VectorState]], float, float]:
-        """
-        Synthesize gadgets using symbolic immediates in Z3.
+        """Synthesize gadgets from a data-flow graph using Z3.
 
-        Takes instruction templates with symbolic values (e.g., BitVec("imm8", 8))
-        and lets Z3 find concrete immediate values that satisfy constraints.
-
-        The symbolic values are represented using SymbolicPlaceholder for pickling.
-        The pickling is required for multiprocessing.
+        Evaluates the graph to build Z3 expressions, then solves for
+        symbolic variable assignments that satisfy the target permutation.
 
         Returns (results, construction_time, solver_time) where results is
-        list of (gadget, output_state) tuples. The output state is computed
-        directly from the satisfying model, avoiding a redundant Z3 solve. The output
-        state is in canonical form: for each pair, the lower element index goes to
-        the top vector and the higher index goes to bottom, reflecting the
-        compare-and-exchange operation.
+        list of (gadget, output_state) tuples.
 
         Args:
+            graph: Data-flow graph with symbolic immediates and optional muxes.
             max_solutions: Maximum number of solutions to return. Defaults to 1,
                 which enumerates unique output states deterministically.
-                Values > 1 use Z3 Solver with enumeration (non-deterministic ordering).
             max_unique_outputs: When max_solutions == 1, the number of smallest
-                unique output states to enumerate per template. Higher values
-                increase search diversity at the cost of speed. Default: 3.
+                unique output states to enumerate per template. Default: 3.
             solver_callback: Optional callback receiving the Solver instance.
             allow_any_lane_order: When True (default), any target pair can land
-                in any lane and the output state is canonicalized (min to top,
-                max to bottom). When False, pair[i] is pinned to lane i with
-                strict top/bottom assignment and no canonicalization.
+                in any lane and the output state is canonicalized.
         """
         start_construction = time.perf_counter()
         ctx = main_ctx()
@@ -628,38 +601,28 @@ class GadgetSynthesizer:
 
         # Create input registers with actual element values
         top_reg, bottom_reg = self._create_input_registers(solver, ctx, input_state)
+        registers = {"top": top_reg, "bottom": bottom_reg}
 
-        # Collect all symbolic variables from instruction templates and resolve them
+        # Evaluate the graph to build Z3 expressions
         symbolic_vars = {}
-        self._resolve_symbolic_instruction_args(
-            top_instructions_template, ctx, symbolic_vars
+        mux_constraints = []
+        eval_cache = {}
+
+        top_output = self._evaluate(
+            graph.top, registers, ctx, symbolic_vars, mux_constraints, eval_cache
         )
-        self._resolve_symbolic_instruction_args(
-            bottom_instructions_template, ctx, symbolic_vars
+        bottom_output = self._evaluate(
+            graph.bottom, registers, ctx, symbolic_vars, mux_constraints, eval_cache
         )
 
-        # Apply gadget instructions to get output registers
-        top_output, top_mux_constraints = self._apply_instructions(
-            top_reg,
-            bottom_reg,
-            top_instructions_template,
-            is_top=True,
-            solver=solver,
-            symbolic_vars=symbolic_vars,
-        )
-        bottom_output, bottom_mux_constraints = self._apply_instructions(
-            top_reg,
-            bottom_reg,
-            bottom_instructions_template,
-            is_top=False,
-            solver=solver,
-            symbolic_vars=symbolic_vars,
-        )
+        # Identity side: pass through the input register
+        if top_output is None:
+            top_output = top_reg
+        if bottom_output is None:
+            bottom_output = bottom_reg
 
-        # Add mux range constraints (select vars must be in {0, 1, 2})
-        for c in top_mux_constraints:
-            solver.add(c)
-        for c in bottom_mux_constraints:
+        # Add mux constraints
+        for c in mux_constraints:
             solver.add(c)
 
         all_output_lanes = self._constrain_output_lanes_to_target_pairs(
@@ -671,25 +634,17 @@ class GadgetSynthesizer:
             allow_any_lane_order,
         )
 
-        # All output elements must be distinct — prevents element duplication
-        # where an instruction copies the same element to both top and bottom.
         solver.add(Distinct(*all_output_lanes))
 
         if solver_callback:
             solver_callback(solver)
 
-        # When strict lane order, the output state is deterministic from pairs
         fixed_output_state = self._fixed_output_state_from_target_pairs(
             target_pairs, allow_any_lane_order
         )
 
-        # Partition symbolic vars: select variables (mux wiring) vs
-        # immediate/control vector variables
-        select_vars = {
-            k: v
-            for k, v in symbolic_vars.items()
-            if isinstance(k, str) and k.startswith("sel_")
-        }
+        # Partition symbolic vars: select variables vs immediate variables
+        select_vars = {k: v for k, v in symbolic_vars.items() if k.startswith("sel_")}
         imm_vars = {k: v for k, v in symbolic_vars.items() if k not in select_vars}
         imm_terms = list(imm_vars.values())
 
@@ -703,13 +658,12 @@ class GadgetSynthesizer:
                 solver_time = time.perf_counter() - solver_start
                 return [], construction_time, solver_time
             model = solver.model()
-            gadget, output_state = self._extract_solution_from_model(
+            gadget, output_state = self._extract_solution_from_graph(
                 model,
                 top_output,
                 bottom_output,
+                graph,
                 symbolic_vars,
-                top_instructions_template,
-                bottom_instructions_template,
                 fixed_output_state=fixed_output_state,
             )
             solver_time = time.perf_counter() - solver_start
@@ -717,52 +671,33 @@ class GadgetSynthesizer:
 
         if max_solutions == 1:
             # K-per-wiring algorithm: deterministic synthesis with diversity.
-            #
-            # Outer loop: discover unique operand wirings (which source each
-            # inst2 operand reads from: top, bottom, or prev). The wiring
-            # space is small (at most 3^num_select_vars) and many wirings
-            # are UNSAT, so this terminates quickly.
-            #
-            # Inner loop: for each valid wiring, find the K smallest unique
-            # output states using Optimize.minimize with output-blocking.
-            # For each unique output, pin the output + wiring and minimize
-            # immediates for a deterministic gadget.
-            #
-            # For depth-1 templates (no select vars), the outer loop runs
-            # once and the inner loop behaves identically to the previous
-            # K-smallest algorithm — fully backward compatible.
             original_assertions = list(solver.assertions())
             results = []
             wiring_blocks = []
 
-            # Outer loop: discover unique wirings
             while True:
                 opt_wiring = Optimize(ctx=ctx)
                 for a in original_assertions:
                     opt_wiring.add(a)
                 for block in wiring_blocks:
                     opt_wiring.add(block)
-                # Minimize output to get a deterministic first hit
                 opt_wiring.minimize(top_output)
                 opt_wiring.minimize(bottom_output)
 
                 if opt_wiring.check() != sat:
-                    break  # No more valid wirings
+                    break
 
                 model = opt_wiring.model()
 
-                # Extract the wiring from the model
                 wiring = {}
                 for name, var in select_vars.items():
                     wiring[name] = model.evaluate(var, model_completion=True).as_long()
 
-                # Pin this wiring for the inner loop
                 wiring_constraints = [
                     var == BitVecVal(wiring[name], var.size())
                     for name, var in select_vars.items()
                 ]
 
-                # Inner loop: K smallest unique outputs for this wiring
                 output_blocks = []
                 for _ in range(max_unique_outputs):
                     opt_k = Optimize(ctx=ctx)
@@ -782,7 +717,6 @@ class GadgetSynthesizer:
                     top_val = simplify(model_k.eval(top_output))
                     bot_val = simplify(model_k.eval(bottom_output))
 
-                    # Pin output + wiring, minimize immediates only
                     opt_imm = Optimize(ctx=ctx)
                     for a in original_assertions:
                         opt_imm.add(a)
@@ -794,23 +728,20 @@ class GadgetSynthesizer:
                         opt_imm.minimize(term)
 
                     if opt_imm.check() == sat:
-                        gadget, output_state = self._extract_solution_from_model(
+                        gadget, output_state = self._extract_solution_from_graph(
                             opt_imm.model(),
                             top_output,
                             bottom_output,
+                            graph,
                             symbolic_vars,
-                            top_instructions_template,
-                            bottom_instructions_template,
                             fixed_output_state=fixed_output_state,
                         )
                         results.append((gadget, output_state))
 
-                    # Block this output for the next inner iteration
                     output_blocks.append(
                         Or(top_output != top_val, bottom_output != bot_val)
                     )
 
-                # Block this entire wiring for the next outer iteration
                 if select_vars:
                     wiring_blocks.append(
                         Or(
@@ -821,10 +752,8 @@ class GadgetSynthesizer:
                         )
                     )
                 else:
-                    # No select vars (depth-1): only run outer loop once
                     break
 
-            # Sort by output state for deterministic ordering
             results.sort(key=lambda x: x[1].as_tuple())
             solver_time = time.perf_counter() - solver_start
             return results, construction_time, solver_time
@@ -833,44 +762,150 @@ class GadgetSynthesizer:
         all_terms = list(symbolic_vars.values())
         results = []
         for model in _all_smt(solver, all_terms, max_results=max_solutions):
-            gadget, output_state = self._extract_solution_from_model(
+            gadget, output_state = self._extract_solution_from_graph(
                 model,
                 top_output,
                 bottom_output,
+                graph,
                 symbolic_vars,
-                top_instructions_template,
-                bottom_instructions_template,
                 fixed_output_state=fixed_output_state,
             )
             results.append((gadget, output_state))
         solver_time = time.perf_counter() - solver_start
         return results, construction_time, solver_time
 
-    def _extract_solution_from_model(
+    def _evaluate(
+        self,
+        node: InputRef | Symbolic | Mux | IntrinsicNode | None,
+        registers: dict,
+        ctx: Context,
+        symbolic_vars: dict,
+        mux_constraints: list,
+        cache: dict,
+    ):
+        """Recursively evaluate a graph node to a Z3 expression.
+
+        Memoizes by ``id(node)`` to avoid redundant evaluation when the same
+        node is referenced by multiple parents (e.g. ``InputRef("top")``
+        shared across operands).
+        """
+        if node is None:
+            return None
+
+        nid = id(node)
+        if nid in cache:
+            return cache[nid]
+
+        if isinstance(node, InputRef):
+            result = registers[node.name]
+
+        elif isinstance(node, Symbolic):
+            if node.name in symbolic_vars:
+                result = symbolic_vars[node.name]
+            else:
+                if node.bit_width == 256:
+                    result = z3_avx.ymm_reg(node.name, ctx=ctx)
+                elif node.bit_width == 512:
+                    result = z3_avx.zmm_reg(node.name, ctx=ctx)
+                else:
+                    result = BitVec(node.name, node.bit_width, ctx=ctx)
+                symbolic_vars[node.name] = result
+
+        elif isinstance(node, Mux):
+            sel = self._evaluate(
+                node.select, registers, ctx, symbolic_vars, mux_constraints, cache
+            )
+            sources = [
+                self._evaluate(s, registers, ctx, symbolic_vars, mux_constraints, cache)
+                for s in node.sources
+            ]
+            # Range constraint
+            mux_constraints.append(ULE(sel, BitVecVal(len(sources) - 1, sel.size())))
+            # Build If-chain backwards
+            result = sources[-1]
+            for i in range(len(sources) - 2, -1, -1):
+                result = If(sel == i, sources[i], result)
+            # Store select var for extraction
+            symbolic_vars[node.select.name] = sel
+            cache[nid] = result
+            # Pruning applied by parent IntrinsicNode via _apply_mux_pruning
+            return result
+
+        elif isinstance(node, IntrinsicNode):
+            intrinsic_fn = self.available_intrinsics.get(node.name)
+            if intrinsic_fn is None:
+                raise ValueError(f"Unknown intrinsic: {node.name}")
+            args = {}
+            for key, operand in node.operands.items():
+                args[key] = self._evaluate(
+                    operand, registers, ctx, symbolic_vars, mux_constraints, cache
+                )
+            result = _dispatch_intrinsic_by_signature(intrinsic_fn, args)
+            # Apply combined mux pruning for any Mux children
+            self._apply_mux_pruning(node, symbolic_vars, mux_constraints)
+        else:
+            raise TypeError(f"Unknown graph node type: {type(node)}")
+
+        cache[nid] = result
+        return result
+
+    @staticmethod
+    def _apply_mux_pruning(
+        node: IntrinsicNode,
+        symbolic_vars: dict,
+        mux_constraints: list,
+    ):
+        """Apply pruning constraints for Mux children of an IntrinsicNode.
+
+        - ``"force_last"``: single mux forced to pick the last source.
+        - ``"at_least_one_last"``: with multiple sibling muxes, at least one
+          must select a source index >= the last (i.e., a prior result).
+        """
+        mux_selects = []
+        for operand in node.operands.values():
+            if isinstance(operand, Mux) and operand.pruning is not None:
+                sel_var = symbolic_vars[operand.select.name]
+                last_idx = len(operand.sources) - 1
+                mux_selects.append((sel_var, last_idx, operand.pruning))
+
+        if not mux_selects:
+            return
+
+        # Collect all "at_least_one_last" muxes for joint constraint
+        joint = [
+            (sel, last) for sel, last, p in mux_selects if p == "at_least_one_last"
+        ]
+
+        for sel, last, pruning in mux_selects:
+            if pruning == "force_last":
+                mux_constraints.append(sel == last)
+
+        if len(joint) == 1:
+            sel, last = joint[0]
+            mux_constraints.append(sel == last)
+        elif len(joint) >= 2:
+            mux_constraints.append(
+                Or(*(ULE(BitVecVal(last, sel.size()), sel) for sel, last in joint))
+            )
+
+    def _extract_solution_from_graph(
         self,
         model,
         top_output,
         bottom_output,
+        graph: GadgetGraph,
         symbolic_vars: dict,
-        top_instructions_template: list[InstructionSpec],
-        bottom_instructions_template: list[InstructionSpec],
         fixed_output_state: VectorState | None = None,
     ) -> tuple[PermutationGadget, VectorState]:
         """Extract a concrete gadget and output state from a Z3 model.
 
-        Reads element values from the symbolic output registers, builds the
-        canonical output state (min to top, max to bottom per lane), and
-        concretizes all symbolic variables in the instruction templates
-        using the model's assignments.
-
-        When ``fixed_output_state`` is provided (strict lane order mode), the
-        output state is used directly without reading from the model or
-        applying min/max canonicalization.
+        Walks the graph in topological order, evaluating symbolic variables
+        and mux selects against the model to produce concrete InstructionSpec
+        lists for the PermutationGadget.
         """
         if fixed_output_state is not None:
             output_state = fixed_output_state
         else:
-            # Extract element values from output registers to build canonical output state
             output_top = []
             output_bottom = []
             for lane_idx in range(self.elements_per_vector):
@@ -890,77 +925,96 @@ class GadgetSynthesizer:
                     else bottom_val
                 )
 
-                # Canonical ordering: lower element index to top, higher to bottom
                 output_top.append(min(top_elem, bottom_elem))
                 output_bottom.append(max(top_elem, bottom_elem))
 
             output_state = VectorState(top=output_top, bottom=output_bottom)
 
-        # Create concrete instructions by substituting symbolic values.
-        # Select variables (from mux encoding) are resolved to source name
-        # strings ("top", "bottom", "result_N") via _select_to_source().
-        def concretize_instructions(
-            instructions: list[InstructionSpec],
-        ) -> list[InstructionSpec]:
-            concrete_insts = []
-            for inst_idx, inst in enumerate(instructions):
-                concrete_args = {}
-                for key, value in inst.args.items():
-                    # Check if this arg has a corresponding select variable
-                    select_name = f"sel_{key}_{inst.intrinsic_name}_{id(inst)}"
-                    if select_name in symbolic_vars:
-                        select_val = model.evaluate(
-                            symbolic_vars[select_name], model_completion=True
-                        ).as_long()
-                        concrete_args[key] = self._select_to_source(
-                            select_val, inst_idx
-                        )
-                    elif id(value) in symbolic_vars:
-                        if hasattr(value, "size") and callable(
-                            getattr(value, "size", None)
-                        ):
-                            bit_size = value.size()
-                            if bit_size == 256:
-                                concrete_bitvec = model.evaluate(
-                                    value, model_completion=True
-                                )
-                                if hasattr(concrete_bitvec, "as_long"):
-                                    concrete_value = concrete_bitvec.as_long()
-                                else:
-                                    concrete_value = concrete_bitvec
-                                concrete_args[key] = concrete_value
-                            elif bit_size == 8:
-                                concrete_value = model.evaluate(
-                                    value, model_completion=True
-                                ).as_long()
-                                concrete_args[key] = concrete_value
-                            else:
-                                concrete_value = model.evaluate(
-                                    value, model_completion=True
-                                ).as_long()
-                                concrete_args[key] = concrete_value
-                        else:
-                            concrete_value = model.evaluate(
-                                value, model_completion=True
-                            ).as_long()
-                            concrete_args[key] = concrete_value
-                    else:
-                        concrete_args[key] = value
-                concrete_insts.append(
-                    InstructionSpec(inst.intrinsic_name, concrete_args)
-                )
-            return concrete_insts
-
-        concrete_top = concretize_instructions(top_instructions_template)
-        concrete_bottom = concretize_instructions(bottom_instructions_template)
+        concrete_top = self._concretize_graph(graph.top, model, symbolic_vars)
+        concrete_bottom = self._concretize_graph(graph.bottom, model, symbolic_vars)
 
         gadget = PermutationGadget(
             top_instructions=concrete_top,
             bottom_instructions=concrete_bottom,
             validated=True,
         )
-
         return gadget, output_state
+
+    def _concretize_graph(
+        self,
+        root: IntrinsicNode | None,
+        model,
+        symbolic_vars: dict,
+    ) -> list[InstructionSpec]:
+        """Walk a graph and produce a flat list of concrete InstructionSpec.
+
+        Collects IntrinsicNodes in topological (post-)order, then concretizes
+        each node's operands against the model.
+        """
+        if root is None:
+            return []
+
+        # Collect IntrinsicNodes in topological order
+        order: list[IntrinsicNode] = []
+        visited: set[int] = set()
+
+        def topo_visit(node):
+            nid = id(node)
+            if nid in visited:
+                return
+            visited.add(nid)
+            if isinstance(node, IntrinsicNode):
+                for operand in node.operands.values():
+                    topo_visit(operand)
+                order.append(node)
+            elif isinstance(node, Mux):
+                for source in node.sources:
+                    topo_visit(source)
+
+        topo_visit(root)
+
+        # Map IntrinsicNode id → index in linearized order
+        node_to_idx = {id(n): idx for idx, n in enumerate(order)}
+
+        result = []
+        for inst_idx, node in enumerate(order):
+            concrete_args = {}
+            for key, operand in node.operands.items():
+                concrete_args[key] = self._concretize_operand(
+                    operand, inst_idx, model, symbolic_vars, node_to_idx
+                )
+            result.append(InstructionSpec(node.name, concrete_args))
+        return result
+
+    def _concretize_operand(
+        self,
+        operand,
+        inst_idx: int,
+        model,
+        symbolic_vars: dict,
+        node_to_idx: dict,
+    ):
+        """Concretize a single graph operand against a Z3 model."""
+        if isinstance(operand, InputRef):
+            return operand.name
+
+        if isinstance(operand, Symbolic):
+            z3_var = symbolic_vars[operand.name]
+            return model.evaluate(z3_var, model_completion=True).as_long()
+
+        if isinstance(operand, Mux):
+            sel_val = model.evaluate(
+                symbolic_vars[operand.select.name], model_completion=True
+            ).as_long()
+            return self._select_to_source(sel_val, inst_idx)
+
+        if isinstance(operand, IntrinsicNode):
+            ref_idx = node_to_idx[id(operand)]
+            if ref_idx == inst_idx - 1:
+                return "prev"
+            return f"result_{ref_idx}"
+
+        raise TypeError(f"Unknown operand type: {type(operand)}")
 
     def compute_output_state(
         self, input_state: VectorState, gadget: PermutationGadget
@@ -980,38 +1034,13 @@ class GadgetSynthesizer:
         ctx = main_ctx()
         solver = Solver(ctx=ctx)
 
-        # Create input registers where each lane contains the element index
-        if self.vm == vector_machine.AVX2:
-            top_reg = z3_avx.ymm_reg("top_input", ctx=ctx)
-            bottom_reg = z3_avx.ymm_reg("bottom_input", ctx=ctx)
-        elif self.vm == vector_machine.AVX512:
-            top_reg = z3_avx.zmm_reg("top_input", ctx=ctx)
-            bottom_reg = z3_avx.zmm_reg("bottom_input", ctx=ctx)
-        else:
-            raise NotImplementedError(
-                f"Register creation not implemented for VM: {self.vm}"
-            )
+        top_reg, bottom_reg = self._create_input_registers(solver, ctx, input_state)
 
-        # Constrain input registers to contain element indices
-        for lane_idx in range(self.elements_per_vector):
-            top_elem = input_state.top[lane_idx]
-            bottom_elem = input_state.bottom[lane_idx]
-
-            lane_start = lane_idx * self.lane_width
-            lane_end = lane_start + self.lane_width - 1
-
-            top_lane = Extract(lane_end, lane_start, top_reg)
-            bottom_lane = Extract(lane_end, lane_start, bottom_reg)
-
-            solver.add(top_lane == BitVecVal(top_elem, self.lane_width, ctx=ctx))
-            solver.add(bottom_lane == BitVecVal(bottom_elem, self.lane_width, ctx=ctx))
-
-        # Apply gadget instructions (mux constraints ignored here —
-        # concrete gadgets have resolved args, no select variables)
-        top_output, _ = self._apply_instructions(
+        # Apply concrete gadget instructions
+        top_output, _ = self._apply_concrete_instructions(
             top_reg, bottom_reg, gadget.top_instructions, is_top=True
         )
-        bottom_output, _ = self._apply_instructions(
+        bottom_output, _ = self._apply_concrete_instructions(
             top_reg, bottom_reg, gadget.bottom_instructions, is_top=False
         )
 
@@ -1049,50 +1078,6 @@ class GadgetSynthesizer:
 
         return VectorState(top=output_top, bottom=output_bottom)
 
-    def _substitute_register_names(
-        self, arg, top_reg, bottom_reg, current_reg, symbolic_vars=None, key=None
-    ):
-        """
-        Substitute register name strings with actual Z3 register variables.
-
-        Args:
-            arg: Argument value (could be string register name, immediate, Z3 symbolic var, etc.)
-            top_reg: Top Z3 register
-            bottom_reg: Bottom Z3 register
-            current_reg: Current Z3 register being computed
-            symbolic_vars: Optional dict to track symbolic variables by name
-
-        Returns:
-            Actual register if arg is a register name, otherwise returns arg unchanged
-        """
-        # If it's a Z3 expression (BitVec), track it in symbolic_vars if it has a name
-        if hasattr(arg, "decl") and callable(getattr(arg, "decl", None)):
-            # This is a Z3 expression
-            if symbolic_vars is not None:
-                # Try to extract the variable name
-                symbolic_vars[id(arg)] = arg
-            return arg
-
-        if isinstance(arg, int):
-            # Check if this is a 256-bit (or 512-bit) control vector or an 8-bit immediate
-            if key == "imm8":
-                return BitVecVal(arg, 8)
-            else:
-                return BitVecVal(arg, width_dict[self.vm] * 8)
-
-        if isinstance(arg, str):
-            if arg == "top":
-                return top_reg
-            elif arg == "bottom":
-                return bottom_reg
-            elif arg == "prev":
-                return current_reg
-            elif arg.startswith("result_"):
-                return current_reg  # best-effort for concrete gadgets
-            elif arg in ["input", "a"]:  # Generic input register
-                return current_reg
-        return arg
-
     @staticmethod
     def _select_to_source(select_val: int, inst_idx: int) -> str:
         """Map a mux select value to a source name string.
@@ -1110,918 +1095,620 @@ class GadgetSynthesizer:
             return "prev"
         return f"result_{result_idx}"
 
-    def _create_operand_mux(
-        self,
-        key: str,
-        inst: InstructionSpec,
-        inst_idx: int,
-        top_reg,
-        bottom_reg,
-        results: list,
-        symbolic_vars: dict | None,
-        mux_constraints: list,
-    ):
-        """Create a Z3 If-else chain selecting between {top, bottom, result_0, ...}.
-
-        For inst2+ in a multi-instruction chain, register operands ("a", "b")
-        get a select variable that Z3 uses to pick the optimal source from
-        the original top/bottom registers or any prior instruction's output.
-
-        Args:
-            key: Argument key ("a" or "b")
-            inst: The instruction spec (used for unique naming)
-            inst_idx: Index of this instruction in the sequence
-            top_reg: Z3 register for original top input
-            bottom_reg: Z3 register for original bottom input
-            results: List of Z3 registers from prior instructions' outputs
-            symbolic_vars: Dict to track the select variable for later extraction
-            mux_constraints: List to append range constraints to
-
-        Returns:
-            Z3 If-expression selecting between the sources
-        """
-        # Number of options: top, bottom, plus one per prior result
-        num_options = 2 + len(results)
-        # Bit-width: 2 bits for up to 4 options, 3 bits for 5-8
-        bit_width = 2 if num_options <= 4 else 3
-
-        select_name = f"sel_{key}_{inst.intrinsic_name}_{id(inst)}"
-        select_var = BitVec(select_name, bit_width)
-
-        if symbolic_vars is not None:
-            symbolic_vars[select_name] = select_var
-
-        # Constrain to valid range
-        mux_constraints.append(ULE(select_var, BitVecVal(num_options - 1, bit_width)))
-
-        # Build If-chain: 0→top, 1→bottom, 2→result_0, 3→result_1, ...
-        # Start from the last option (fallback) and build backwards
-        mux = results[-1]  # last result is the default/fallback
-        for i in range(num_options - 2, -1, -1):
-            if i == 0:
-                source = top_reg
-            elif i == 1:
-                source = bottom_reg
-            else:
-                source = results[i - 2]
-            mux = If(select_var == i, source, mux)
-
-        return mux
-
-    def _apply_instructions(
+    def _apply_concrete_instructions(
         self,
         top_reg,
         bottom_reg,
         instructions: list[InstructionSpec],
         is_top: bool,
-        solver=None,
-        symbolic_vars=None,
     ):
-        """
-        Apply a sequence of instructions to compute output register.
+        """Apply concrete (fully-resolved) instructions to compute an output register.
 
-        For multi-instruction sequences, inst1+ register operands ("a", "b"
-        referencing "top"/"bottom") get a mux select variable so Z3 can pick
-        from {top, bottom, result_0, ...}.
-
-        For exactly-2-instruction sequences (auto-generated depth-2), the mux
-        is then constrained to prevent degeneration to depth-1:
-        - Single-input inst1: mux forced to result_0 (picking top/bottom
-          would discard inst0, duplicating a depth-1 gadget).
-        - Dual-input inst1: at least one of (a, b) must select result_0.
-
-        For 3+ instruction sequences (user templates with arbitrary wiring),
-        mux variables are left unconstrained.
+        Used by ``compute_output_state`` where all operands are already concrete
+        strings ("top", "bottom", "prev", "result_N") or integer immediates.
 
         Returns:
-            (output_register, mux_constraints) tuple.
+            (output_register, []) tuple (empty mux_constraints for API compat).
         """
         current_reg = top_reg if is_top else bottom_reg
         results = []
-        mux_constraints = []
 
-        for inst_idx, inst in enumerate(instructions):
+        for inst in instructions:
             intrinsic = self.available_intrinsics.get(inst.intrinsic_name)
             if intrinsic is None:
                 raise ValueError(f"Unknown intrinsic: {inst.intrinsic_name}")
 
             args = {}
             for key, value in inst.args.items():
-                if (
-                    inst_idx > 0
-                    and results
-                    and key in ("a", "b")
-                    and isinstance(value, str)
-                    and value in ("top", "bottom")
-                ):
-                    args[key] = self._create_operand_mux(
-                        key,
-                        inst,
-                        inst_idx,
-                        top_reg,
-                        bottom_reg,
-                        results,
-                        symbolic_vars,
-                        mux_constraints,
-                    )
+                if isinstance(value, str):
+                    if value == "top":
+                        args[key] = top_reg
+                    elif value == "bottom":
+                        args[key] = bottom_reg
+                    elif value == "prev":
+                        args[key] = results[-1] if results else current_reg
+                    elif value.startswith("result_"):
+                        idx = int(value[len("result_") :])
+                        args[key] = results[idx] if idx < len(results) else current_reg
+                    else:
+                        args[key] = current_reg
+                elif isinstance(value, int):
+                    if key == "imm8":
+                        args[key] = BitVecVal(value, 8)
+                    else:
+                        args[key] = BitVecVal(value, width_dict[self.vm] * 8)
                 else:
-                    args[key] = self._substitute_register_names(
-                        value,
-                        top_reg,
-                        bottom_reg,
-                        current_reg,
-                        symbolic_vars,
-                        key=key,
-                    )
+                    args[key] = value
 
             current_reg = _dispatch_intrinsic_by_signature(intrinsic, args)
             results.append(current_reg)
 
-        # For depth-2 sequences, constrain inst1's mux to prevent
-        # degeneration to a depth-1 gadget.
-        if len(instructions) == 2 and symbolic_vars is not None:
-            self._prune_depth2_mux(instructions[1], mux_constraints, symbolic_vars)
+        return current_reg, []
 
-        return current_reg, mux_constraints
+    # ------------------------------------------------------------------
+    # Graph-based candidate enumeration
+    # ------------------------------------------------------------------
 
-    @staticmethod
-    def _prune_depth2_mux(
-        inst1: InstructionSpec,
-        mux_constraints: list,
-        symbolic_vars: dict,
-    ):
-        """Constrain inst1's mux in a depth-2 sequence to use result_0.
+    def _build_gadget_graphs(
+        self, depth: int, single_intrinsics: list[IntrinsicNode]
+    ) -> list[IntrinsicNode | None]:
+        """Build data-flow graphs for all instruction sequences at a given depth.
 
-        Mux encoding: 0=top, 1=bottom, 2=result_0, ...
-        Without constraints, Z3 can pick top/bottom for all operands,
-        making inst0 dead code — equivalent to a depth-1 gadget.
-
-        - 1 mux var (single-input inst1): force it to result_0.
-        - 2 mux vars (dual-input inst1): at least one must be >= result_0.
-        """
-        FIRST_RESULT = 2
-
-        sel_vars = []
-        for key in ("a", "b"):
-            name = f"sel_{key}_{inst1.intrinsic_name}_{id(inst1)}"
-            if name in symbolic_vars:
-                sel_vars.append(symbolic_vars[name])
-
-        if len(sel_vars) == 1:
-            mux_constraints.append(sel_vars[0] == FIRST_RESULT)
-        elif len(sel_vars) >= 2:
-            mux_constraints.append(
-                Or(
-                    ULE(BitVecVal(FIRST_RESULT, sel_vars[0].size()), sel_vars[0]),
-                    ULE(BitVecVal(FIRST_RESULT, sel_vars[1].size()), sel_vars[1]),
-                )
-            )
-
-    def _build_instruction_sequences(
-        self, depth: int, single_input_insts: list[InstructionSpec]
-    ) -> list[list[InstructionSpec]]:
-        """
-        mermaid
-        title Permutation Gadget Data-Flow Shapes
-        flowchart TD
-
-            subgraph D0["DEPTH 0 — Identity"]
-                direction TB
-                d0_top["top reg"] --> d0_COEX["COEX<br/>min/max"]
-                d0_bot["bottom reg"] --> d0_COEX
-            end
-
-            subgraph D1["1 inst per side"]
-                subgraph A["Shape A: single-input (e.g. permute_ps)"]
-                    direction TB
-                    a_top["top reg"]
-                    a_bot["bottom reg"]
-                    a_top --> a_i0["inst0(a, imm8/cv)"]
-                    a_i0 --> a_COEX["COEX"]
-                    a_bot --> a_COEX
-                end
-                subgraph B["Shape B: dual-input (e.g. shuffle_ps)"]
-                    direction TB
-                    b_top["top reg"]
-                    b_bot["bottom reg"]
-                    b_top --> b_i0["inst0(a, b, imm8)"]
-                    b_bot --> b_i0
-                    b_i0 --> b_COEX["COEX"]
-                end
-            end
-
-            subgraph D2["2 inst per side"]
-                subgraph C["Shape C: single → single (hardwired chain)"]
-                    direction TB
-                    c_top["top reg"]
-                    c_bot["bottom reg"]
-                    c_top --> c_i0["inst0(a, imm8/cv)"]
-                    c_i0 --> c_i1["inst1(result_0, imm8/cv)"]
-                    c_i1 --> c_COEX["COEX"]
-                end
-                subgraph D["Shape D: dual → single (hardwired chain)"]
-                    direction TB
-                    d_top["top reg"]
-                    d_bot["bottom reg"]
-                    d_top --> d_i0["inst0(a, b, imm8)"]
-                    d_bot --> d_i0
-                    d_i0 --> d_i1["inst1(result_0, imm8/cv)"]
-                    d_i1 --> d_COEX["COEX"]
-                end
-                subgraph E["Shape E: single → dual (mux, ≥1 must use result_0)"]
-                    direction TB
-                    e_top["top reg"]
-                    e_bot["bottom reg"]
-                    e_top --> e_i0["inst0(a, imm8/cv)"]
-                    e_i0 --> e_r0((result_0))
-                    e_r0 -.-> e_mux_a{{mux a}}
-                    e_top -.-> e_mux_a
-                    e_bot -.-> e_mux_a
-                    e_r0 -.-> e_mux_b{{mux b}}
-                    e_top -.-> e_mux_b
-                    e_bot -.-> e_mux_b
-                    e_mux_a --> e_i1["inst1(a, b, imm8)"]
-                    e_mux_b --> e_i1
-                    e_i1 --> e_COEX["COEX"]
-                end
-            end
-
-            subgraph FG["Full Gadget: top side + bottom side + COEX"]
-                direction TB
-                fg_top["top reg"] --> fg_ts["top-side instructions<br/>(shape A-E)"]
-                fg_bot["bottom reg"] --> fg_ts
-                fg_top --> fg_bs["bottom-side instructions<br/>(shape A-E)"]
-                fg_bot --> fg_bs
-                fg_ts --> fg_nt["new top"]
-                fg_bs --> fg_nb["new bottom"]
-                fg_nt --> fg_COEX["COEX<br/>min(new_top, new_bot)<br/>max(new_top, new_bot)"]
-                fg_nb --> fg_COEX
-                fg_COEX --> fg_ot["output top<br/>(mins)"]
-                fg_COEX --> fg_ob["output bottom<br/>(maxs)"]
-            end
+        Depth 0: identity (None).
+        Depth 1: one intrinsic node per template.
+        Depth 2: pairs with explicit wiring and mux nodes where needed.
         """
         if depth <= 0:
-            return [[]]
+            return [None]
 
-        sequences = []
         if depth == 1:
-            sequences = [[inst] for inst in single_input_insts]
-            sequences.extend([[inst] for inst in self.dual_input_insts_top_bottom])
-        elif depth == 2:
-            # Try pairs:
-            # (single, single)
-            for inst1 in single_input_insts:
-                for inst2 in single_input_insts:
-                    sequences.append([inst1, inst2])
-            # (dual, single)
-            for inst1 in self.dual_input_insts_top_bottom:
-                for inst2 in single_input_insts:
-                    sequences.append([inst1, inst2])
-            # (single, dual)
-            for inst1 in single_input_insts:
-                for inst2 in self.dual_input_insts_top_bottom:
-                    sequences.append([inst1, inst2])
-        elif depth > 2:
-            raise ValueError(f"Instruction depth {depth} is not supported (max is 2)")
-        return sequences
+            return list(single_intrinsics) + list(self.dual_intrinsics)
 
-    def _generate_candidate_gadgets_at_depth(
+        if depth == 2:
+            top = self._top_ref
+            bottom = self._bottom_ref
+            graphs: list[IntrinsicNode] = []
+
+            # single → single: inst1 hardwired to inst0
+            for inst0 in single_intrinsics:
+                for inst1 in single_intrinsics:
+                    graphs.append(self._wire_hardwired(inst0, inst1))
+
+            # dual → single: inst1 hardwired to inst0
+            for inst0 in self.dual_intrinsics:
+                for inst1 in single_intrinsics:
+                    graphs.append(self._wire_hardwired(inst0, inst1))
+
+            # single → dual: inst1 gets muxes on both register operands
+            for inst0 in single_intrinsics:
+                for inst1 in self.dual_intrinsics:
+                    graphs.append(self._wire_with_muxes(inst0, inst1, top, bottom))
+            return graphs
+
+        raise ValueError(f"Instruction depth {depth} is not supported (max is 2)")
+
+    @staticmethod
+    def _wire_hardwired(inst0: IntrinsicNode, inst1: IntrinsicNode) -> IntrinsicNode:
+        """Wire all of inst1's register (InputRef) operands to inst0's output."""
+        operands = {}
+        for key, operand in inst1.operands.items():
+            if isinstance(operand, InputRef):
+                # Replace the register input with inst0's output
+                operands[key] = inst0
+            else:
+                operands[key] = operand
+        return IntrinsicNode(inst1.name, operands)
+
+    @staticmethod
+    def _wire_with_muxes(
+        inst0: IntrinsicNode,
+        inst1: IntrinsicNode,
+        top: InputRef,
+        bottom: InputRef,
+    ) -> IntrinsicNode:
+        """Wire inst1's register operands through muxes over {top, bottom, inst0}."""
+        operands = {}
+        for key, operand in inst1.operands.items():
+            if isinstance(operand, (InputRef, IntrinsicNode)):
+                # Register operand gets a mux
+                sel_name = f"sel_{key}_{inst1.name}_{id(inst1)}"
+                operands[key] = Mux(
+                    select=Symbolic(sel_name, 2),
+                    sources=(top, bottom, inst0),
+                    pruning="at_least_one_last",
+                )
+            else:
+                operands[key] = operand
+        return IntrinsicNode(inst1.name, operands)
+
+    def _generate_candidate_graphs_at_depth(
         self, top_depth: int, bottom_depth: int
-    ) -> list[tuple[list[InstructionSpec], list[InstructionSpec]]]:
-        """
-        Generate candidate instruction sequences without validation.
-        Returns list of (top_sequence, bottom_sequence) tuples.
-        """
-        top_sequences = self._build_instruction_sequences(
-            top_depth, self.single_input_insts_top
+    ) -> list[GadgetGraph]:
+        """Generate candidate GadgetGraphs for a given (top_depth, bottom_depth)."""
+        top_graphs = self._build_gadget_graphs(top_depth, self.single_intrinsics_top)
+        bottom_graphs = self._build_gadget_graphs(
+            bottom_depth, self.single_intrinsics_bottom
         )
-        bottom_sequences = self._build_instruction_sequences(
-            bottom_depth, self.single_input_insts_bottom
-        )
+        return [GadgetGraph(top=t, bottom=b) for t in top_graphs for b in bottom_graphs]
 
-        # Generate all combinations
-        candidates = []
-        for top_seq in top_sequences:
-            for bottom_seq in bottom_sequences:
-                candidates.append((top_seq, bottom_seq))
-
-        return candidates
-
-    def precompute_all_candidates(
-        self, gadget_depth: int
-    ) -> list[tuple[list[InstructionSpec], list[InstructionSpec]]]:
-        """Pre-compute all candidate instruction sequences for all depth combinations.
+    def precompute_all_candidates(self, gadget_depth: int) -> list[GadgetGraph]:
+        """Pre-compute all candidate gadget graphs for all depth combinations.
 
         The candidates depend only on gadget_depth and the available intrinsics,
-        not on input state or stage pairs. This allows computing them once and
-        reusing across all stages and input states.
+        not on input state or stage pairs.
         """
-        all_candidates = []
+        all_candidates: list[GadgetGraph] = []
         for top_depth in range(gadget_depth + 1):
             for bottom_depth in range(gadget_depth + 1):
-                candidates = self._generate_candidate_gadgets_at_depth(
-                    top_depth, bottom_depth
+                all_candidates.extend(
+                    self._generate_candidate_graphs_at_depth(top_depth, bottom_depth)
                 )
-                all_candidates.extend(candidates)
         return all_candidates
 
-    def _enumerate_single_input_instructions(
-        self, reg_name: str = "input"
-    ) -> list[InstructionSpec]:
-        """
-        Generate single-input instruction templates with symbolic immediates or control vectors.
-        Z3 will solve for the concrete values.
+    # ------------------------------------------------------------------
+    # Intrinsic node enumeration (graph-based replacements)
+    # ------------------------------------------------------------------
 
-        Single-input means: operates on ONE of our vectors (top OR bottom),
-        even if it takes additional operands like control vectors.
-        """
+    def _enumerate_single_input_intrinsics(
+        self, input_ref: InputRef
+    ) -> list[IntrinsicNode]:
+        """Generate single-input IntrinsicNode templates with Symbolic immediates."""
+        tag = input_ref.name  # "top" or "bottom" — ensures unique names per side
+
         if self.vm == vector_machine.AVX2 and self.prim_type == primitive_type.i32:
-            input_reg = reg_name
-            unique_id = id(input_reg)
-
-            # Permute within 128-bit lanes using immediate
-            permute_ps = InstructionSpec(
-                "_mm256_permute_ps",
-                {
-                    "a": input_reg,
-                    "imm8": SymbolicPlaceholder(f"imm8_permute_ps_{unique_id}", 8),
-                },
-            )
-
-            # Permute 64-bit chunks across full register
-            permute4x64 = InstructionSpec(
-                "_mm256_permute4x64_epi64",
-                {
-                    "a": input_reg,
-                    "imm8": SymbolicPlaceholder(f"imm8_permute4x64_{unique_id}", 8),
-                },
-            )
-
-            # Variable permute across all lanes (most powerful)
-            permutexvar = InstructionSpec(
-                "_mm256_permutexvar_epi32",
-                {
-                    "a": input_reg,
-                    "op_idx": SymbolicPlaceholder(f"ctrl_permutexvar_{unique_id}", 256),
-                },
-            )
-
-            # Variable permute within 128-bit lanes
-            permutevar_ps = InstructionSpec(
-                "_mm256_permutevar_ps",
-                {
-                    "a": input_reg,
-                    "b": SymbolicPlaceholder(f"ctrl_permutevar_ps_{unique_id}", 256),
-                },
-            )
-
-            return [permute_ps, permute4x64, permutexvar, permutevar_ps]
+            return [
+                IntrinsicNode(
+                    "_mm256_permute_ps",
+                    {
+                        "a": input_ref,
+                        "imm8": Symbolic(f"imm8_permute_ps_{tag}", 8),
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm256_permute4x64_epi64",
+                    {
+                        "a": input_ref,
+                        "imm8": Symbolic(f"imm8_permute4x64_{tag}", 8),
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm256_permutexvar_epi32",
+                    {
+                        "a": input_ref,
+                        "op_idx": Symbolic(f"ctrl_permutexvar_{tag}", 256),
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm256_permutevar_ps",
+                    {
+                        "a": input_ref,
+                        "b": Symbolic(f"ctrl_permutevar_ps_{tag}", 256),
+                    },
+                ),
+            ]
 
         if self.vm == vector_machine.AVX2 and self.prim_type == primitive_type.i64:
-            input_reg = reg_name
-            unique_id = id(input_reg)
-
-            # Permute within 128-bit lanes using immediate (for pd/64-bit doubles)
-            permute_pd = InstructionSpec(
-                "_mm256_permute_pd",
-                {
-                    "a": input_reg,
-                    "imm8": SymbolicPlaceholder(f"imm8_permute_pd_{unique_id}", 8),
-                },
-            )
-
-            # Permute 64-bit elements across full register
-            permute4x64 = InstructionSpec(
-                "_mm256_permute4x64_epi64",
-                {
-                    "a": input_reg,
-                    "imm8": SymbolicPlaceholder(f"imm8_permute4x64_{unique_id}", 8),
-                },
-            )
-
-            # Variable permute across all lanes (most powerful for 64-bit)
-            permutexvar = InstructionSpec(
-                "_mm256_permutexvar_epi64",
-                {
-                    "a": input_reg,
-                    "op_idx": SymbolicPlaceholder(f"ctrl_permutexvar_{unique_id}", 256),
-                },
-            )
-
-            # Variable permute within 128-bit lanes (for pd)
-            permutevar_pd = InstructionSpec(
-                "_mm256_permutevar_pd",
-                {
-                    "a": input_reg,
-                    "b": SymbolicPlaceholder(f"ctrl_permutevar_pd_{unique_id}", 256),
-                },
-            )
-
-            return [permute_pd, permute4x64, permutexvar, permutevar_pd]
+            return [
+                IntrinsicNode(
+                    "_mm256_permute_pd",
+                    {
+                        "a": input_ref,
+                        "imm8": Symbolic(f"imm8_permute_pd_{tag}", 8),
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm256_permute4x64_epi64",
+                    {
+                        "a": input_ref,
+                        "imm8": Symbolic(f"imm8_permute4x64_{tag}", 8),
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm256_permutexvar_epi64",
+                    {
+                        "a": input_ref,
+                        "op_idx": Symbolic(f"ctrl_permutexvar_{tag}", 256),
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm256_permutevar_pd",
+                    {
+                        "a": input_ref,
+                        "b": Symbolic(f"ctrl_permutevar_pd_{tag}", 256),
+                    },
+                ),
+            ]
 
         if self.vm == vector_machine.AVX512 and self.prim_type == primitive_type.i64:
-            input_reg = reg_name
-            unique_id = id(input_reg)
-
-            # --- Unmasked ---
-            # Cross-lane variable permute (most powerful)
-            permutexvar = InstructionSpec(
-                "_mm512_permutexvar_epi64",
-                {
-                    "a": input_reg,
-                    "op_idx": SymbolicPlaceholder(f"ctrl_permutexvar_{unique_id}", 512),
-                },
-            )
-            # In-lane permute with immediate
-            permute_pd = InstructionSpec(
-                "_mm512_permute_pd",
-                {
-                    "a": input_reg,
-                    "imm8": SymbolicPlaceholder(f"imm8_permute_pd_{unique_id}", 8),
-                },
-            )
-            # In-lane variable permute
-            permutevar_pd = InstructionSpec(
-                "_mm512_permutevar_pd",
-                {
-                    "a": input_reg,
-                    "b": SymbolicPlaceholder(f"ctrl_permutevar_pd_{unique_id}", 512),
-                },
-            )
-
-            # --- Masked ---
-            mask_permutexvar = InstructionSpec(
-                "_mm512_mask_permutexvar_epi64",
-                {
-                    "src": input_reg,
-                    "k": SymbolicPlaceholder(f"k_mask_permutexvar_{unique_id}", 8),
-                    "op_idx": SymbolicPlaceholder(
-                        f"ctrl_m_permutexvar_{unique_id}", 512
-                    ),
-                    "a": input_reg,
-                },
-            )
-            mask_permute_pd = InstructionSpec(
-                "_mm512_mask_permute_pd",
-                {
-                    "src": input_reg,
-                    "k": SymbolicPlaceholder(f"k_mask_permute_pd_{unique_id}", 8),
-                    "a": input_reg,
-                    "imm8": SymbolicPlaceholder(f"imm8_m_permute_pd_{unique_id}", 8),
-                },
-            )
-            mask_permutevar_pd = InstructionSpec(
-                "_mm512_mask_permutevar_pd",
-                {
-                    "src": input_reg,
-                    "k": SymbolicPlaceholder(f"k_mask_permutevar_pd_{unique_id}", 8),
-                    "a": input_reg,
-                    "b": SymbolicPlaceholder(f"ctrl_m_permutevar_pd_{unique_id}", 512),
-                },
-            )
-
             return [
-                permutexvar,
-                permute_pd,
-                permutevar_pd,
-                mask_permutexvar,
-                mask_permute_pd,
-                mask_permutevar_pd,
+                # Unmasked
+                IntrinsicNode(
+                    "_mm512_permutexvar_epi64",
+                    {
+                        "a": input_ref,
+                        "op_idx": Symbolic(f"ctrl_permutexvar_{tag}", 512),
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm512_permute_pd",
+                    {
+                        "a": input_ref,
+                        "imm8": Symbolic(f"imm8_permute_pd_{tag}", 8),
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm512_permutevar_pd",
+                    {
+                        "a": input_ref,
+                        "b": Symbolic(f"ctrl_permutevar_pd_{tag}", 512),
+                    },
+                ),
+                # Masked
+                IntrinsicNode(
+                    "_mm512_mask_permutexvar_epi64",
+                    {
+                        "src": input_ref,
+                        "k": Symbolic(f"k_mask_permutexvar_{tag}", 8),
+                        "op_idx": Symbolic(f"ctrl_m_permutexvar_{tag}", 512),
+                        "a": input_ref,
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm512_mask_permute_pd",
+                    {
+                        "src": input_ref,
+                        "k": Symbolic(f"k_mask_permute_pd_{tag}", 8),
+                        "a": input_ref,
+                        "imm8": Symbolic(f"imm8_m_permute_pd_{tag}", 8),
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm512_mask_permutevar_pd",
+                    {
+                        "src": input_ref,
+                        "k": Symbolic(f"k_mask_permutevar_pd_{tag}", 8),
+                        "a": input_ref,
+                        "b": Symbolic(f"ctrl_m_permutevar_pd_{tag}", 512),
+                    },
+                ),
             ]
 
         if self.vm == vector_machine.AVX512 and self.prim_type == primitive_type.i32:
-            input_reg = reg_name
-            unique_id = id(input_reg)
-
-            # --- Unmasked ---
-            permutexvar = InstructionSpec(
-                "_mm512_permutexvar_epi32",
-                {
-                    "a": input_reg,
-                    "op_idx": SymbolicPlaceholder(f"ctrl_permutexvar_{unique_id}", 512),
-                },
-            )
-            permute_ps = InstructionSpec(
-                "_mm512_permute_ps",
-                {
-                    "a": input_reg,
-                    "imm8": SymbolicPlaceholder(f"imm8_permute_ps_{unique_id}", 8),
-                },
-            )
-            permutevar_ps = InstructionSpec(
-                "_mm512_permutevar_ps",
-                {
-                    "a": input_reg,
-                    "b": SymbolicPlaceholder(f"ctrl_permutevar_ps_{unique_id}", 512),
-                },
-            )
-
-            # --- Masked (16-bit k-mask for 16 elements) ---
-            mask_permutexvar = InstructionSpec(
-                "_mm512_mask_permutexvar_epi32",
-                {
-                    "src": input_reg,
-                    "k": SymbolicPlaceholder(f"k_mask_permutexvar_{unique_id}", 16),
-                    "op_idx": SymbolicPlaceholder(
-                        f"ctrl_m_permutexvar_{unique_id}", 512
-                    ),
-                    "a": input_reg,
-                },
-            )
-            mask_permute_ps = InstructionSpec(
-                "_mm512_mask_permute_ps",
-                {
-                    "src": input_reg,
-                    "k": SymbolicPlaceholder(f"k_mask_permute_ps_{unique_id}", 16),
-                    "a": input_reg,
-                    "imm8": SymbolicPlaceholder(f"imm8_m_permute_ps_{unique_id}", 8),
-                },
-            )
-            mask_permutevar_ps = InstructionSpec(
-                "_mm512_mask_permutevar_ps",
-                {
-                    "src": input_reg,
-                    "k": SymbolicPlaceholder(f"k_mask_permutevar_ps_{unique_id}", 16),
-                    "a": input_reg,
-                    "b": SymbolicPlaceholder(f"ctrl_m_permutevar_ps_{unique_id}", 512),
-                },
-            )
-
             return [
-                permutexvar,
-                permute_ps,
-                permutevar_ps,
-                mask_permutexvar,
-                mask_permute_ps,
-                mask_permutevar_ps,
+                # Unmasked
+                IntrinsicNode(
+                    "_mm512_permutexvar_epi32",
+                    {
+                        "a": input_ref,
+                        "op_idx": Symbolic(f"ctrl_permutexvar_{tag}", 512),
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm512_permute_ps",
+                    {
+                        "a": input_ref,
+                        "imm8": Symbolic(f"imm8_permute_ps_{tag}", 8),
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm512_permutevar_ps",
+                    {
+                        "a": input_ref,
+                        "b": Symbolic(f"ctrl_permutevar_ps_{tag}", 512),
+                    },
+                ),
+                # Masked (16-bit k-mask)
+                IntrinsicNode(
+                    "_mm512_mask_permutexvar_epi32",
+                    {
+                        "src": input_ref,
+                        "k": Symbolic(f"k_mask_permutexvar_{tag}", 16),
+                        "op_idx": Symbolic(f"ctrl_m_permutexvar_{tag}", 512),
+                        "a": input_ref,
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm512_mask_permute_ps",
+                    {
+                        "src": input_ref,
+                        "k": Symbolic(f"k_mask_permute_ps_{tag}", 16),
+                        "a": input_ref,
+                        "imm8": Symbolic(f"imm8_m_permute_ps_{tag}", 8),
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm512_mask_permutevar_ps",
+                    {
+                        "src": input_ref,
+                        "k": Symbolic(f"k_mask_permutevar_ps_{tag}", 16),
+                        "a": input_ref,
+                        "b": Symbolic(f"ctrl_m_permutevar_ps_{tag}", 512),
+                    },
+                ),
             ]
 
         raise NotImplementedError(
-            f"Single-input instructions not implemented for {self.vm} and {self.prim_type}"
+            f"Single-input intrinsics not implemented for {self.vm} and {self.prim_type}"
         )
 
-    def _enumerate_dual_input_instructions(
-        self, reg1: str = "top", reg2: str = "bottom"
-    ) -> list[InstructionSpec]:
-        """
-        Generate dual-input instruction templates with symbolic immediates.
-        Z3 will solve for the concrete immediate values.
-        """
+    def _enumerate_dual_input_intrinsics(
+        self, ref1: InputRef, ref2: InputRef
+    ) -> list[IntrinsicNode]:
+        """Generate dual-input IntrinsicNode templates with Symbolic immediates."""
+        tag = f"{ref1.name}_{ref2.name}"
+
         if self.vm == vector_machine.AVX2 and self.prim_type == primitive_type.i32:
-            unique_id = f"{id(reg1)}_{id(reg2)}"
-
-            # Shuffle: select elements from both inputs within 128-bit lanes
-            shuffle_ps = InstructionSpec(
-                "_mm256_shuffle_ps",
-                {
-                    "a": reg1,
-                    "b": reg2,
-                    "imm8": SymbolicPlaceholder(f"imm8_shuffle_{unique_id}", 8),
-                },
-            )
-
-            # Unpack low: interleave low elements from both inputs
-            unpacklo = InstructionSpec(
-                "_mm256_unpacklo_epi32",
-                {"a": reg1, "b": reg2},
-            )
-
-            # Unpack high: interleave high elements from both inputs
-            unpackhi = InstructionSpec(
-                "_mm256_unpackhi_epi32",
-                {"a": reg1, "b": reg2},
-            )
-
-            # Permute 128-bit lanes between two registers
-            permute2x128 = InstructionSpec(
-                "_mm256_permute2x128_si256",
-                {
-                    "a": reg1,
-                    "b": reg2,
-                    "imm8": SymbolicPlaceholder(f"imm8_perm2x128_{unique_id}", 8),
-                },
-            )
-
-            # Blend: select elements from either input based on mask
-            blend_ps = InstructionSpec(
-                "_mm256_blend_ps",
-                {
-                    "a": reg1,
-                    "b": reg2,
-                    "imm8": SymbolicPlaceholder(f"imm8_blend_{unique_id}", 8),
-                },
-            )
-
-            # Align right: concatenate and shift
-            alignr = InstructionSpec(
-                "_mm256_alignr_epi32",
-                {
-                    "a": reg1,
-                    "b": reg2,
-                    "imm8": SymbolicPlaceholder(f"imm8_alignr_{unique_id}", 8),
-                },
-            )
-
-            return [shuffle_ps, unpacklo, unpackhi, permute2x128, blend_ps, alignr]
+            return [
+                IntrinsicNode(
+                    "_mm256_shuffle_ps",
+                    {
+                        "a": ref1,
+                        "b": ref2,
+                        "imm8": Symbolic(f"imm8_shuffle_{tag}", 8),
+                    },
+                ),
+                IntrinsicNode("_mm256_unpacklo_epi32", {"a": ref1, "b": ref2}),
+                IntrinsicNode("_mm256_unpackhi_epi32", {"a": ref1, "b": ref2}),
+                IntrinsicNode(
+                    "_mm256_permute2x128_si256",
+                    {
+                        "a": ref1,
+                        "b": ref2,
+                        "imm8": Symbolic(f"imm8_perm2x128_{tag}", 8),
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm256_blend_ps",
+                    {
+                        "a": ref1,
+                        "b": ref2,
+                        "imm8": Symbolic(f"imm8_blend_{tag}", 8),
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm256_alignr_epi32",
+                    {
+                        "a": ref1,
+                        "b": ref2,
+                        "imm8": Symbolic(f"imm8_alignr_{tag}", 8),
+                    },
+                ),
+            ]
 
         if self.vm == vector_machine.AVX2 and self.prim_type == primitive_type.i64:
-            unique_id = f"{id(reg1)}_{id(reg2)}"
-
-            # Shuffle: select 64-bit elements from both inputs within 128-bit lanes (pd variant)
-            shuffle_pd = InstructionSpec(
-                "_mm256_shuffle_pd",
-                {
-                    "a": reg1,
-                    "b": reg2,
-                    "imm8": SymbolicPlaceholder(f"imm8_shuffle_{unique_id}", 8),
-                },
-            )
-
-            # Unpack low: interleave low 64-bit elements from both inputs
-            unpacklo = InstructionSpec(
-                "_mm256_unpacklo_epi64",
-                {"a": reg1, "b": reg2},
-            )
-
-            # Unpack high: interleave high 64-bit elements from both inputs
-            unpackhi = InstructionSpec(
-                "_mm256_unpackhi_epi64",
-                {"a": reg1, "b": reg2},
-            )
-
-            # Permute 128-bit lanes between two registers (works for any element size)
-            permute2x128 = InstructionSpec(
-                "_mm256_permute2x128_si256",
-                {
-                    "a": reg1,
-                    "b": reg2,
-                    "imm8": SymbolicPlaceholder(f"imm8_perm2x128_{unique_id}", 8),
-                },
-            )
-
-            # Blend: select 64-bit elements from either input based on mask (pd variant)
-            blend_pd = InstructionSpec(
-                "_mm256_blend_pd",
-                {
-                    "a": reg1,
-                    "b": reg2,
-                    "imm8": SymbolicPlaceholder(f"imm8_blend_{unique_id}", 8),
-                },
-            )
-
-            # Align right: concatenate and shift by 64-bit elements
-            alignr = InstructionSpec(
-                "_mm256_alignr_epi64",
-                {
-                    "a": reg1,
-                    "b": reg2,
-                    "imm8": SymbolicPlaceholder(f"imm8_alignr_{unique_id}", 8),
-                },
-            )
-
-            return [shuffle_pd, unpacklo, unpackhi, permute2x128, blend_pd, alignr]
+            return [
+                IntrinsicNode(
+                    "_mm256_shuffle_pd",
+                    {
+                        "a": ref1,
+                        "b": ref2,
+                        "imm8": Symbolic(f"imm8_shuffle_{tag}", 8),
+                    },
+                ),
+                IntrinsicNode("_mm256_unpacklo_epi64", {"a": ref1, "b": ref2}),
+                IntrinsicNode("_mm256_unpackhi_epi64", {"a": ref1, "b": ref2}),
+                IntrinsicNode(
+                    "_mm256_permute2x128_si256",
+                    {
+                        "a": ref1,
+                        "b": ref2,
+                        "imm8": Symbolic(f"imm8_perm2x128_{tag}", 8),
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm256_blend_pd",
+                    {
+                        "a": ref1,
+                        "b": ref2,
+                        "imm8": Symbolic(f"imm8_blend_{tag}", 8),
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm256_alignr_epi64",
+                    {
+                        "a": ref1,
+                        "b": ref2,
+                        "imm8": Symbolic(f"imm8_alignr_{tag}", 8),
+                    },
+                ),
+            ]
 
         if self.vm == vector_machine.AVX512 and self.prim_type == primitive_type.i64:
-            unique_id = f"{id(reg1)}_{id(reg2)}"
-
-            # --- Unmasked ---
-            # Two-source variable permute (most powerful AVX512 instruction)
-            permutex2var = InstructionSpec(
-                "_mm512_permutex2var_epi64",
-                {
-                    "a": reg1,
-                    "op_idx": SymbolicPlaceholder(
-                        f"ctrl_permutex2var_{unique_id}", 512
-                    ),
-                    "b": reg2,
-                },
-            )
-            # Shuffle pd within 128-bit lanes
-            shuffle_pd = InstructionSpec(
-                "_mm512_shuffle_pd",
-                {
-                    "a": reg1,
-                    "b": reg2,
-                    "imm8": SymbolicPlaceholder(f"imm8_shuffle_pd_{unique_id}", 8),
-                },
-            )
-            # Unpack low/high
-            unpacklo = InstructionSpec("_mm512_unpacklo_epi64", {"a": reg1, "b": reg2})
-            unpackhi = InstructionSpec("_mm512_unpackhi_epi64", {"a": reg1, "b": reg2})
-            # 128-bit lane shuffle
-            shuffle_i32x4 = InstructionSpec(
-                "_mm512_shuffle_i32x4",
-                {
-                    "a": reg1,
-                    "b": reg2,
-                    "imm8": SymbolicPlaceholder(f"imm8_shuf_i32x4_{unique_id}", 8),
-                },
-            )
-            # Align right
-            alignr = InstructionSpec(
-                "_mm512_alignr_epi64",
-                {
-                    "a": reg1,
-                    "b": reg2,
-                    "imm8": SymbolicPlaceholder(f"imm8_alignr_{unique_id}", 8),
-                },
-            )
-
-            # --- Masked ---
-            mask_permutex2var = InstructionSpec(
-                "_mm512_mask_permutex2var_epi64",
-                {
-                    "a": reg1,
-                    "k": SymbolicPlaceholder(f"k_mask_permutex2var_{unique_id}", 8),
-                    "op_idx": SymbolicPlaceholder(
-                        f"ctrl_m_permutex2var_{unique_id}", 512
-                    ),
-                    "b": reg2,
-                },
-            )
-            mask_shuffle_pd = InstructionSpec(
-                "_mm512_mask_shuffle_pd",
-                {
-                    "src": reg1,
-                    "k": SymbolicPlaceholder(f"k_mask_shuffle_pd_{unique_id}", 8),
-                    "a": reg1,
-                    "b": reg2,
-                    "imm8": SymbolicPlaceholder(f"imm8_m_shuffle_pd_{unique_id}", 8),
-                },
-            )
-            mask_unpacklo = InstructionSpec(
-                "_mm512_mask_unpacklo_epi64",
-                {
-                    "src": reg1,
-                    "k": SymbolicPlaceholder(f"k_mask_unpacklo_{unique_id}", 8),
-                    "a": reg1,
-                    "b": reg2,
-                },
-            )
-            mask_unpackhi = InstructionSpec(
-                "_mm512_mask_unpackhi_epi64",
-                {
-                    "src": reg1,
-                    "k": SymbolicPlaceholder(f"k_mask_unpackhi_{unique_id}", 8),
-                    "a": reg1,
-                    "b": reg2,
-                },
-            )
-            mask_shuffle_i32x4 = InstructionSpec(
-                "_mm512_mask_shuffle_i32x4",
-                {
-                    "src": reg1,
-                    "k": SymbolicPlaceholder(f"k_mask_shuf_i32x4_{unique_id}", 16),
-                    "a": reg1,
-                    "b": reg2,
-                    "imm8": SymbolicPlaceholder(f"imm8_m_shuf_i32x4_{unique_id}", 8),
-                },
-            )
-            mask_alignr = InstructionSpec(
-                "_mm512_mask_alignr_epi64",
-                {
-                    "src": reg1,
-                    "k": SymbolicPlaceholder(f"k_mask_alignr_{unique_id}", 8),
-                    "a": reg1,
-                    "b": reg2,
-                    "imm8": SymbolicPlaceholder(f"imm8_m_alignr_{unique_id}", 8),
-                },
-            )
-
             return [
-                permutex2var,
-                shuffle_pd,
-                unpacklo,
-                unpackhi,
-                shuffle_i32x4,
-                alignr,
-                mask_permutex2var,
-                mask_shuffle_pd,
-                mask_unpacklo,
-                mask_unpackhi,
-                mask_shuffle_i32x4,
-                mask_alignr,
+                # Unmasked
+                IntrinsicNode(
+                    "_mm512_permutex2var_epi64",
+                    {
+                        "a": ref1,
+                        "op_idx": Symbolic(f"ctrl_permutex2var_{tag}", 512),
+                        "b": ref2,
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm512_shuffle_pd",
+                    {
+                        "a": ref1,
+                        "b": ref2,
+                        "imm8": Symbolic(f"imm8_shuffle_pd_{tag}", 8),
+                    },
+                ),
+                IntrinsicNode("_mm512_unpacklo_epi64", {"a": ref1, "b": ref2}),
+                IntrinsicNode("_mm512_unpackhi_epi64", {"a": ref1, "b": ref2}),
+                IntrinsicNode(
+                    "_mm512_shuffle_i32x4",
+                    {
+                        "a": ref1,
+                        "b": ref2,
+                        "imm8": Symbolic(f"imm8_shuf_i32x4_{tag}", 8),
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm512_alignr_epi64",
+                    {
+                        "a": ref1,
+                        "b": ref2,
+                        "imm8": Symbolic(f"imm8_alignr_{tag}", 8),
+                    },
+                ),
+                # Masked
+                IntrinsicNode(
+                    "_mm512_mask_permutex2var_epi64",
+                    {
+                        "a": ref1,
+                        "k": Symbolic(f"k_mask_permutex2var_{tag}", 8),
+                        "op_idx": Symbolic(f"ctrl_m_permutex2var_{tag}", 512),
+                        "b": ref2,
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm512_mask_shuffle_pd",
+                    {
+                        "src": ref1,
+                        "k": Symbolic(f"k_mask_shuffle_pd_{tag}", 8),
+                        "a": ref1,
+                        "b": ref2,
+                        "imm8": Symbolic(f"imm8_m_shuffle_pd_{tag}", 8),
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm512_mask_unpacklo_epi64",
+                    {
+                        "src": ref1,
+                        "k": Symbolic(f"k_mask_unpacklo_{tag}", 8),
+                        "a": ref1,
+                        "b": ref2,
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm512_mask_unpackhi_epi64",
+                    {
+                        "src": ref1,
+                        "k": Symbolic(f"k_mask_unpackhi_{tag}", 8),
+                        "a": ref1,
+                        "b": ref2,
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm512_mask_shuffle_i32x4",
+                    {
+                        "src": ref1,
+                        "k": Symbolic(f"k_mask_shuf_i32x4_{tag}", 16),
+                        "a": ref1,
+                        "b": ref2,
+                        "imm8": Symbolic(f"imm8_m_shuf_i32x4_{tag}", 8),
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm512_mask_alignr_epi64",
+                    {
+                        "src": ref1,
+                        "k": Symbolic(f"k_mask_alignr_{tag}", 8),
+                        "a": ref1,
+                        "b": ref2,
+                        "imm8": Symbolic(f"imm8_m_alignr_{tag}", 8),
+                    },
+                ),
             ]
 
         if self.vm == vector_machine.AVX512 and self.prim_type == primitive_type.i32:
-            unique_id = f"{id(reg1)}_{id(reg2)}"
-
-            # --- Unmasked ---
-            permutex2var = InstructionSpec(
-                "_mm512_permutex2var_epi32",
-                {
-                    "a": reg1,
-                    "op_idx": SymbolicPlaceholder(
-                        f"ctrl_permutex2var_{unique_id}", 512
-                    ),
-                    "b": reg2,
-                },
-            )
-            shuffle_ps = InstructionSpec(
-                "_mm512_shuffle_ps",
-                {
-                    "a": reg1,
-                    "b": reg2,
-                    "imm8": SymbolicPlaceholder(f"imm8_shuffle_ps_{unique_id}", 8),
-                },
-            )
-            unpacklo = InstructionSpec("_mm512_unpacklo_epi32", {"a": reg1, "b": reg2})
-            unpackhi = InstructionSpec("_mm512_unpackhi_epi32", {"a": reg1, "b": reg2})
-            shuffle_i32x4 = InstructionSpec(
-                "_mm512_shuffle_i32x4",
-                {
-                    "a": reg1,
-                    "b": reg2,
-                    "imm8": SymbolicPlaceholder(f"imm8_shuf_i32x4_{unique_id}", 8),
-                },
-            )
-            alignr = InstructionSpec(
-                "_mm512_alignr_epi32",
-                {
-                    "a": reg1,
-                    "b": reg2,
-                    "imm8": SymbolicPlaceholder(f"imm8_alignr_{unique_id}", 8),
-                },
-            )
-
-            # --- Masked (16-bit k-mask for 16 elements) ---
-            mask_permutex2var = InstructionSpec(
-                "_mm512_mask_permutex2var_epi32",
-                {
-                    "a": reg1,
-                    "k": SymbolicPlaceholder(f"k_mask_permutex2var_{unique_id}", 16),
-                    "op_idx": SymbolicPlaceholder(
-                        f"ctrl_m_permutex2var_{unique_id}", 512
-                    ),
-                    "b": reg2,
-                },
-            )
-            mask_shuffle_ps = InstructionSpec(
-                "_mm512_mask_shuffle_ps",
-                {
-                    "src": reg1,
-                    "k": SymbolicPlaceholder(f"k_mask_shuffle_ps_{unique_id}", 16),
-                    "a": reg1,
-                    "b": reg2,
-                    "imm8": SymbolicPlaceholder(f"imm8_m_shuffle_ps_{unique_id}", 8),
-                },
-            )
-            mask_unpacklo = InstructionSpec(
-                "_mm512_mask_unpacklo_epi32",
-                {
-                    "src": reg1,
-                    "k": SymbolicPlaceholder(f"k_mask_unpacklo_{unique_id}", 16),
-                    "a": reg1,
-                    "b": reg2,
-                },
-            )
-            mask_unpackhi = InstructionSpec(
-                "_mm512_mask_unpackhi_epi32",
-                {
-                    "src": reg1,
-                    "k": SymbolicPlaceholder(f"k_mask_unpackhi_{unique_id}", 16),
-                    "a": reg1,
-                    "b": reg2,
-                },
-            )
-            mask_shuffle_i32x4 = InstructionSpec(
-                "_mm512_mask_shuffle_i32x4",
-                {
-                    "src": reg1,
-                    "k": SymbolicPlaceholder(f"k_mask_shuf_i32x4_{unique_id}", 16),
-                    "a": reg1,
-                    "b": reg2,
-                    "imm8": SymbolicPlaceholder(f"imm8_m_shuf_i32x4_{unique_id}", 8),
-                },
-            )
-            mask_alignr = InstructionSpec(
-                "_mm512_mask_alignr_epi32",
-                {
-                    "src": reg1,
-                    "k": SymbolicPlaceholder(f"k_mask_alignr_{unique_id}", 16),
-                    "a": reg1,
-                    "b": reg2,
-                    "imm8": SymbolicPlaceholder(f"imm8_m_alignr_{unique_id}", 8),
-                },
-            )
-
             return [
-                permutex2var,
-                shuffle_ps,
-                unpacklo,
-                unpackhi,
-                shuffle_i32x4,
-                alignr,
-                mask_permutex2var,
-                mask_shuffle_ps,
-                mask_unpacklo,
-                mask_unpackhi,
-                mask_shuffle_i32x4,
-                mask_alignr,
+                # Unmasked
+                IntrinsicNode(
+                    "_mm512_permutex2var_epi32",
+                    {
+                        "a": ref1,
+                        "op_idx": Symbolic(f"ctrl_permutex2var_{tag}", 512),
+                        "b": ref2,
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm512_shuffle_ps",
+                    {
+                        "a": ref1,
+                        "b": ref2,
+                        "imm8": Symbolic(f"imm8_shuffle_ps_{tag}", 8),
+                    },
+                ),
+                IntrinsicNode("_mm512_unpacklo_epi32", {"a": ref1, "b": ref2}),
+                IntrinsicNode("_mm512_unpackhi_epi32", {"a": ref1, "b": ref2}),
+                IntrinsicNode(
+                    "_mm512_shuffle_i32x4",
+                    {
+                        "a": ref1,
+                        "b": ref2,
+                        "imm8": Symbolic(f"imm8_shuf_i32x4_{tag}", 8),
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm512_alignr_epi32",
+                    {
+                        "a": ref1,
+                        "b": ref2,
+                        "imm8": Symbolic(f"imm8_alignr_{tag}", 8),
+                    },
+                ),
+                # Masked (16-bit k-mask)
+                IntrinsicNode(
+                    "_mm512_mask_permutex2var_epi32",
+                    {
+                        "a": ref1,
+                        "k": Symbolic(f"k_mask_permutex2var_{tag}", 16),
+                        "op_idx": Symbolic(f"ctrl_m_permutex2var_{tag}", 512),
+                        "b": ref2,
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm512_mask_shuffle_ps",
+                    {
+                        "src": ref1,
+                        "k": Symbolic(f"k_mask_shuffle_ps_{tag}", 16),
+                        "a": ref1,
+                        "b": ref2,
+                        "imm8": Symbolic(f"imm8_m_shuffle_ps_{tag}", 8),
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm512_mask_unpacklo_epi32",
+                    {
+                        "src": ref1,
+                        "k": Symbolic(f"k_mask_unpacklo_{tag}", 16),
+                        "a": ref1,
+                        "b": ref2,
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm512_mask_unpackhi_epi32",
+                    {
+                        "src": ref1,
+                        "k": Symbolic(f"k_mask_unpackhi_{tag}", 16),
+                        "a": ref1,
+                        "b": ref2,
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm512_mask_shuffle_i32x4",
+                    {
+                        "src": ref1,
+                        "k": Symbolic(f"k_mask_shuf_i32x4_{tag}", 16),
+                        "a": ref1,
+                        "b": ref2,
+                        "imm8": Symbolic(f"imm8_m_shuf_i32x4_{tag}", 8),
+                    },
+                ),
+                IntrinsicNode(
+                    "_mm512_mask_alignr_epi32",
+                    {
+                        "src": ref1,
+                        "k": Symbolic(f"k_mask_alignr_{tag}", 16),
+                        "a": ref1,
+                        "b": ref2,
+                        "imm8": Symbolic(f"imm8_m_alignr_{tag}", 8),
+                    },
+                ),
             ]
 
         raise NotImplementedError(
-            f"Dual-input instructions not implemented for {self.vm} and {self.prim_type}"
+            f"Dual-input intrinsics not implemented for {self.vm} and {self.prim_type}"
         )
 
 
@@ -2036,13 +1723,9 @@ def _validate_gadget_worker(job):
     where gadget_results is a list of (gadget, output_state) tuples.
     """
     global _worker_tar, _worker_job_count
-    top_seq, bottom_seq, input_state, target_pairs, vm, prim_type, metadata = job
+    graph, input_state, target_pairs, vm, prim_type, metadata = job
 
-    # Create clones of sequences to avoid modifying the ones in the main process
-    top_seq_clone = copy.deepcopy(top_seq)
-    bottom_seq_clone = copy.deepcopy(bottom_seq)
-
-    # Create a local synthesizer and synthesis in its own Z3 context
+    # Create a local synthesizer in its own Z3 context
     synthesizer = GadgetSynthesizer(vm, prim_type)
 
     smt2_dump_dir = metadata.get("smt2_dump_dir")
@@ -2055,7 +1738,6 @@ def _validate_gadget_worker(job):
 
         if _worker_tar is None:
             pid = os.getpid()
-            # Write to an uncompressed tar file first; we'll compress it in the main process
             tar_filename = f"stage{stage_idx}_pid_{pid}.tar"
             tar_path = os.path.join(smt2_dump_dir, tar_filename)
             _worker_tar = tarfile.open(tar_path, mode="a")
@@ -2067,7 +1749,6 @@ def _validate_gadget_worker(job):
         tar_info = tarfile.TarInfo(name=f"job_{_worker_job_count}.smt2")
         tar_info.size = len(smt2_bytes)
         _worker_tar.addfile(tar_info, io.BytesIO(smt2_bytes))
-        # Ensure it's written to disk
         _worker_tar.fileobj.flush()
 
     allow_any_lane_order = metadata.get("allow_any_lane_order", True)
@@ -2075,8 +1756,7 @@ def _validate_gadget_worker(job):
 
     gadget_results, construction_time, solver_time = (
         synthesizer.synthesize_gadget_with_symbolic(
-            top_seq_clone,
-            bottom_seq_clone,
+            graph,
             input_state,
             target_pairs,
             max_solutions=1,

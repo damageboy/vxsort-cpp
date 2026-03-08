@@ -37,12 +37,67 @@ class VectorState:
         return (tuple(self.top), tuple(self.bottom))
 
 
-@dataclass
-class SymbolicPlaceholder:
-    """Represents a symbolic Z3 variable that can be safely pickled."""
+# ---------------------------------------------------------------------------
+# Gadget data-flow graph nodes
+#
+# These types describe gadget instruction templates as explicit graphs.
+# Nodes are trivially picklable (no Z3 objects) and are built once during
+# candidate enumeration then sent to worker subprocesses for synthesis.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class InputRef:
+    """Reference to a named input register ("top" or "bottom")."""
+
+    name: str  # "top" or "bottom"
+
+
+@dataclass(frozen=True)
+class Symbolic:
+    """A symbolic variable resolved to a Z3 BitVec during evaluation."""
 
     name: str
-    size: int
+    bit_width: int
+
+
+@dataclass
+class Mux:
+    """Multiplexer: selects among *sources* via a symbolic select variable.
+
+    Pruning modes (applied by the evaluator):
+      - ``None``: unconstrained.
+      - ``"force_last"``: select variable forced to the last source index.
+      - ``"at_least_one_last"``: when sibling muxes share an ``IntrinsicNode``
+        parent, at least one must pick a source >= the last index.
+    """
+
+    select: Symbolic
+    sources: tuple  # of GadgetNode
+    pruning: str | None = None
+
+
+@dataclass
+class IntrinsicNode:
+    """An AVX intrinsic applied to operands drawn from the graph."""
+
+    name: str
+    operands: dict  # str → GadgetNode
+
+
+# Union of all node types (for type annotations).
+GadgetNode = InputRef | Symbolic | Mux | IntrinsicNode
+
+
+@dataclass
+class GadgetGraph:
+    """A complete gadget template: one data-flow graph per vector side.
+
+    ``None`` outputs represent identity (depth-0).
+    """
+
+    top: IntrinsicNode | None
+    bottom: IntrinsicNode | None
 
 
 @dataclass
