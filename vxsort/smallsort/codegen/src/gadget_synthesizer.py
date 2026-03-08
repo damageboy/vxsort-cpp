@@ -1061,6 +1061,85 @@ class GadgetSynthesizer:
         Depth 0: identity (None).
         Depth 1: one intrinsic node per template.
         Depth 2: pairs with explicit wiring and mux nodes where needed.
+
+        mermaid
+        title Permutation Gadget Data-Flow Shapes
+        flowchart TD
+
+            subgraph D0["DEPTH 0 — Identity"]
+                direction TB
+                d0_top["top reg"] --> d0_COEX["COEX<br/>min/max"]
+                d0_bot["bottom reg"] --> d0_COEX
+            end
+
+            subgraph D1["1 inst per side"]
+                subgraph A["Shape A: single-input (e.g. permute_ps)"]
+                    direction TB
+                    a_top["top reg"]
+                    a_bot["bottom reg"]
+                    a_top --> a_i0["inst0(a, imm8/cv)"]
+                    a_i0 --> a_COEX["COEX"]
+                    a_bot --> a_COEX
+                end
+                subgraph B["Shape B: dual-input (e.g. shuffle_ps)"]
+                    direction TB
+                    b_top["top reg"]
+                    b_bot["bottom reg"]
+                    b_top --> b_i0["inst0(a, b, imm8)"]
+                    b_bot --> b_i0
+                    b_i0 --> b_COEX["COEX"]
+                end
+            end
+
+            subgraph D2["2 inst per side"]
+                subgraph C["Shape C: single → single (hardwired chain)"]
+                    direction TB
+                    c_top["top reg"]
+                    c_bot["bottom reg"]
+                    c_top --> c_i0["inst0(a, imm8/cv)"]
+                    c_i0 --> c_i1["inst1(result_0, imm8/cv)"]
+                    c_i1 --> c_COEX["COEX"]
+                end
+                subgraph D["Shape D: dual → single (hardwired chain)"]
+                    direction TB
+                    d_top["top reg"]
+                    d_bot["bottom reg"]
+                    d_top --> d_i0["inst0(a, b, imm8)"]
+                    d_bot --> d_i0
+                    d_i0 --> d_i1["inst1(result_0, imm8/cv)"]
+                    d_i1 --> d_COEX["COEX"]
+                end
+                subgraph E["Shape E: single → dual (mux, ≥1 must use result_0)"]
+                    direction TB
+                    e_top["top reg"]
+                    e_bot["bottom reg"]
+                    e_top --> e_i0["inst0(a, imm8/cv)"]
+                    e_i0 --> e_r0((result_0))
+                    e_r0 -.-> e_mux_a{{mux a}}
+                    e_top -.-> e_mux_a
+                    e_bot -.-> e_mux_a
+                    e_r0 -.-> e_mux_b{{mux b}}
+                    e_top -.-> e_mux_b
+                    e_bot -.-> e_mux_b
+                    e_mux_a --> e_i1["inst1(a, b, imm8)"]
+                    e_mux_b --> e_i1
+                    e_i1 --> e_COEX["COEX"]
+                end
+            end
+
+            subgraph FG["Full Gadget: top side + bottom side + COEX"]
+                direction TB
+                fg_top["top reg"] --> fg_ts["top-side instructions<br/>(shape A-E)"]
+                fg_bot["bottom reg"] --> fg_ts
+                fg_top --> fg_bs["bottom-side instructions<br/>(shape A-E)"]
+                fg_bot --> fg_bs
+                fg_ts --> fg_nt["new top"]
+                fg_bs --> fg_nb["new bottom"]
+                fg_nt --> fg_COEX["COEX<br/>min(new_top, new_bot)<br/>max(new_top, new_bot)"]
+                fg_nb --> fg_COEX
+                fg_COEX --> fg_ot["output top<br/>(mins)"]
+                fg_COEX --> fg_ob["output bottom<br/>(maxs)"]
+            end
         """
         if depth <= 0:
             return [None]
