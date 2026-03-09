@@ -490,3 +490,212 @@ def test_filtered_synthesis_blacher_stage10_natural_order():
 
     # Top permutes bottom, bottom permutes top -- no CSE possible
     assert gadget.instruction_count() == 4
+
+
+def test_build_shared_prefix_graphs_structure():
+    """_build_shared_prefix_graphs produces graphs with shared prefix nodes."""
+    synth = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i32)
+    graphs = synth._build_shared_prefix_graphs()
+
+    assert len(graphs) > 0, "Should produce at least one shared-prefix graph"
+
+    for g in graphs:
+        assert g.top is not None
+        assert g.bottom is not None
+        assert isinstance(g.top, IntrinsicNode)
+        assert isinstance(g.bottom, IntrinsicNode)
+
+        # Tail nodes should reference shared prefix nodes
+        top_intrinsic_ops = [
+            v for v in g.top.operands.values() if isinstance(v, IntrinsicNode)
+        ]
+        bot_intrinsic_ops = [
+            v for v in g.bottom.operands.values() if isinstance(v, IntrinsicNode)
+        ]
+
+        assert (
+            len(top_intrinsic_ops) == 2
+        ), f"Tail should have 2 prefix refs, got {len(top_intrinsic_ops)}"
+        assert (
+            len(bot_intrinsic_ops) == 2
+        ), f"Tail should have 2 prefix refs, got {len(bot_intrinsic_ops)}"
+
+        # Shared by identity: same Python objects
+        for top_op, bot_op in zip(top_intrinsic_ops, bot_intrinsic_ops):
+            assert (
+                top_op is bot_op
+            ), "Prefix nodes must be the same Python object (shared by identity)"
+
+
+def _has_shared_prefix(graph: GadgetGraph) -> bool:
+    """Check whether a GadgetGraph has shared-prefix structure.
+
+    A shared-prefix graph has top and bottom IntrinsicNode tails whose
+    IntrinsicNode operands are the same Python objects (shared by identity).
+    """
+    if not isinstance(graph.top, IntrinsicNode) or not isinstance(
+        graph.bottom, IntrinsicNode
+    ):
+        return False
+    top_intrinsic_ops = [
+        v for v in graph.top.operands.values() if isinstance(v, IntrinsicNode)
+    ]
+    bot_intrinsic_ops = [
+        v for v in graph.bottom.operands.values() if isinstance(v, IntrinsicNode)
+    ]
+    if len(top_intrinsic_ops) != 2 or len(bot_intrinsic_ops) != 2:
+        return False
+    return all(t is b for t, b in zip(top_intrinsic_ops, bot_intrinsic_ops))
+
+
+def test_precompute_includes_shared_prefix_graphs():
+    """precompute_all_candidates includes shared-prefix graphs at depth >= 2."""
+    synth = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i32)
+
+    shared_prefix_graphs = synth._build_shared_prefix_graphs()
+    assert len(shared_prefix_graphs) > 0, "Precondition: shared-prefix graphs exist"
+
+    # depth=1 should NOT include any shared-prefix graphs
+    candidates_d1 = synth.precompute_all_candidates(gadget_depth=1)
+    shared_in_d1 = [g for g in candidates_d1 if _has_shared_prefix(g)]
+    assert (
+        len(shared_in_d1) == 0
+    ), f"depth=1 should not include shared-prefix graphs, found {len(shared_in_d1)}"
+
+    # depth=2 should include shared-prefix graphs
+    candidates_d2 = synth.precompute_all_candidates(gadget_depth=2)
+    shared_in_d2 = [g for g in candidates_d2 if _has_shared_prefix(g)]
+    assert len(shared_in_d2) >= len(shared_prefix_graphs), (
+        f"depth=2 should include at least {len(shared_prefix_graphs)} "
+        f"shared-prefix graphs, found {len(shared_in_d2)}"
+    )
+
+
+def test_shared_prefix_tail_symbolics_differ():
+    """Top and bottom tails have independently-named Symbolic operands."""
+    synth = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i32)
+    graphs = synth._build_shared_prefix_graphs()
+
+    for g in graphs:
+        top_symbolics = {
+            (k, v.name) for k, v in g.top.operands.items() if isinstance(v, Symbolic)
+        }
+        bot_symbolics = {
+            (k, v.name) for k, v in g.bottom.operands.items() if isinstance(v, Symbolic)
+        }
+        top_keys = {k for k, _ in top_symbolics}
+        bot_keys = {k for k, _ in bot_symbolics}
+        assert (
+            top_keys == bot_keys
+        ), "Top and bottom tails should have same operand keys"
+
+        top_names = {n for _, n in top_symbolics}
+        bot_names = {n for _, n in bot_symbolics}
+        assert top_names.isdisjoint(
+            bot_names
+        ), f"Top and bottom Symbolic names must differ: {top_names} vs {bot_names}"
+
+
+def test_instruction_count_filter_rejects_above_4():
+    """Gadgets with instruction_count > 4 would be filtered by the worker."""
+    from bitonic_types import InstructionSpec, PermutationGadget
+
+    # Construct a gadget with 3 instructions per side, no CSE (all different)
+    gadget_no_cse = PermutationGadget(
+        top_instructions=[
+            InstructionSpec("_mm256_permute_ps", {"a": "top", "imm8": 0x44}),
+            InstructionSpec("_mm256_permute_ps", {"a": "prev", "imm8": 0x55}),
+            InstructionSpec(
+                "_mm256_shuffle_ps", {"a": "prev", "b": "top", "imm8": 0x88}
+            ),
+        ],
+        bottom_instructions=[
+            InstructionSpec("_mm256_permute_ps", {"a": "bottom", "imm8": 0x66}),
+            InstructionSpec("_mm256_permute_ps", {"a": "prev", "imm8": 0x77}),
+            InstructionSpec(
+                "_mm256_shuffle_ps", {"a": "prev", "b": "bottom", "imm8": 0x99}
+            ),
+        ],
+        validated=True,
+    )
+    assert gadget_no_cse.instruction_count() == 6  # no dedup possible
+
+    # Construct a gadget with 3 per side but shared prefix (CSE -> 4)
+    gadget_cse = PermutationGadget(
+        top_instructions=[
+            InstructionSpec("_mm256_permutexvar_epi32", {"a": "top", "op_idx": 123}),
+            InstructionSpec("_mm256_permutexvar_epi32", {"a": "bottom", "op_idx": 456}),
+            InstructionSpec(
+                "_mm256_shuffle_ps", {"a": "result_0", "b": "prev", "imm8": 0xAA}
+            ),
+        ],
+        bottom_instructions=[
+            InstructionSpec("_mm256_permutexvar_epi32", {"a": "top", "op_idx": 123}),
+            InstructionSpec("_mm256_permutexvar_epi32", {"a": "bottom", "op_idx": 456}),
+            InstructionSpec(
+                "_mm256_shuffle_ps", {"a": "result_0", "b": "prev", "imm8": 0xBB}
+            ),
+        ],
+        validated=True,
+    )
+    assert gadget_cse.instruction_count() == 4  # prefix deduped
+
+    # Simulate the filter
+    results = [(gadget_no_cse, None), (gadget_cse, None)]
+    filtered = [(g, os) for g, os in results if g.instruction_count() <= 4]
+    assert len(filtered) == 1
+    assert filtered[0][0] is gadget_cse
+
+
+def test_generated_shared_prefix_solves_blacher_stage9():
+    """Generated shared-prefix graphs can solve Blacher stage 9 with CSE."""
+    synth = GadgetSynthesizer(
+        vector_machine.AVX2,
+        primitive_type.i32,
+        intrinsic_filter={"_mm256_permutexvar_epi32", "_mm256_shuffle_ps"},
+    )
+
+    input_state = VectorState(
+        top=[1, 9, 6, 14, 2, 10, 5, 13],
+        bottom=[3, 11, 8, 16, 4, 12, 7, 15],
+    )
+    target_pairs = [
+        (1, 2),
+        (9, 10),
+        (3, 4),
+        (11, 12),
+        (5, 6),
+        (13, 14),
+        (7, 8),
+        (15, 16),
+    ]
+
+    shared_graphs = synth._build_shared_prefix_graphs()
+    assert len(shared_graphs) > 0
+
+    # Try all generated shared-prefix graphs until one solves the stage
+    found = False
+    for graph in shared_graphs:
+        results, _, _ = synth.synthesize_gadget_with_symbolic(
+            graph,
+            input_state,
+            target_pairs,
+            max_solutions=1,
+            allow_any_lane_order=False,
+        )
+        if results:
+            gadget, _ = results[0]
+            # Must CSE-collapse to 4 instructions
+            assert gadget.instruction_count() == 4
+            assert len(gadget.top_instructions) == 3
+            assert len(gadget.bottom_instructions) == 3
+            # Shared prefix: first 2 instructions identical across sides
+            for i in range(2):
+                assert (
+                    gadget.top_instructions[i].args
+                    == gadget.bottom_instructions[i].args
+                ), f"Prefix instruction {i} should be identical across sides"
+            found = True
+            break
+
+    assert found, "No generated shared-prefix graph solved Blacher stage 9"

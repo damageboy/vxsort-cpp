@@ -278,9 +278,11 @@ flowchart TD
         build --> d0["depth 0: identity (None)"]
         build --> d1["depth 1: single IntrinsicNode"]
         build --> d2["depth 2: _wire_hardwired or<br/>_wire_with_muxes<br/>(explicit Mux nodes in graph)"]
+        intrinsics --> shared["_build_shared_prefix_graphs<br/>shared-prefix pattern:<br/>both sides share prefix nodes,<br/>CSE → 4 unified instructions"]
         d0 --> combine["_generate_candidate_graphs_at_depth<br/>cartesian product → list[GadgetGraph]"]
         d1 --> combine
         d2 --> combine
+        shared --> combine
     end
 
     subgraph TREE["Solution Tree (build_solution_tree)"]
@@ -1094,8 +1096,7 @@ class GadgetSynthesizer:
             subgraph D2["2 inst per side"]
                 subgraph C["Shape C: single → single (hardwired chain)"]
                     direction TB
-                    c_top["top reg"]
-                    c_bot["bottom reg"]
+                    c_top["top/bottom reg"]
                     c_top --> c_i0["inst0(a, imm8/cv)"]
                     c_i0 --> c_i1["inst1(result_0, imm8/cv)"]
                     c_i1 --> c_COEX["COEX"]
@@ -1114,11 +1115,10 @@ class GadgetSynthesizer:
                     e_top["top reg"]
                     e_bot["bottom reg"]
                     e_top --> e_i0["inst0(a, imm8/cv)"]
-                    e_i0 --> e_r0((result_0))
-                    e_r0 -.-> e_mux_a{{mux a}}
+                    e_i0 -.-> e_mux_a{{mux a}}
                     e_top -.-> e_mux_a
                     e_bot -.-> e_mux_a
-                    e_r0 -.-> e_mux_b{{mux b}}
+                    e_i0 -.-> e_mux_b{{mux b}}
                     e_top -.-> e_mux_b
                     e_bot -.-> e_mux_b
                     e_mux_a --> e_i1["inst1(a, b, imm8)"]
@@ -1127,18 +1127,20 @@ class GadgetSynthesizer:
                 end
             end
 
-            subgraph FG["Full Gadget: top side + bottom side + COEX"]
-                direction TB
-                fg_top["top reg"] --> fg_ts["top-side instructions<br/>(shape A-E)"]
-                fg_bot["bottom reg"] --> fg_ts
-                fg_top --> fg_bs["bottom-side instructions<br/>(shape A-E)"]
-                fg_bot --> fg_bs
-                fg_ts --> fg_nt["new top"]
-                fg_bs --> fg_nb["new bottom"]
-                fg_nt --> fg_COEX["COEX<br/>min(new_top, new_bot)<br/>max(new_top, new_bot)"]
-                fg_nb --> fg_COEX
-                fg_COEX --> fg_ot["output top<br/>(mins)"]
-                fg_COEX --> fg_ob["output bottom<br/>(maxs)"]
+            subgraph D2S["2 inst per side (shared prefix)"]
+                subgraph F["Shape F: shared prefix → dual tails (CSE → 4 inst)"]
+                    direction TB
+                    f_top["top reg"]
+                    f_bot["bottom reg"]
+                    f_top --> f_pA["prefix_A(a, imm8/cv)"]
+                    f_bot --> f_pB["prefix_B(a, imm8/cv)"]
+                    f_pA --> f_tail_top["tail_top(a, b, imm8_top)"]
+                    f_pB --> f_tail_top
+                    f_pA --> f_tail_bot["tail_bot(a, b, imm8_bot)"]
+                    f_pB --> f_tail_bot
+                    f_tail_top --> f_COEX["COEX"]
+                    f_tail_bot --> f_COEX
+                end
             end
         """
         if depth <= 0:
@@ -1169,6 +1171,70 @@ class GadgetSynthesizer:
             return graphs
 
         raise ValueError(f"Instruction depth {depth} is not supported (max is 2)")
+
+    def _build_shared_prefix_graphs(self) -> list[GadgetGraph]:
+        """Build shared-prefix gadget graphs (Shape F).
+
+        Both sides share a prefix of two single-input permutations (one on
+        each register), then each side applies a dual-input tail instruction
+        with independent Symbolic immediates.  After CSE the shared prefix
+        is deduplicated, yielding 4 unified instructions (2 shared + 2 tails).
+
+        Only dual intrinsics with at least one Symbolic operand are used as
+        the tail — parameterless duals would produce identical tails on both
+        sides (useless).  Both operand orderings are enumerated since
+        non-commutative instructions treat a/b differently.
+        """
+        parametric_duals = [
+            d
+            for d in self.dual_intrinsics
+            if any(isinstance(v, Symbolic) for v in d.operands.values())
+        ]
+        if not parametric_duals:
+            return []
+
+        def _register_keys(node: IntrinsicNode) -> list[str]:
+            return [k for k, v in node.operands.items() if isinstance(v, InputRef)]
+
+        graphs: list[GadgetGraph] = []
+
+        for prefix_top in self.single_intrinsics_top:
+            for prefix_bot in self.single_intrinsics_bottom:
+                for dual in parametric_duals:
+                    reg_keys = _register_keys(dual)
+                    if len(reg_keys) != 2:
+                        continue
+
+                    orderings = [
+                        (prefix_top, prefix_bot),
+                        (prefix_bot, prefix_top),
+                    ]
+                    for reg_a, reg_b in orderings:
+                        top_ops = {}
+                        bot_ops = {}
+                        for key, operand in dual.operands.items():
+                            if key == reg_keys[0]:
+                                top_ops[key] = reg_a
+                                bot_ops[key] = reg_a
+                            elif key == reg_keys[1]:
+                                top_ops[key] = reg_b
+                                bot_ops[key] = reg_b
+                            elif isinstance(operand, Symbolic):
+                                top_ops[key] = Symbolic(
+                                    f"{operand.name}_shared_top", operand.bit_width
+                                )
+                                bot_ops[key] = Symbolic(
+                                    f"{operand.name}_shared_bot", operand.bit_width
+                                )
+                            else:
+                                top_ops[key] = operand
+                                bot_ops[key] = operand
+
+                        tail_top = IntrinsicNode(dual.name, top_ops)
+                        tail_bot = IntrinsicNode(dual.name, bot_ops)
+                        graphs.append(GadgetGraph(top=tail_top, bottom=tail_bot))
+
+        return graphs
 
     @staticmethod
     def _wire_hardwired(inst0: IntrinsicNode, inst1: IntrinsicNode) -> IntrinsicNode:
@@ -1226,6 +1292,8 @@ class GadgetSynthesizer:
                 all_candidates.extend(
                     self._generate_candidate_graphs_at_depth(top_depth, bottom_depth)
                 )
+        if gadget_depth >= 2:
+            all_candidates.extend(self._build_shared_prefix_graphs())
         return all_candidates
 
     # ------------------------------------------------------------------
@@ -1298,6 +1366,11 @@ def _validate_gadget_worker(job):
             allow_any_lane_order=allow_any_lane_order,
         )
     )
+
+    # Reject gadgets where CSE doesn't collapse to <= 4 unified instructions
+    gadget_results = [
+        (g, out) for g, out in gadget_results if g.instruction_count() <= 4
+    ]
 
     metadata["worker_pid"] = os.getpid()
     return gadget_results, input_state, metadata, construction_time, solver_time
