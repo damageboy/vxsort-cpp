@@ -169,17 +169,19 @@ def test_generate_candidate_graphs_order_and_counts():
     )
 
     # Top depth-2 graphs: (single,single) + (dual,single) + (single,dual)
+    # For dual→single (Shape D), asymmetric duals generate both orderings.
     n_single_top = len(synthesizer.single_intrinsics_top)
     n_dual = len(synthesizer.dual_intrinsics)
+    n_asym = sum(1 for d in synthesizer.dual_intrinsics if not d.isomorphic_order)
     expected_top_count = (
         n_single_top * n_single_top  # single → single
-        + n_dual * n_single_top  # dual → single
+        + (n_dual + n_asym) * n_single_top  # dual → single (with swapped variants)
         + n_single_top * n_dual  # single → dual
     )
 
-    # Bottom depth-1 graphs: single + dual
+    # Bottom depth-1 graphs: single + dual + asymmetric swapped variants
     n_single_bottom = len(synthesizer.single_intrinsics_bottom)
-    expected_bottom_count = n_single_bottom + n_dual
+    expected_bottom_count = n_single_bottom + n_dual + n_asym
 
     expected_total = expected_top_count * expected_bottom_count
     assert (

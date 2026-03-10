@@ -212,6 +212,86 @@ def test_multi_solution_enumeration():
     ), f"Expected 1 unique output state, got {len(output_states)}"
 
 
+def test_shape_b_includes_swapped_for_asymmetric():
+    """depth-1 candidates include both orderings for isomorphic_order=False duals."""
+    from bitonic_super_optimizer import GadgetSynthesizer
+    from bitonic_types import IntrinsicNode, InputRef
+    from utils import vector_machine, primitive_type
+
+    synth = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i32)
+    graphs = synth._build_gadget_graphs(depth=1, single_intrinsics=[])
+
+    # Collect all (name, a_ref, b_ref) tuples for dual nodes
+    dual_signatures = set()
+    for node in graphs:
+        if not isinstance(node, IntrinsicNode):
+            continue
+        reg_refs = [
+            (k, v.name) for k, v in node.operands.items() if isinstance(v, InputRef)
+        ]
+        if len(reg_refs) == 2:
+            dual_signatures.add((node.name, reg_refs[0][1], reg_refs[1][1]))
+
+    # shuffle_ps is asymmetric — both orderings must be present
+    assert (
+        "_mm256_shuffle_ps",
+        "top",
+        "bottom",
+    ) in dual_signatures, "Missing shuffle_ps(top, bottom)"
+    assert (
+        "_mm256_shuffle_ps",
+        "bottom",
+        "top",
+    ) in dual_signatures, "Missing shuffle_ps(bottom, top) — swapped variant"
+
+    # blend_ps is symmetric — only one ordering
+    blend_variants = [
+        (n, a, b) for n, a, b in dual_signatures if n == "_mm256_blend_ps"
+    ]
+    assert (
+        len(blend_variants) == 1
+    ), f"blend_ps should have only 1 ordering, got {blend_variants}"
+
+
+def test_shape_d_includes_swapped_for_asymmetric():
+    """depth-2 dual→single candidates include both orderings for asymmetric inst0."""
+    from bitonic_super_optimizer import GadgetSynthesizer
+    from bitonic_types import IntrinsicNode, InputRef
+    from utils import vector_machine, primitive_type
+
+    synth = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i32)
+    single = synth.single_intrinsics_top[:1]  # one single-input instruction
+    graphs = synth._build_gadget_graphs(depth=2, single_intrinsics=single)
+
+    # Collect root→child (inst1→inst0) pairs for shape D graphs
+    # Shape D: root is single-input, its operand is a dual (the inst0)
+    shape_d_inst0_names = set()
+    for node in graphs:
+        if not isinstance(node, IntrinsicNode):
+            continue
+        for v in node.operands.values():
+            if isinstance(v, IntrinsicNode):
+                inner_refs = [
+                    (k, op.name)
+                    for k, op in v.operands.items()
+                    if isinstance(op, InputRef)
+                ]
+                if len(inner_refs) == 2:
+                    shape_d_inst0_names.add(
+                        (v.name, inner_refs[0][1], inner_refs[1][1])
+                    )
+
+    # shuffle_ps asymmetric: both orderings as inst0
+    assert ("_mm256_shuffle_ps", "top", "bottom") in shape_d_inst0_names
+    assert ("_mm256_shuffle_ps", "bottom", "top") in shape_d_inst0_names
+
+    # blend_ps symmetric: only one ordering as inst0
+    blend_variants = [
+        (n, a, b) for n, a, b in shape_d_inst0_names if n == "_mm256_blend_ps"
+    ]
+    assert len(blend_variants) == 1
+
+
 if __name__ == "__main__":
     try:
         test_enumerate_instruction_count()

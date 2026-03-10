@@ -1147,7 +1147,12 @@ class GadgetSynthesizer:
             return [None]
 
         if depth == 1:
-            return list(single_intrinsics) + list(self.dual_intrinsics)
+            result: list[IntrinsicNode] = list(single_intrinsics)
+            for dual in self.dual_intrinsics:
+                result.append(dual)
+                if not dual.isomorphic_order:
+                    result.append(self._swap_register_operands(dual))
+            return result
 
         if depth == 2:
             top = self._top_ref
@@ -1161,8 +1166,12 @@ class GadgetSynthesizer:
 
             # dual → single: inst1 hardwired to inst0
             for inst0 in self.dual_intrinsics:
-                for inst1 in single_intrinsics:
-                    graphs.append(self._wire_hardwired(inst0, inst1))
+                inst0_variants = [inst0]
+                if not inst0.isomorphic_order:
+                    inst0_variants.append(self._swap_register_operands(inst0))
+                for inst0_v in inst0_variants:
+                    for inst1 in single_intrinsics:
+                        graphs.append(self._wire_hardwired(inst0_v, inst1))
 
             # single → dual: inst1 gets muxes on both register operands
             for inst0 in single_intrinsics:
@@ -1247,6 +1256,18 @@ class GadgetSynthesizer:
             else:
                 operands[key] = operand
         return IntrinsicNode(inst1.name, operands)
+
+    @staticmethod
+    def _swap_register_operands(node: IntrinsicNode) -> IntrinsicNode:
+        """Return a copy of *node* with its two InputRef operands swapped."""
+        reg_keys = [k for k, v in node.operands.items() if isinstance(v, InputRef)]
+        assert len(reg_keys) == 2, f"Expected 2 InputRef operands, got {reg_keys}"
+        new_ops = dict(node.operands)
+        new_ops[reg_keys[0]], new_ops[reg_keys[1]] = (
+            new_ops[reg_keys[1]],
+            new_ops[reg_keys[0]],
+        )
+        return IntrinsicNode(node.name, new_ops, isomorphic_order=node.isomorphic_order)
 
     @staticmethod
     def _wire_with_muxes(
