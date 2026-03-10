@@ -520,11 +520,14 @@ def test_build_shared_prefix_graphs_structure():
             len(bot_intrinsic_ops) == 2
         ), f"Tail should have 2 prefix refs, got {len(bot_intrinsic_ops)}"
 
-        # Shared by identity: same Python objects
-        for top_op, bot_op in zip(top_intrinsic_ops, bot_intrinsic_ops):
-            assert (
-                top_op is bot_op
-            ), "Prefix nodes must be the same Python object (shared by identity)"
+        # Shared by identity: same Python objects (possibly in different order
+        # for cross-ordering graphs)
+        top_ids = {id(x) for x in top_intrinsic_ops}
+        bot_ids = {id(x) for x in bot_intrinsic_ops}
+        assert top_ids == bot_ids, (
+            "Prefix nodes must be the same Python objects (shared by identity), "
+            "though possibly in different order (cross-ordering)"
+        )
 
 
 def _has_shared_prefix(graph: GadgetGraph) -> bool:
@@ -545,7 +548,7 @@ def _has_shared_prefix(graph: GadgetGraph) -> bool:
     ]
     if len(top_intrinsic_ops) != 2 or len(bot_intrinsic_ops) != 2:
         return False
-    return all(t is b for t, b in zip(top_intrinsic_ops, bot_intrinsic_ops))
+    return {id(x) for x in top_intrinsic_ops} == {id(x) for x in bot_intrinsic_ops}
 
 
 def test_precompute_includes_shared_prefix_graphs():
@@ -699,3 +702,81 @@ def test_generated_shared_prefix_solves_blacher_stage9():
             break
 
     assert found, "No generated shared-prefix graph solved Blacher stage 9"
+
+
+def test_shape_f_symmetric_dual_has_one_ordering():
+    """Symmetric duals (isomorphic_order=True) produce only one operand ordering in Shape F."""
+    synth = GadgetSynthesizer(
+        vector_machine.AVX2,
+        primitive_type.i32,
+        intrinsic_filter={"_mm256_permute_ps", "_mm256_blend_ps"},
+    )
+    graphs = synth._build_shared_prefix_graphs()
+
+    # blend_ps is symmetric + has Symbolics → one ordering
+    blend_graphs = [g for g in graphs if g.top.name == "_mm256_blend_ps"]
+    assert len(blend_graphs) > 0, "Should produce blend_ps graphs"
+
+    # Count distinct orderings by looking at which prefix node is first reg operand
+    orderings_seen = set()
+    for g in blend_graphs:
+        top_refs = [
+            id(v) for v in g.top.operands.values() if isinstance(v, IntrinsicNode)
+        ]
+        orderings_seen.add(tuple(top_refs))
+
+    assert (
+        len(orderings_seen) == 1
+    ), f"blend_ps (symmetric) should produce 1 ordering, got {len(orderings_seen)}"
+
+
+def test_shape_f_asymmetric_parametric_dual_has_two_orderings():
+    """Asymmetric duals with Symbolics produce two same-ordering variants in Shape F."""
+    synth = GadgetSynthesizer(
+        vector_machine.AVX2,
+        primitive_type.i32,
+        intrinsic_filter={"_mm256_permute_ps", "_mm256_shuffle_ps"},
+    )
+    graphs = synth._build_shared_prefix_graphs()
+
+    shuffle_graphs = [g for g in graphs if g.top.name == "_mm256_shuffle_ps"]
+    assert len(shuffle_graphs) > 0, "Should produce shuffle_ps graphs"
+
+    # Count distinct orderings
+    orderings_seen = set()
+    for g in shuffle_graphs:
+        top_refs = [
+            id(v) for v in g.top.operands.values() if isinstance(v, IntrinsicNode)
+        ]
+        orderings_seen.add(tuple(top_refs))
+
+    assert len(orderings_seen) == 2, (
+        f"shuffle_ps (asymmetric+parametric) should produce 2 orderings, "
+        f"got {len(orderings_seen)}"
+    )
+
+
+def test_shape_f_asymmetric_parameterless_dual_has_cross_ordering():
+    """Asymmetric duals without Symbolics produce cross-ordering in Shape F."""
+    synth = GadgetSynthesizer(
+        vector_machine.AVX2,
+        primitive_type.i32,
+        intrinsic_filter={"_mm256_permute_ps", "_mm256_unpacklo_epi32"},
+    )
+    graphs = synth._build_shared_prefix_graphs()
+
+    unpack_graphs = [g for g in graphs if g.top.name == "_mm256_unpacklo_epi32"]
+    assert len(unpack_graphs) > 0, "Should produce unpacklo graphs (cross-ordering)"
+
+    for g in unpack_graphs:
+        top_reg_ids = [
+            id(v) for v in g.top.operands.values() if isinstance(v, IntrinsicNode)
+        ]
+        bot_reg_ids = [
+            id(v) for v in g.bottom.operands.values() if isinstance(v, IntrinsicNode)
+        ]
+        # Cross-ordering: top and bottom must use DIFFERENT operand orders
+        assert top_reg_ids != bot_reg_ids, (
+            "unpacklo (asymmetric, no Symbolics) must use cross-ordering "
+            "(top and bottom tails have swapped operands)"
+        )

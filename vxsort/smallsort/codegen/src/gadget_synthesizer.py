@@ -1185,63 +1185,87 @@ class GadgetSynthesizer:
         """Build shared-prefix gadget graphs (Shape F).
 
         Both sides share a prefix of two single-input permutations (one on
-        each register), then each side applies a dual-input tail instruction
-        with independent Symbolic immediates.  After CSE the shared prefix
-        is deduplicated, yielding 4 unified instructions (2 shared + 2 tails).
+        each register), then each side applies a dual-input tail instruction.
+        After CSE the shared prefix is deduplicated, yielding 4 unified
+        instructions (2 shared + 2 tails).
 
-        Only dual intrinsics with at least one Symbolic operand are used as
-        the tail — parameterless duals would produce identical tails on both
-        sides (useless).  Both operand orderings are enumerated since
-        non-commutative instructions treat a/b differently.
+        The tail enumeration is tag-aware (isomorphic_order):
+
+          isomorphic_order=True  + Symbolics → one ordering, independent
+                                               Symbolic names per side
+          isomorphic_order=False + Symbolics → two same-ordering variants
+                                               (A,B) and (B,A) for both sides
+          isomorphic_order=False + no Symbolics → cross-ordering: top uses
+                                                  (A,B), bottom uses (B,A);
+                                                  the only way to get distinct
+                                                  side outputs without a CV
+          isomorphic_order=True  + no Symbolics → skip (top ≡ bottom always)
         """
-        parametric_duals = [
-            d
-            for d in self.dual_intrinsics
-            if any(isinstance(v, Symbolic) for v in d.operands.values())
-        ]
-        if not parametric_duals:
-            return []
+
+        def _has_symbolic(node: IntrinsicNode) -> bool:
+            return any(isinstance(v, Symbolic) for v in node.operands.values())
 
         def _register_keys(node: IntrinsicNode) -> list[str]:
             return [k for k, v in node.operands.items() if isinstance(v, InputRef)]
+
+        def _build_tail(
+            dual: IntrinsicNode,
+            reg_a: IntrinsicNode,
+            reg_b: IntrinsicNode,
+            suffix: str,
+        ) -> IntrinsicNode:
+            """Build one tail node wiring reg_a→first-reg-key, reg_b→second-reg-key."""
+            reg_keys = _register_keys(dual)
+            ops = {}
+            for key, operand in dual.operands.items():
+                if key == reg_keys[0]:
+                    ops[key] = reg_a
+                elif key == reg_keys[1]:
+                    ops[key] = reg_b
+                elif isinstance(operand, Symbolic):
+                    ops[key] = Symbolic(
+                        f"{operand.name}_shared_{suffix}", operand.bit_width
+                    )
+                else:
+                    ops[key] = operand
+            return IntrinsicNode(dual.name, ops, isomorphic_order=dual.isomorphic_order)
 
         graphs: list[GadgetGraph] = []
 
         for prefix_top in self.single_intrinsics_top:
             for prefix_bot in self.single_intrinsics_bottom:
-                for dual in parametric_duals:
+                for dual in self.dual_intrinsics:
                     reg_keys = _register_keys(dual)
                     if len(reg_keys) != 2:
                         continue
 
-                    orderings = [
-                        (prefix_top, prefix_bot),
-                        (prefix_bot, prefix_top),
-                    ]
-                    for reg_a, reg_b in orderings:
-                        top_ops = {}
-                        bot_ops = {}
-                        for key, operand in dual.operands.items():
-                            if key == reg_keys[0]:
-                                top_ops[key] = reg_a
-                                bot_ops[key] = reg_a
-                            elif key == reg_keys[1]:
-                                top_ops[key] = reg_b
-                                bot_ops[key] = reg_b
-                            elif isinstance(operand, Symbolic):
-                                top_ops[key] = Symbolic(
-                                    f"{operand.name}_shared_top", operand.bit_width
-                                )
-                                bot_ops[key] = Symbolic(
-                                    f"{operand.name}_shared_bot", operand.bit_width
-                                )
-                            else:
-                                top_ops[key] = operand
-                                bot_ops[key] = operand
+                    has_sym = _has_symbolic(dual)
 
-                        tail_top = IntrinsicNode(dual.name, top_ops)
-                        tail_bot = IntrinsicNode(dual.name, bot_ops)
+                    if dual.isomorphic_order:
+                        # Symmetric: one ordering only
+                        if not has_sym:
+                            continue  # top ≡ bottom always — useless
+                        tail_top = _build_tail(dual, prefix_top, prefix_bot, "top")
+                        tail_bot = _build_tail(dual, prefix_top, prefix_bot, "bot")
                         graphs.append(GadgetGraph(top=tail_top, bottom=tail_bot))
+                    else:
+                        # Asymmetric
+                        if has_sym:
+                            # Two same-ordering variants
+                            for reg_a, reg_b in [
+                                (prefix_top, prefix_bot),
+                                (prefix_bot, prefix_top),
+                            ]:
+                                tail_top = _build_tail(dual, reg_a, reg_b, "top")
+                                tail_bot = _build_tail(dual, reg_a, reg_b, "bot")
+                                graphs.append(
+                                    GadgetGraph(top=tail_top, bottom=tail_bot)
+                                )
+                        else:
+                            # Cross-ordering: only way to get distinct outputs
+                            tail_top = _build_tail(dual, prefix_top, prefix_bot, "top")
+                            tail_bot = _build_tail(dual, prefix_bot, prefix_top, "bot")
+                            graphs.append(GadgetGraph(top=tail_top, bottom=tail_bot))
 
         return graphs
 
