@@ -86,9 +86,14 @@ def dual_input_nodes(ref1: InputRef, ref2: InputRef) -> list[IntrinsicNode]:
                 "b": ref2,
                 "imm8": Symbolic(f"imm8_shuffle_{tag}", 8),
             },
+            isomorphic_order=False,
         ),
-        IntrinsicNode("_mm256_unpacklo_epi32", {"a": ref1, "b": ref2}),
-        IntrinsicNode("_mm256_unpackhi_epi32", {"a": ref1, "b": ref2}),
+        IntrinsicNode(
+            "_mm256_unpacklo_epi32", {"a": ref1, "b": ref2}, isomorphic_order=False
+        ),
+        IntrinsicNode(
+            "_mm256_unpackhi_epi32", {"a": ref1, "b": ref2}, isomorphic_order=False
+        ),
         IntrinsicNode(
             "_mm256_permute2x128_si256",
             {
@@ -112,5 +117,6 @@ def dual_input_nodes(ref1: InputRef, ref2: InputRef) -> list[IntrinsicNode]:
                 "b": ref2,
                 "imm8": Symbolic(f"imm8_alignr_{tag}", 8),
             },
+            isomorphic_order=False,
         ),
     ]

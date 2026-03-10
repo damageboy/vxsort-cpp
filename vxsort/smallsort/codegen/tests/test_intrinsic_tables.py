@@ -113,3 +113,54 @@ def test_node_counts_match_expected(vm, prim, expected_single, expected_dual):
     assert (
         len(dual) == expected_dual
     ), f"Expected {expected_dual} dual-input nodes for {vm}/{prim}, got {len(dual)}"
+
+
+def test_asymmetric_dual_intrinsics_tagged():
+    """Instructions that are order-dependent carry isomorphic_order=False."""
+    # Instructions known to be order-dependent
+    EXPECTED_ASYMMETRIC = {
+        # AVX2
+        "_mm256_shuffle_ps",
+        "_mm256_unpacklo_epi32",
+        "_mm256_unpackhi_epi32",
+        "_mm256_alignr_epi32",
+        "_mm256_shuffle_pd",
+        "_mm256_unpacklo_epi64",
+        "_mm256_unpackhi_epi64",
+        "_mm256_alignr_epi64",
+        # AVX512
+        "_mm512_shuffle_ps",
+        "_mm512_unpacklo_epi32",
+        "_mm512_unpackhi_epi32",
+        "_mm512_alignr_epi32",
+        "_mm512_mask_shuffle_ps",
+        "_mm512_mask_unpacklo_epi32",
+        "_mm512_mask_unpackhi_epi32",
+        "_mm512_mask_alignr_epi32",
+        "_mm512_shuffle_i32x4",
+        "_mm512_mask_shuffle_i32x4",
+        "_mm512_shuffle_pd",
+        "_mm512_unpacklo_epi64",
+        "_mm512_unpackhi_epi64",
+        "_mm512_alignr_epi64",
+        "_mm512_mask_shuffle_pd",
+        "_mm512_mask_unpacklo_epi64",
+        "_mm512_mask_unpackhi_epi64",
+        "_mm512_mask_alignr_epi64",
+    }
+
+    ref1, ref2 = InputRef("top"), InputRef("bottom")
+    targets = [
+        (vector_machine.AVX2, primitive_type.i32),
+        (vector_machine.AVX2, primitive_type.i64),
+        (vector_machine.AVX512, primitive_type.i32),
+        (vector_machine.AVX512, primitive_type.i64),
+    ]
+    for vm, pt in targets:
+        nodes = get_dual_input_nodes(vm, pt, ref1, ref2)
+        for node in nodes:
+            expected = node.name not in EXPECTED_ASYMMETRIC
+            assert node.isomorphic_order == expected, (
+                f"{vm}/{pt}: {node.name} isomorphic_order should be "
+                f"{expected}, got {node.isomorphic_order}"
+            )

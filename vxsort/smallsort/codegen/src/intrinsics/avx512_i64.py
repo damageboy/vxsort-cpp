@@ -119,9 +119,14 @@ def dual_input_nodes(ref1: InputRef, ref2: InputRef) -> list[IntrinsicNode]:
                 "b": ref2,
                 "imm8": Symbolic(f"imm8_shuffle_pd_{tag}", 8),
             },
+            isomorphic_order=False,
         ),
-        IntrinsicNode("_mm512_unpacklo_epi64", {"a": ref1, "b": ref2}),
-        IntrinsicNode("_mm512_unpackhi_epi64", {"a": ref1, "b": ref2}),
+        IntrinsicNode(
+            "_mm512_unpacklo_epi64", {"a": ref1, "b": ref2}, isomorphic_order=False
+        ),
+        IntrinsicNode(
+            "_mm512_unpackhi_epi64", {"a": ref1, "b": ref2}, isomorphic_order=False
+        ),
         IntrinsicNode(
             "_mm512_shuffle_i32x4",
             {
@@ -129,6 +134,7 @@ def dual_input_nodes(ref1: InputRef, ref2: InputRef) -> list[IntrinsicNode]:
                 "b": ref2,
                 "imm8": Symbolic(f"imm8_shuf_i32x4_{tag}", 8),
             },
+            isomorphic_order=False,
         ),
         IntrinsicNode(
             "_mm512_alignr_epi64",
@@ -137,6 +143,7 @@ def dual_input_nodes(ref1: InputRef, ref2: InputRef) -> list[IntrinsicNode]:
                 "b": ref2,
                 "imm8": Symbolic(f"imm8_alignr_{tag}", 8),
             },
+            isomorphic_order=False,
         ),
         # Masked
         IntrinsicNode(
@@ -157,6 +164,7 @@ def dual_input_nodes(ref1: InputRef, ref2: InputRef) -> list[IntrinsicNode]:
                 "b": ref2,
                 "imm8": Symbolic(f"imm8_m_shuffle_pd_{tag}", 8),
             },
+            isomorphic_order=False,
         ),
         IntrinsicNode(
             "_mm512_mask_unpacklo_epi64",
@@ -166,6 +174,7 @@ def dual_input_nodes(ref1: InputRef, ref2: InputRef) -> list[IntrinsicNode]:
                 "a": ref1,
                 "b": ref2,
             },
+            isomorphic_order=False,
         ),
         IntrinsicNode(
             "_mm512_mask_unpackhi_epi64",
@@ -175,6 +184,7 @@ def dual_input_nodes(ref1: InputRef, ref2: InputRef) -> list[IntrinsicNode]:
                 "a": ref1,
                 "b": ref2,
             },
+            isomorphic_order=False,
         ),
         IntrinsicNode(
             "_mm512_mask_shuffle_i32x4",
@@ -185,6 +195,7 @@ def dual_input_nodes(ref1: InputRef, ref2: InputRef) -> list[IntrinsicNode]:
                 "b": ref2,
                 "imm8": Symbolic(f"imm8_m_shuf_i32x4_{tag}", 8),
             },
+            isomorphic_order=False,
         ),
         IntrinsicNode(
             "_mm512_mask_alignr_epi64",
@@ -195,5 +206,6 @@ def dual_input_nodes(ref1: InputRef, ref2: InputRef) -> list[IntrinsicNode]:
                 "b": ref2,
                 "imm8": Symbolic(f"imm8_m_alignr_{tag}", 8),
             },
+            isomorphic_order=False,
         ),
     ]
