@@ -74,6 +74,18 @@ def test_unsupported_target_raises():
         get_z3_functions(vector_machine.AVX2, primitive_type.i16)
 
 
+def test_intrinsic_node_isomorphic_order_default():
+    """IntrinsicNode defaults isomorphic_order=True and excludes it from equality."""
+    from bitonic_types import IntrinsicNode, InputRef
+
+    a = IntrinsicNode("foo", {"x": InputRef("top")})
+    b = IntrinsicNode("foo", {"x": InputRef("top")}, isomorphic_order=False)
+
+    assert a.isomorphic_order is True
+    assert b.isomorphic_order is False
+    assert a == b  # compare=False: tag does not affect equality
+
+
 # Expected node counts per target
 _COUNT_CASES = [
     (vector_machine.AVX2, primitive_type.i32, 4, 6),

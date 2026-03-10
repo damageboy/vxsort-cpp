@@ -83,6 +83,7 @@ class IntrinsicNode:
 
     name: str
     operands: dict  # str → GadgetNode
+    isomorphic_order: bool = field(default=True, compare=False, hash=False)
 
 
 # Union of all node types (for type annotations).
