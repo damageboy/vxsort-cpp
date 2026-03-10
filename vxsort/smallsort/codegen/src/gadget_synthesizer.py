@@ -1064,6 +1064,21 @@ class GadgetSynthesizer:
         Depth 1: one intrinsic node per template.
         Depth 2: pairs with explicit wiring and mux nodes where needed.
 
+        Ordering variants driven by ``isomorphic_order`` tag:
+
+        Shapes B & D (dual-input at depth 1 and depth 2 respectively):
+          Symmetric duals (isomorphic_order=True) produce one operand ordering.
+          Asymmetric duals (isomorphic_order=False) produce both orderings:
+          inst(top, bot) and inst(bot, top).
+
+        Shape F (shared-prefix → dual tails, built by _build_shared_prefix_graphs):
+          isomorphic_order=True  + Symbolics   → 1 ordering; independent CVs per side
+          isomorphic_order=False + Symbolics   → 2 same-ordering variants (A,B)+(B,A)
+          isomorphic_order=False + no Symbolics → cross-ordering: top uses (A,B),
+                                                  bottom uses (B,A) — the only way to
+                                                  get distinct outputs without a CV
+          isomorphic_order=True  + no Symbolics → skipped (top ≡ bottom always)
+
         mermaid
         title Permutation Gadget Data-Flow Shapes
         flowchart TD
@@ -1083,7 +1098,7 @@ class GadgetSynthesizer:
                     a_i0 --> a_COEX["COEX"]
                     a_bot --> a_COEX
                 end
-                subgraph B["Shape B: dual-input (e.g. shuffle_ps)"]
+                subgraph B["Shape B: dual-input; asymmetric duals emit both orderings"]
                     direction TB
                     b_top["top reg"]
                     b_bot["bottom reg"]
@@ -1101,7 +1116,7 @@ class GadgetSynthesizer:
                     c_i0 --> c_i1["inst1(result_0, imm8/cv)"]
                     c_i1 --> c_COEX["COEX"]
                 end
-                subgraph D["Shape D: dual → single (hardwired chain)"]
+                subgraph D["Shape D: dual → single; asymmetric duals emit both orderings"]
                     direction TB
                     d_top["top reg"]
                     d_bot["bottom reg"]
@@ -1128,7 +1143,7 @@ class GadgetSynthesizer:
             end
 
             subgraph D2S["2 inst per side (shared prefix)"]
-                subgraph F["Shape F: shared prefix → dual tails (CSE → 4 inst)"]
+                subgraph F["Shape F: shared prefix → dual tails (tag-aware, see above)"]
                     direction TB
                     f_top["top reg"]
                     f_bot["bottom reg"]
