@@ -67,21 +67,97 @@ def _emit_gadget_asm(
     reg_allocator: RegisterAllocator,
     top_reg: str,
     bottom_reg: str | None,
+    dst_top_reg: str,
+    dst_bottom_reg: str | None,
     stage_idx: int,
     rodata_entries: list[tuple[str, str]],
-) -> list[str]:
+    cv_cache: dict[str, str] | None = None,
+) -> tuple[list[str], bool]:
     """Emit assembly lines for a gadget's instructions, including CV/k-mask loads.
 
-    Returns a list of assembly lines. Appends (label, directive) pairs to
-    rodata_entries for any control vectors that need .rodata definitions.
+    Returns (lines, is_dual_side):
+      - lines: assembly lines
+      - is_dual_side: True when both sides have instructions and the gadget
+        writes to the destination register pair (caller must adjust COEX flow)
+
+    For dual-side gadgets, each side writes to its corresponding dst register
+    instead of modifying the src register in-place.  This eliminates the
+    cross-side save (vmovdqa copy) because source registers are never modified.
+
+    Appends (label, directive) pairs to rodata_entries for control vectors.
+    cv_cache deduplicates identical control vector entries across stages.
     """
     lines: list[str] = []
     total_bits = width_dict[reg_allocator.vm] * 8
     cv_counter = [0]  # mutable counter for closure
+    if cv_cache is None:
+        cv_cache = {}
+
+    # Detect dual-side: both top and bottom have instructions.
+    # In dual-side mode, gadget writes to dst pair so src is never modified.
+    is_dual_side = (
+        bool(gadget.top_instructions)
+        and bool(gadget.bottom_instructions)
+        and bottom_reg is not None
+    )
 
     def _emit_instructions(instructions, is_top: bool, side_label: str):
-        dest_reg = top_reg if is_top else bottom_reg
+        source_reg = top_reg if is_top else bottom_reg
+        if is_dual_side:
+            dest_reg = dst_top_reg if is_top else dst_bottom_reg
+        else:
+            dest_reg = source_reg  # in-place
+
+        result_re = re.compile(r"^result_(\d+)$")
+
+        # Multi-instruction gadgets use "input" (original value before
+        # the chain started) and "result_N" (output of instruction N).
+        # Pre-scan to find which intermediates need saving.
+        needs_input_save = False
+        needed_result_saves: set[int] = set()
         for inst in instructions:
+            for v in inst.args.values():
+                if isinstance(v, str):
+                    if v == "input":
+                        needs_input_save = True
+                    m = result_re.match(v)
+                    if m:
+                        needed_result_saves.add(int(m.group(1)))
+
+        mov_mnemonic = (
+            "vmovdqa64" if reg_allocator.vm == vector_machine.AVX512 else "vmovdqa32"
+        )
+
+        input_save_reg = None
+        if needs_input_save:
+            if is_dual_side:
+                # Source register is never overwritten → "input" = source_reg
+                input_save_reg = source_reg
+            else:
+                input_save_reg = reg_allocator.allocate_temp()
+                lines.append(
+                    f"    {mov_mnemonic:20s} {input_save_reg}, {dest_reg}"
+                    f"  ; save input"
+                )
+
+        result_save_regs: dict[int, str] = {}
+
+        def resolve(name: str) -> str:
+            """Resolve source name including multi-instruction refs."""
+            if name == "input":
+                assert input_save_reg is not None
+                return input_save_reg
+            m = result_re.match(name)
+            if m:
+                idx = int(m.group(1))
+                assert idx in result_save_regs, f"result_{idx} not yet computed"
+                return result_save_regs[idx]
+            if name == "prev":
+                return dest_reg
+            # "top" / "bottom" always resolve to src registers (unmodified)
+            return _resolve_source(name, top_reg, bottom_reg or top_reg, is_top)
+
+        for inst_idx, inst in enumerate(instructions):
             mnemonic = _intrinsic_to_asm_mnemonic(inst.intrinsic_name)
             metadata = _get_instruction_metadata(inst.intrinsic_name)
             args = inst.args
@@ -98,12 +174,14 @@ def _emit_gadget_asm(
                 kmask_val = args["k"]
                 kmask_reg = reg_allocator.allocate_kmask()
 
-            # Detect control vector from various arg patterns
+            # Detect control vector from various arg patterns.
+            # Use isinstance(int) to distinguish numeric control vectors
+            # from string source references ("input", "result_N", etc.)
             if "op_idx" in args:
                 ctrl_val = args["op_idx"]
                 ctrl_element_width = metadata["control_vector_width"]
-            elif "b" in args and args["b"] not in ("top", "bottom", "prev"):
-                # 'b' is a control vector value, not a register
+            elif "b" in args and isinstance(args["b"], int):
+                # 'b' is a numeric control vector, not a register reference
                 ctrl_val = args["b"]
                 ctrl_element_width = metadata["control_vector_width"]
             elif (
@@ -125,20 +203,23 @@ def _emit_gadget_asm(
             ctrl_reg = None
             if ctrl_val is not None:
                 ctrl_reg = reg_allocator.allocate_temp()
-                cv_label = f"cv_s{stage_idx}_{side_label[0]}{cv_counter[0]}"
-                cv_counter[0] += 1
 
                 element_bits = ctrl_element_width or (reg_allocator.dtype.value[0] * 8)
                 data_directive = _format_cv_as_data_directive(
                     ctrl_val, total_bits, element_bits
                 )
-                rodata_entries.append((cv_label, data_directive))
 
-                if reg_allocator.vm == vector_machine.AVX512:
-                    load_mnemonic = "vmovdqa64"
+                # Deduplicate: reuse an existing .rodata label if the
+                # same directive was already emitted.
+                if data_directive in cv_cache:
+                    cv_label = cv_cache[data_directive]
                 else:
-                    load_mnemonic = "vmovdqa32"
-                lines.append(f"    {load_mnemonic:20s} {ctrl_reg}, [rel {cv_label}]")
+                    cv_label = f"cv_s{stage_idx}_{side_label[0]}{cv_counter[0]}"
+                    cv_counter[0] += 1
+                    cv_cache[data_directive] = cv_label
+                    rodata_entries.append((cv_label, data_directive))
+
+                lines.append(f"    {mov_mnemonic:20s} {ctrl_reg}, [rel {cv_label}]")
                 # Add comment showing CV contents
                 comment = _format_control_vector_bits(
                     ctrl_val, total_bits, element_bits
@@ -158,23 +239,19 @@ def _emit_gadget_asm(
                 and "a" in args
                 and "b" not in args
             ):
-                src = _resolve_source(args["a"], top_reg, bottom_reg or top_reg, is_top)
+                src = resolve(args["a"])
                 assert ctrl_reg is not None
                 operands.append(ctrl_reg)
                 operands.append(src)
 
             elif "k" in args and "src" in args and "a" in args and "b" in args:
-                src1 = _resolve_source(
-                    args["a"], top_reg, bottom_reg or top_reg, is_top
-                )
-                src2 = _resolve_source(
-                    args["b"], top_reg, bottom_reg or top_reg, is_top
-                )
+                src1 = resolve(args["a"])
+                src2 = resolve(args["b"])
                 operands.append(src1)
                 operands.append(src2)
 
             elif "k" in args and "src" in args and "a" in args and "b" not in args:
-                src = _resolve_source(args["a"], top_reg, bottom_reg or top_reg, is_top)
+                src = resolve(args["a"])
                 operands.append(src)
 
             elif (
@@ -184,39 +261,31 @@ def _emit_gadget_asm(
                 and "b" in args
                 and "src" not in args
             ):
-                src2 = _resolve_source(
-                    args["b"], top_reg, bottom_reg or top_reg, is_top
-                )
+                src2 = resolve(args["b"])
                 assert ctrl_reg is not None
                 operands.append(ctrl_reg)
                 operands.append(src2)
 
             elif "a" in args and "op_idx" in args and "b" in args and "k" not in args:
-                src2 = _resolve_source(
-                    args["b"], top_reg, bottom_reg or top_reg, is_top
-                )
+                src2 = resolve(args["b"])
                 assert ctrl_reg is not None
                 operands.append(ctrl_reg)
                 operands.append(src2)
 
             elif "a" in args and "b" in args:
-                src1 = _resolve_source(
-                    args["a"], top_reg, bottom_reg or top_reg, is_top
-                )
-                if args["b"] not in ("top", "bottom", "prev"):
-                    # 'b' is a control vector
+                src1 = resolve(args["a"])
+                if isinstance(args["b"], int):
+                    # 'b' is a numeric control vector
                     assert ctrl_reg is not None
                     operands.append(src1)
                     operands.append(ctrl_reg)
                 else:
-                    src2 = _resolve_source(
-                        args["b"], top_reg, bottom_reg or top_reg, is_top
-                    )
+                    src2 = resolve(args["b"])
                     operands.append(src1)
                     operands.append(src2)
 
             elif "a" in args:
-                src = _resolve_source(args["a"], top_reg, bottom_reg or top_reg, is_top)
+                src = resolve(args["a"])
                 if "op_idx" in args:
                     assert ctrl_reg is not None
                     operands.append(ctrl_reg)
@@ -225,9 +294,7 @@ def _emit_gadget_asm(
                     operands.append(src)
 
             elif "input" in args:
-                src = _resolve_source(
-                    args["input"], top_reg, bottom_reg or top_reg, is_top
-                )
+                src = resolve(args["input"])
                 operands.append(src)
 
             # Immediate values and their comments
@@ -275,6 +342,14 @@ def _emit_gadget_asm(
                 inst_line += f"  ; {comment}"
             lines.append(inst_line)
 
+            # Save result to temp if later instructions reference it
+            if inst_idx in needed_result_saves:
+                result_save_regs[inst_idx] = reg_allocator.allocate_temp()
+                lines.append(
+                    f"    {mov_mnemonic:20s} {result_save_regs[inst_idx]}, {dest_reg}"
+                    f"  ; save result_{inst_idx}"
+                )
+
     # Emit top instructions
     if gadget.top_instructions:
         lines.append(f"    ; Top vector ({top_reg}) operations:")
@@ -283,9 +358,13 @@ def _emit_gadget_asm(
     # Emit bottom instructions
     if gadget.bottom_instructions and bottom_reg:
         lines.append(f"    ; Bottom vector ({bottom_reg}) operations:")
-        _emit_instructions(gadget.bottom_instructions, is_top=False, side_label="bot")
+        _emit_instructions(
+            gadget.bottom_instructions,
+            is_top=False,
+            side_label="bot",
+        )
 
-    return lines
+    return lines, is_dual_side
 
 
 def _generate_osaca_asm(
@@ -325,6 +404,7 @@ def _generate_osaca_asm(
 
     # Collect .rodata entries as we emit instructions
     rodata_entries: list[tuple[str, str]] = []
+    cv_cache: dict[str, str] = {}  # data_directive -> label, for dedup
 
     # Build .text section
     text_lines = [
@@ -363,28 +443,49 @@ def _generate_osaca_asm(
         # Gadget operates on source pair
         top_reg = reg_allocator.src_top
         bottom_reg = reg_allocator.src_bottom
-
-        # Register transition
-        text_lines.append(
-            f"    ; Registers: {top_reg} = top, {bottom_reg} = bottom"
-            f"  →  {reg_allocator.dst_top} = top, "
-            f"{reg_allocator.dst_bottom} = bottom"
-        )
+        dst_top_reg = reg_allocator.dst_top
+        dst_bottom_reg = reg_allocator.dst_bottom
+        is_natural_order_step = natural_order and step_idx == last_idx
+        has_coex = not is_natural_order_step and num_vecs > 1
 
         gadget = step.gadget
-        gadget_lines = _emit_gadget_asm(
+        gadget_lines, is_dual_side = _emit_gadget_asm(
             gadget,
             reg_allocator,
             top_reg,
             bottom_reg,
+            dst_top_reg,
+            dst_bottom_reg,
             stage_idx=step_idx,
             rodata_entries=rodata_entries,
+            cv_cache=cv_cache,
         )
+
+        # Compute output registers for the transition comment.
+        # Dual-side + COEX: 2 swaps → back to src pair.
+        # Non-dual + COEX: 1 swap → moves to dst pair.
+        # Dual-side + natural: 1 swap → moves to dst pair.
+        # Non-dual + natural: 0 swaps → stays in src pair.
+        output_in_dst = is_dual_side != has_coex  # XOR
+        if output_in_dst:
+            out_top, out_bottom = dst_top_reg, dst_bottom_reg
+        else:
+            out_top, out_bottom = top_reg, bottom_reg
+
+        # Register transition
+        text_lines.append(
+            f"    ; Registers: {top_reg} = top, {bottom_reg} = bottom"
+            f"  →  {out_top} = top, "
+            f"{out_bottom} = bottom"
+        )
+
         text_lines.extend(gadget_lines)
 
         # Compare-swap (skip on final natural-order stage)
-        is_natural_order_step = natural_order and step_idx == last_idx
-        if not is_natural_order_step and num_vecs > 1:
+        if has_coex:
+            if is_dual_side:
+                # Gadget wrote to dst pair; swap so COEX reads it as src
+                reg_allocator.swap_pairs()
             text_lines.append(
                 f"    ; Compare-swap: "
                 f"min → {reg_allocator.dst_top} (top), "
@@ -392,6 +493,9 @@ def _generate_osaca_asm(
             )
             cs_lines = _emit_compare_swap_lines(reg_allocator)
             text_lines.extend(cs_lines)
+            reg_allocator.swap_pairs()
+        elif is_dual_side:
+            # Natural-order dual-side: gadget wrote to dst, swap once
             reg_allocator.swap_pairs()
 
         # Output state
