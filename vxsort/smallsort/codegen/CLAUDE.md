@@ -70,6 +70,14 @@ The super-optimizer generates AVX permutation sequences for bitonic sort stages:
 - **PermutationGadget**: Sequence of 0-3 instructions validated by Z3
 - **SolutionNode**: Tree node linking gadgets across stages
 
+### ASM Export Architecture
+
+**There must be exactly ONE assembly emitter.** The canonical ASM emission path lives in
+`osaca_estimator.py` (`_emit_gadget_asm` + `_generate_osaca_asm`). All ASM output — whether
+for OSACA estimation or `--output-format=asm` — must go through this single code path.
+Never duplicate gadget emission logic. The old `asm_exporter.py` `_format_instruction` /
+`_print_solution_step_as_assembly` path is legacy and must be replaced.
+
 ### Generated Output
 
 - `bitonic_solutions_*.json` - Solution database

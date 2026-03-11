@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from intrinsic_registry import get_intrinsic_registry
 from utils import vector_machine, primitive_type
-from utils import width_dict
-from z3_avx import mm_shuffle_str, mm_shuffle2_str
 
 
 def _get_instruction_metadata(intrinsic_name: str) -> dict:
@@ -140,10 +138,6 @@ class RegisterAllocator:
         """Toggle which register pair is the source vs destination."""
         self._pair_index = 1 - self._pair_index
 
-    def get_data_reg(self, vec_idx: int) -> str:
-        """Get the register name for a data vector."""
-        return f"{self.reg_prefix}{vec_idx}"
-
     def allocate_temp(self) -> str:
         """Allocate a temporary register."""
         reg = f"{self.reg_prefix}{self.next_temp_reg}"
@@ -202,205 +196,6 @@ def _resolve_source(name: str, top_reg: str, bottom_reg: str, is_top: bool) -> s
     return name  # not a register name (shouldn't happen for a/b args)
 
 
-def _format_instruction(
-    inst,
-    reg_allocator: RegisterAllocator,
-    top_reg: str,
-    bottom_reg: str,
-    is_top: bool,
-) -> str:
-    """
-    Format a single instruction as assembly.
-
-    Args:
-        inst: InstructionSpec with intrinsic_name and args
-        reg_allocator: RegisterAllocator for temporary registers
-        top_reg: Physical register for the top vector (absolute)
-        bottom_reg: Physical register for the bottom vector (absolute)
-        is_top: Whether this instruction is in the top-side chain
-    """
-    mnemonic = _intrinsic_to_asm_mnemonic(inst.intrinsic_name)
-    metadata = _get_instruction_metadata(inst.intrinsic_name)
-    args = inst.args
-    dest_reg = top_reg if is_top else bottom_reg
-
-    # Handle k-mask for masked intrinsics
-    is_masked = _is_masked_intrinsic(inst.intrinsic_name)
-    kmask_reg = None
-    kmask_val = None
-    if is_masked and "k" in args:
-        kmask_reg = reg_allocator.allocate_kmask()
-        kmask_val = args["k"]
-
-    # Build operand list - Intel syntax: dest, src1, [src2], [imm]
-    # For masked instructions, dest gets {kN} suffix
-    dest_str = f"{dest_reg}{{{kmask_reg}}}" if kmask_reg else dest_reg
-    operands = [dest_str]  # Destination is always first
-
-    ctrl_val = None
-    ctrl_element_width = None  # Track element width for control vectors
-
-    # Handle different instruction patterns based on arguments.
-    # More specific masked patterns come first, then fall through to
-    # existing unmasked patterns.
-
-    if (
-        "k" in args
-        and "src" in args
-        and "op_idx" in args
-        and "a" in args
-        and "b" not in args
-    ):
-        # Masked single-input with control vector
-        # e.g., _mm512_mask_permutexvar_epi64(src, k, op_idx, a)
-        ctrl_val = args["op_idx"]
-        ctrl_element_width = metadata["control_vector_width"]
-        ctrl_reg = reg_allocator.allocate_temp()
-        src = _resolve_source(args["a"], top_reg, bottom_reg, is_top)
-        operands.append(ctrl_reg)
-        operands.append(src)
-
-    elif "k" in args and "src" in args and "a" in args and "b" in args:
-        # Masked dual-input (with or without immediate)
-        # e.g., _mm512_mask_shuffle_pd(src, k, a, b, imm8)
-        # e.g., _mm512_mask_unpacklo_epi64(src, k, a, b)
-        src1 = _resolve_source(args["a"], top_reg, bottom_reg, is_top)
-        src2 = _resolve_source(args["b"], top_reg, bottom_reg, is_top)
-        operands.append(src1)
-        operands.append(src2)
-
-    elif "k" in args and "src" in args and "a" in args and "b" not in args:
-        # Masked single-input with immediate (no control vector, no b)
-        # e.g., _mm512_mask_permute_pd(src, k, a, imm8)
-        src = _resolve_source(args["a"], top_reg, bottom_reg, is_top)
-        operands.append(src)
-
-    elif (
-        "k" in args
-        and "a" in args
-        and "op_idx" in args
-        and "b" in args
-        and "src" not in args
-    ):
-        # Masked permutex2var: a is merge source, op_idx is control, b is second input
-        # e.g., _mm512_mask_permutex2var_epi64(a, k, op_idx, b)
-        ctrl_val = args["op_idx"]
-        ctrl_element_width = metadata["control_vector_width"]
-        ctrl_reg = reg_allocator.allocate_temp()
-        src2 = _resolve_source(args["b"], top_reg, bottom_reg, is_top)
-        operands.append(ctrl_reg)
-        operands.append(src2)
-
-    elif "a" in args and "op_idx" in args and "b" in args and "k" not in args:
-        # Unmasked permutex2var: a is first input, op_idx is control, b is second input
-        # e.g., _mm512_permutex2var_epi64(a, op_idx, b)
-        ctrl_val = args["op_idx"]
-        ctrl_element_width = metadata["control_vector_width"]
-        ctrl_reg = reg_allocator.allocate_temp()
-        src2 = _resolve_source(args["b"], top_reg, bottom_reg, is_top)
-        operands.append(ctrl_reg)
-        operands.append(src2)
-
-    elif "a" in args and "b" in args:
-        # Two-input instruction (shuffle, blend, unpack, etc.)
-        src1 = _resolve_source(args["a"], top_reg, bottom_reg, is_top)
-        src2_raw = args["b"]
-
-        # Check if 'b' is a control vector (not a register name)
-        if src2_raw not in ["top", "bottom", "prev"]:
-            # It's a control vector - allocate a temp register for it
-            ctrl_val = src2_raw
-            ctrl_element_width = metadata["control_vector_width"]
-            ctrl_reg = reg_allocator.allocate_temp()
-            operands.append(src1)
-            operands.append(ctrl_reg)
-        else:
-            src2 = _resolve_source(src2_raw, top_reg, bottom_reg, is_top)
-            operands.append(src1)
-            operands.append(src2)
-    elif "a" in args:
-        # Single-input instruction
-        src = _resolve_source(args["a"], top_reg, bottom_reg, is_top)
-
-        # Check for control/index operand
-        if "op_idx" in args:
-            # Variable permute with control vector
-            ctrl_val = args["op_idx"]
-            ctrl_element_width = metadata["control_vector_width"]
-            ctrl_reg = reg_allocator.allocate_temp()
-            operands.append(ctrl_reg)
-            operands.append(src)
-        else:
-            operands.append(src)
-    elif "input" in args:
-        # Old-style single-input
-        src = _resolve_source(args["input"], top_reg, bottom_reg, is_top)
-        operands.append(src)
-
-    # Add immediate values at the end
-    comment_parts = []
-    if "imm8" in args:
-        imm_val = args["imm8"]
-        if isinstance(imm_val, int):
-            imm_type = metadata["imm_type"]
-            if imm_type == "binary":
-                operands.append(f"0x{imm_val:02x}")
-                comment_parts.append(f"0b{imm_val:08b}")
-            elif imm_type == "shuffle2":
-                operands.append(f"0x{imm_val:02x}")
-                comment_parts.append(mm_shuffle2_str(imm_val))
-            elif imm_type == "shuffle4":
-                operands.append(f"0x{imm_val:02x}")
-                comment_parts.append(mm_shuffle_str(imm_val))
-            else:
-                operands.append(f"0x{imm_val:02x}")
-        else:
-            operands.append(f"<{imm_val}>")  # Symbolic value
-    elif "imm" in args:
-        imm_val = args["imm"]
-        if isinstance(imm_val, int):
-            operands.append(f"0x{imm_val:x}")
-        else:
-            operands.append(f"<{imm_val}>")  # Symbolic value
-    elif "mask" in args:
-        mask_val = args["mask"]
-        if isinstance(mask_val, int):
-            if mask_val > 0xFF:
-                # 256/512-bit mask for blendv
-                ctrl_val = mask_val
-                ctrl_reg = reg_allocator.allocate_temp()
-                operands.append(ctrl_reg)
-            else:
-                operands.append(f"0x{mask_val:02x}")
-        else:
-            operands.append(f"<{mask_val}>")
-
-    if ctrl_val is not None:
-        total_bits = width_dict[reg_allocator.vm] * 8
-        if ctrl_element_width is not None:
-            comment_parts.append(
-                _format_control_vector_bits(ctrl_val, total_bits, ctrl_element_width)
-            )
-        else:
-            element_bits = reg_allocator.dtype.value[0] * 8
-            comment_parts.append(
-                _format_control_vector_bits(ctrl_val, total_bits, element_bits)
-            )
-
-    # Add k-mask value as a comment
-    if kmask_val is not None:
-        if isinstance(kmask_val, int):
-            comment_parts.insert(0, f"k=0x{kmask_val:02x}")
-        else:
-            comment_parts.insert(0, f"k={kmask_val}")
-
-    comment = ", ".join(comment_parts) if comment_parts else None
-    asm_line = f"    {mnemonic:20s} {', '.join(operands)}"
-    if comment:
-        asm_line += f"  ; {comment}"
-    return asm_line
-
-
 def _format_vector_state_as_comment(state, prefix: str = "") -> str:
     """Format VectorState __repr__ output as assembly comments."""
     state_str = repr(state)
@@ -452,87 +247,6 @@ def _emit_compare_swap_lines(
     return lines
 
 
-def _print_solution_step_as_assembly(
-    step,
-    reg_allocator: RegisterAllocator,
-    cumulative_cost: float = 0.0,
-    indent: int = 0,
-    emit_compare_swap: bool = True,
-):
-    """Print a single PathStep as assembly code.
-
-    Args:
-        step: PathStep with node and selected gadget_index
-        reg_allocator: RegisterAllocator for register management
-        cumulative_cost: Running total cost up to this step
-        indent: Indentation level for nested output
-        emit_compare_swap: Whether to emit min/max compare-swap after permutations.
-            Set to False for the natural-order stage (pure reorder, no comparison).
-    """
-    prefix = "  " * indent
-
-    # Print stage header with register mapping
-    print(f"{prefix}; Stage {step.node.stage}")
-    print(f"{prefix}; Cost: {cumulative_cost:.2f} (step: {step.score.total_score:.2f})")
-    if step.score.control_vector_count > 0:
-        print(f"{prefix}; Control vectors: {step.score.control_vector_count}")
-
-    # Get register names from current source pair
-    top_reg = reg_allocator.src_top
-    bottom_reg = reg_allocator.src_bottom
-
-    # Show register mapping: which register is top/bottom for this stage
-    print(
-        f"{prefix}; Registers: {top_reg} = top, {bottom_reg} = bottom"
-        f"  →  {reg_allocator.dst_top} = top, {reg_allocator.dst_bottom} = bottom"
-    )
-
-    # Use the explicitly selected gadget from the step
-    gadget = step.gadget
-
-    # Print top vector instructions (gadget operates in-place on source pair)
-    if gadget.top_instructions:
-        print(f"{prefix}; Top vector ({top_reg}) operations:")
-        for inst in gadget.top_instructions:
-            asm_line = _format_instruction(
-                inst, reg_allocator, top_reg, bottom_reg, is_top=True
-            )
-            print(f"{prefix}{asm_line}")
-
-    # Print bottom vector instructions
-    if gadget.bottom_instructions:
-        print(f"{prefix}; Bottom vector ({bottom_reg}) operations:")
-        for inst in gadget.bottom_instructions:
-            asm_line = _format_instruction(
-                inst, reg_allocator, top_reg, bottom_reg, is_top=False
-            )
-            print(f"{prefix}{asm_line}")
-
-    # Emit compare-swap (min/max) after permutation instructions
-    if emit_compare_swap:
-        cs_lines = _emit_compare_swap_lines(reg_allocator)
-        print(
-            f"{prefix}; Compare-swap: "
-            f"min → {reg_allocator.dst_top} (top), "
-            f"max → {reg_allocator.dst_bottom} (bottom)"
-        )
-        for line in cs_lines:
-            print(f"{prefix}{line}")
-        reg_allocator.swap_pairs()
-
-    # Print output state
-    print(f"{prefix}; Output State:")
-    print(_format_vector_state_as_comment(step.node.output_state, prefix))
-
-    print()
-
-    # Reset temporary registers for next stage
-    reg_allocator.reset_temps()
-
-
-_MAX_ASM_PATHS = 10_000
-
-
 def export_solutions_to_asm(
     solutions,
     num_vecs: int,
@@ -541,8 +255,13 @@ def export_solutions_to_asm(
     output_path: str,
     selected_paths=None,
     natural_order: bool = False,
+    nasm_path: str | None = None,
 ):
-    """Export solutions as readable assembly code.
+    """Export solutions as NASM-valid assembly code.
+
+    Uses the canonical emitter from osaca_estimator (_generate_osaca_asm)
+    for each solution, optionally verifies each with NASM, then concatenates
+    all solutions into a single output file with separators.
 
     Args:
         solutions: List of root SolutionNode objects (may be pruned)
@@ -553,114 +272,65 @@ def export_solutions_to_asm(
         selected_paths: Optional list of CompletePath from PathSelector.
                        If provided, uses these explicit paths instead of
                        enumerating all paths through the DAG.
+        natural_order: Whether the final stage is a natural-order reorder
+        nasm_path: Optional path to nasm binary for per-solution verification
     """
-    import sys
+    import tempfile
+
     from cost_model import CostModel
+    from osaca_estimator import _generate_osaca_asm, _verify_with_nasm
     from path_selector import PathSelector
 
     # If selected_paths is provided, use them directly
     if selected_paths is not None:
         all_paths = selected_paths
-        total_path_count = len(all_paths)
-        truncated = False
     else:
-        # Fall back to old behavior: enumerate paths through DAG
-        # This is needed when top_k is None (no pruning)
         print(
             "Warning: No selected_paths provided, enumerating all paths (may be slow)"
         )
-
-        # Use PathSelector to enumerate paths with cap
         cost_model = CostModel("generic")
         path_selector = PathSelector(cost_model)
+        all_paths = path_selector.select_top_k_paths(solutions, 10_000)
 
-        # Select paths with a large limit to get "all" paths, capped at _MAX_ASM_PATHS
-        all_paths = path_selector.select_top_k_paths(solutions, _MAX_ASM_PATHS)
-        total_path_count = len(all_paths)
-        truncated = total_path_count >= _MAX_ASM_PATHS
+    total = len(all_paths)
+    nasm_failures = 0
 
     with open(output_path, "w") as f:
-        old_stdout = sys.stdout
-        sys.stdout = f
-        try:
-            print("; Bitonic Sort Assembly Output (with min/max compare-swap)")
-            print(f"; Architecture: {vm.name}")
-            print(f"; Data Type: {dtype.name}")
-            print(f"; Number of vectors: {num_vecs}")
-            print(f"; Natural order: {'yes' if natural_order else 'no'}")
-            print(f"; Root solutions: {len(solutions)}")
-            if truncated:
-                print(f"; NOTE: Showing {len(all_paths)} paths (may be capped)")
-            print(";")
-            print(
-                "; Registers (alternating pairs — roles swap after each compare-swap):"
+        # File header
+        f.write("; Bitonic Sort Assembly Output — NASM-valid x86-64\n")
+        f.write(f"; Architecture: {vm.name}\n")
+        f.write(f"; Data Type: {dtype.name}\n")
+        f.write(f"; Number of vectors: {num_vecs}\n")
+        f.write(f"; Natural order: {'yes' if natural_order else 'no'}\n")
+        f.write(f"; Total solutions: {total}\n")
+        f.write("\n")
+
+        # Create temp dir for NASM verification
+        tmp_dir = tempfile.mkdtemp(prefix="vxsort_asm_") if nasm_path else None
+
+        for i, path in enumerate(all_paths):
+            solution_index = i + 1
+
+            # Generate NASM-valid assembly for this solution
+            asm_content = _generate_osaca_asm(
+                path, vm, dtype, num_vecs, natural_order, solution_index, total
             )
-            reg_prefix = "ymm" if vm == vector_machine.AVX2 else "zmm"
-            vec_labels = ["top", "bottom"] + [f"vec{i}" for i in range(2, num_vecs)]
-            for i in range(num_vecs):
-                label = vec_labels[i] if i < len(vec_labels) else f"vec{i}"
-                print(f";   {reg_prefix}{i}: Pair 0 — {label}")
-            for i in range(num_vecs):
-                label = vec_labels[i] if i < len(vec_labels) else f"vec{i}"
-                print(f";   {reg_prefix}{num_vecs + i}: Pair 1 — {label}")
-            print(f";   {reg_prefix}{num_vecs * 2}+: Temporary registers as needed")
-            print()
-            print("=" * 80)
-            print()
 
-            print(f"; Total paths: {len(all_paths)}")
-            print()
+            # Optionally verify with NASM before including
+            if nasm_path is not None and tmp_dir is not None:
+                tmp_path = f"{tmp_dir}/solution_{solution_index:03d}.asm"
+                with open(tmp_path, "w") as tmp_f:
+                    tmp_f.write(asm_content)
+                if not _verify_with_nasm(tmp_path, nasm_path):
+                    nasm_failures += 1
 
-            for i, path in enumerate(all_paths):
-                print(f"; ========== SOLUTION {i + 1} of {len(all_paths)} ==========")
-                print(f"; Total latency: {path.total_latency:.2f}")
-                print(f"; Total score: {path.total_score:.2f}")
-                print(f"; Control vectors: {path.total_cv_count}")
-                print()
+            # Write separator + solution
+            f.write(f"; {'=' * 78}\n")
+            f.write(f"; SOLUTION {solution_index} of {total}\n")
+            f.write(f"; {'=' * 78}\n\n")
+            f.write(asm_content)
+            f.write("\n")
 
-                # Print initial input state (before first stage)
-                if path.steps:
-                    print("; Initial Input State:")
-                    print(
-                        _format_vector_state_as_comment(
-                            path.steps[0].node.input_state, ""
-                        )
-                    )
-                    print()
-
-                reg_allocator = RegisterAllocator(vm, dtype, num_vecs)
-
-                # Print each step in the path, accumulating cost
-                running_cost = 0.0
-                last_idx = len(path.steps) - 1
-                for step_idx, step in enumerate(path.steps):
-                    running_cost += step.score.total_score
-                    # Skip compare-swap on the final natural-order stage
-                    # (it's a pure reorder, not a comparison stage)
-                    is_natural_order_step = natural_order and step_idx == last_idx
-                    _print_solution_step_as_assembly(
-                        step,
-                        reg_allocator,
-                        cumulative_cost=running_cost,
-                        emit_compare_swap=not is_natural_order_step,
-                    )
-
-                # If results ended up in pair 1, move back to pair 0
-                if reg_allocator._pair_index != 0:
-                    mnemonics = _get_compare_swap_mnemonics(dtype, vm)
-                    mov = mnemonics[0] if mnemonics else "vmovdqa"
-                    src_t = reg_allocator.src_top
-                    src_b = reg_allocator.src_bottom
-                    dst_t = reg_allocator.dst_top
-                    dst_b = reg_allocator.dst_bottom
-                    print("; Move results back to pair 0:")
-                    print(f"    {mov:20s} {dst_t}, {src_t}")
-                    print(f"    {mov:20s} {dst_b}, {src_b}")
-                    print()
-
-                print("=" * 80)
-                print()
-        finally:
-            sys.stdout = old_stdout
-
-    print(f"Exported {len(all_paths)} solutions to {output_path}")
+    if nasm_failures:
+        print(f"Warning: {nasm_failures} of {total} solutions failed NASM verification")
+    print(f"Exported {total} solutions to {output_path}")

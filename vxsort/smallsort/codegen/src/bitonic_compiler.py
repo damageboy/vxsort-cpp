@@ -397,6 +397,7 @@ def generate_bitonic_sorter(
                 output_path,
                 selected_paths=selected_paths,
                 natural_order=natural_order,
+                nasm_path=nasm_path,
             )
         elif output_format == "json":
             output_path = f"bitonic_solutions_{num_vecs}x{vm.name}_{prim_type.name}{order_suffix}.json"
@@ -457,7 +458,7 @@ def generate_bitonic_sorter(
     return solutions
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(
         description="Generate bitonic sorter with optimized permutations."
     )
@@ -688,3 +689,15 @@ if __name__ == "__main__":
         max_workers=args.max_workers,
         max_tasks_per_child=max_tasks_per_child,
     )
+
+
+def estimate_main():
+    """Entry point for 'uv run estimate'. Prepends --estimate-only to argv."""
+    import sys
+
+    sys.argv.insert(1, "--estimate-only")
+    main()
+
+
+if __name__ == "__main__":
+    main()

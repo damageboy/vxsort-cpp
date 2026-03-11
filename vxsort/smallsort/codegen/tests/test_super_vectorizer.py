@@ -8,7 +8,6 @@ from bitonic_sorter import BitonicSorter
 from asm_exporter import (
     RegisterAllocator,
     _emit_compare_swap_lines,
-    _format_instruction,
 )
 from bitonic_super_optimizer import (
     BitonicSuperVectorizer,
@@ -601,49 +600,22 @@ def test_single_dual_template_combination():
 
 
 def test_asm_exporter_register_mapping():
-    """Test that _format_instruction uses correct absolute register mapping.
+    """Test that the canonical emitter resolves register names correctly.
 
-    Previously, bottom-side instructions had their registers swapped because
-    the exporter used relative (dest_reg, other_reg) mapping. Now it uses
-    absolute (top_reg, bottom_reg, is_top) mapping.
+    Verifies absolute (top_reg, bottom_reg, is_top) register mapping
+    via _resolve_source, which is used by both the OSACA emitter and
+    the asm export path.
     """
-    reg_alloc = RegisterAllocator(vector_machine.AVX2, primitive_type.i32, 2)
+    from asm_exporter import _resolve_source
 
-    # Bottom single-input: args["a"] = "bottom" should use ymm1 (bottom reg)
-    inst_bottom_single = InstructionSpec(
-        "_mm256_permute_ps", {"a": "bottom", "imm8": 0xB1}
-    )
-    asm = _format_instruction(
-        inst_bottom_single, reg_alloc, "ymm0", "ymm1", is_top=False
-    )
-    # dest=ymm1 (bottom), src=ymm1 (bottom)
-    assert "ymm1, ymm1" in asm, f"Bottom single should read from ymm1, got: {asm}"
-
-    reg_alloc.reset_temps()
-
-    # Bottom dual-input: args["a"]="top", args["b"]="bottom"
-    inst_bottom_dual = InstructionSpec(
-        "_mm256_shuffle_ps", {"a": "top", "b": "bottom", "imm8": 0x4E}
-    )
-    asm = _format_instruction(inst_bottom_dual, reg_alloc, "ymm0", "ymm1", is_top=False)
-    # dest=ymm1, src1=ymm0 (top), src2=ymm1 (bottom)
-    assert (
-        "ymm1, ymm0, ymm1" in asm
-    ), f"Bottom dual should have src1=ymm0, src2=ymm1, got: {asm}"
-
-    reg_alloc.reset_temps()
-
-    # "prev" source on top side → should resolve to ymm0 (top = dest for top chain)
-    inst_prev_top = InstructionSpec("_mm256_permute_ps", {"a": "prev", "imm8": 0xB1})
-    asm = _format_instruction(inst_prev_top, reg_alloc, "ymm0", "ymm1", is_top=True)
-    assert "ymm0, ymm0" in asm, f"prev on top side should use ymm0, got: {asm}"
-
-    reg_alloc.reset_temps()
-
-    # "prev" source on bottom side → should resolve to ymm1 (bottom = dest for bottom chain)
-    inst_prev_bottom = InstructionSpec("_mm256_permute_ps", {"a": "prev", "imm8": 0xB1})
-    asm = _format_instruction(inst_prev_bottom, reg_alloc, "ymm0", "ymm1", is_top=False)
-    assert "ymm1, ymm1" in asm, f"prev on bottom side should use ymm1, got: {asm}"
+    # "bottom" on bottom side → ymm1
+    assert _resolve_source("bottom", "ymm0", "ymm1", is_top=False) == "ymm1"
+    # "top" on bottom side → ymm0
+    assert _resolve_source("top", "ymm0", "ymm1", is_top=False) == "ymm0"
+    # "prev" on top side → ymm0 (dest = top for top chain)
+    assert _resolve_source("prev", "ymm0", "ymm1", is_top=True) == "ymm0"
+    # "prev" on bottom side → ymm1 (dest = bottom for bottom chain)
+    assert _resolve_source("prev", "ymm0", "ymm1", is_top=False) == "ymm1"
 
 
 def test_bitonicsupervectorizer_is_single_use():
