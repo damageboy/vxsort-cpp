@@ -84,6 +84,10 @@ def _emit_gadget_asm(
     instead of modifying the src register in-place.  This eliminates the
     cross-side save (vmovdqa copy) because source registers are never modified.
 
+    When both sides share a common instruction prefix (detected via
+    unified_instruction_map), the shared instructions are emitted once to
+    temp registers, then each side emits only its unique suffix.
+
     Appends (label, directive) pairs to rodata_entries for control vectors.
     cv_cache deduplicates identical control vector entries across stages.
     """
@@ -92,6 +96,10 @@ def _emit_gadget_asm(
     cv_counter = [0]  # mutable counter for closure
     if cv_cache is None:
         cv_cache = {}
+    # Register-level CV cache: if the same ctrl_val is already in a register
+    # (from an earlier instruction or the other side), reuse it instead of
+    # allocating a fresh temp and emitting another load.
+    cv_reg_cache: dict[int, str] = {}
 
     # Detect dual-side: both top and bottom have instructions.
     # In dual-side mode, gadget writes to dst pair so src is never modified.
@@ -101,28 +109,79 @@ def _emit_gadget_asm(
         and bottom_reg is not None
     )
 
-    def _emit_instructions(instructions, is_top: bool, side_label: str):
+    # Detect shared instruction prefix for deduplication.
+    # When both sides share instructions at the same chain positions
+    # (same signature per unified_instruction_map), emit them once.
+    prefix_len = 0
+    if is_dual_side:
+        _, top_indices, bottom_indices, _, _ = gadget.unified_instruction_map()
+        for i in range(min(len(top_indices), len(bottom_indices))):
+            if top_indices[i] == bottom_indices[i]:
+                prefix_len = i + 1
+            else:
+                break
+
+    def _emit_instructions(
+        instructions,
+        is_top: bool,
+        side_label: str,
+        *,
+        shared_mode: bool = False,
+        skip_prefix: int = 0,
+        precomputed_results: dict[int, str] | None = None,
+    ) -> dict[int, str]:
+        """Emit instructions for one chain.
+
+        Args:
+            shared_mode: Each instruction writes to a fresh temp register.
+                Returns {inst_idx: register} for all emitted instructions.
+            skip_prefix: Skip the first N instructions (already emitted shared).
+            precomputed_results: Maps inst_idx → register for pre-emitted results.
+
+        Returns:
+            In shared_mode: {inst_idx: register} for emitted instructions.
+            Otherwise: empty dict.
+        """
         source_reg = top_reg if is_top else bottom_reg
-        if is_dual_side:
+        if shared_mode:
+            dest_reg = None  # set per-instruction below
+        elif is_dual_side:
             dest_reg = dst_top_reg if is_top else dst_bottom_reg
         else:
             dest_reg = source_reg  # in-place
 
         result_re = re.compile(r"^result_(\d+)$")
 
-        # Multi-instruction gadgets use "input" (original value before
-        # the chain started) and "result_N" (output of instruction N).
-        # Pre-scan to find which intermediates need saving.
+        # Track what "prev" resolves to (updated after each emitted instruction).
+        # When resuming after a shared prefix, "prev" initially points to the
+        # last shared result so the first suffix instruction chains correctly.
+        prev_target = dest_reg
+        if (
+            skip_prefix > 0
+            and precomputed_results
+            and (skip_prefix - 1) in precomputed_results
+        ):
+            prev_target = precomputed_results[skip_prefix - 1]
+
+        shared_results: dict[int, str] = {}
+
+        # Pre-scan for input/result saves (only suffix instructions need this).
+        # In shared_mode, each instruction writes to its own temp, so no saves.
         needs_input_save = False
         needed_result_saves: set[int] = set()
-        for inst in instructions:
-            for v in inst.args.values():
-                if isinstance(v, str):
-                    if v == "input":
-                        needs_input_save = True
-                    m = result_re.match(v)
-                    if m:
-                        needed_result_saves.add(int(m.group(1)))
+        if not shared_mode:
+            for inst_idx_s, inst in enumerate(instructions):
+                if inst_idx_s < skip_prefix:
+                    continue
+                for v in inst.args.values():
+                    if isinstance(v, str):
+                        if v == "input":
+                            needs_input_save = True
+                        m = result_re.match(v)
+                        if m:
+                            idx = int(m.group(1))
+                            if not (precomputed_results and idx in precomputed_results):
+                                needed_result_saves.add(idx)
 
         mov_mnemonic = (
             "vmovdqa64" if reg_allocator.vm == vector_machine.AVX512 else "vmovdqa32"
@@ -150,14 +209,25 @@ def _emit_gadget_asm(
             m = result_re.match(name)
             if m:
                 idx = int(m.group(1))
+                if precomputed_results and idx in precomputed_results:
+                    return precomputed_results[idx]
+                if idx in shared_results:
+                    return shared_results[idx]
                 assert idx in result_save_regs, f"result_{idx} not yet computed"
                 return result_save_regs[idx]
             if name == "prev":
-                return dest_reg
+                return prev_target
             # "top" / "bottom" always resolve to src registers (unmodified)
             return _resolve_source(name, top_reg, bottom_reg or top_reg, is_top)
 
         for inst_idx, inst in enumerate(instructions):
+            if inst_idx < skip_prefix:
+                continue
+
+            if shared_mode:
+                dest_reg = reg_allocator.allocate_temp()
+                shared_results[inst_idx] = dest_reg
+
             mnemonic = _intrinsic_to_asm_mnemonic(inst.intrinsic_name)
             metadata = _get_instruction_metadata(inst.intrinsic_name)
             args = inst.args
@@ -199,32 +269,40 @@ def _emit_gadget_asm(
                         lines.append(f"    {'mov':20s} rax, 0x{kmask_val:x}")
                     lines.append(f"    {'kmovw':20s} {kmask_reg}, eax")
 
-            # Emit control vector load if needed
+            # Emit control vector load if needed, reusing a register if the
+            # same value was already loaded earlier in this gadget.
             ctrl_reg = None
             if ctrl_val is not None:
-                ctrl_reg = reg_allocator.allocate_temp()
-
-                element_bits = ctrl_element_width or (reg_allocator.dtype.value[0] * 8)
-                data_directive = _format_cv_as_data_directive(
-                    ctrl_val, total_bits, element_bits
-                )
-
-                # Deduplicate: reuse an existing .rodata label if the
-                # same directive was already emitted.
-                if data_directive in cv_cache:
-                    cv_label = cv_cache[data_directive]
+                if ctrl_val in cv_reg_cache:
+                    # Already loaded into a register — reuse it
+                    ctrl_reg = cv_reg_cache[ctrl_val]
                 else:
-                    cv_label = f"cv_s{stage_idx}_{side_label[0]}{cv_counter[0]}"
-                    cv_counter[0] += 1
-                    cv_cache[data_directive] = cv_label
-                    rodata_entries.append((cv_label, data_directive))
+                    ctrl_reg = reg_allocator.allocate_temp()
+                    cv_reg_cache[ctrl_val] = ctrl_reg
 
-                lines.append(f"    {mov_mnemonic:20s} {ctrl_reg}, [rel {cv_label}]")
-                # Add comment showing CV contents
-                comment = _format_control_vector_bits(
-                    ctrl_val, total_bits, element_bits
-                )
-                lines[-1] += f"  ; {comment}"
+                    element_bits = ctrl_element_width or (
+                        reg_allocator.dtype.value[0] * 8
+                    )
+                    data_directive = _format_cv_as_data_directive(
+                        ctrl_val, total_bits, element_bits
+                    )
+
+                    # Deduplicate .rodata: reuse an existing label if the
+                    # same directive was already emitted.
+                    if data_directive in cv_cache:
+                        cv_label = cv_cache[data_directive]
+                    else:
+                        cv_label = f"cv_s{stage_idx}_{side_label[0]}{cv_counter[0]}"
+                        cv_counter[0] += 1
+                        cv_cache[data_directive] = cv_label
+                        rodata_entries.append((cv_label, data_directive))
+
+                    lines.append(f"    {mov_mnemonic:20s} {ctrl_reg}, [rel {cv_label}]")
+                    # Add comment showing CV contents
+                    comment = _format_control_vector_bits(
+                        ctrl_val, total_bits, element_bits
+                    )
+                    lines[-1] += f"  ; {comment}"
 
             # Build operand list
             dest_str = f"{dest_reg}{{{kmask_reg}}}" if kmask_reg else dest_reg
@@ -342,27 +420,84 @@ def _emit_gadget_asm(
                 inst_line += f"  ; {comment}"
             lines.append(inst_line)
 
-            # Save result to temp if later instructions reference it
-            if inst_idx in needed_result_saves:
+            # Update prev_target so next instruction's "prev" resolves here
+            prev_target = dest_reg
+
+            # Save result to temp if later instructions reference it.
+            # In shared_mode each instruction already has its own register.
+            if not shared_mode and inst_idx in needed_result_saves:
                 result_save_regs[inst_idx] = reg_allocator.allocate_temp()
                 lines.append(
                     f"    {mov_mnemonic:20s} {result_save_regs[inst_idx]}, {dest_reg}"
                     f"  ; save result_{inst_idx}"
                 )
 
-    # Emit top instructions
-    if gadget.top_instructions:
-        lines.append(f"    ; Top vector ({top_reg}) operations:")
-        _emit_instructions(gadget.top_instructions, is_top=True, side_label="top")
+        return shared_results
 
-    # Emit bottom instructions
-    if gadget.bottom_instructions and bottom_reg:
+    # --- Emission logic ---
+
+    shared_results: dict[int, str] = {}
+
+    if prefix_len > 0:
+        # Emit shared instructions once to temp registers
+        lines.append(
+            f"    ; Shared instructions ({prefix_len}"
+            f" of {len(gadget.top_instructions)}):"
+        )
+        shared_results = _emit_instructions(
+            gadget.top_instructions[:prefix_len],
+            is_top=True,  # doesn't matter: shared uses absolute refs
+            side_label="shared",
+            shared_mode=True,
+        )
+
+    # Emit top-side suffix (or all top instructions if no shared prefix)
+    if gadget.top_instructions and len(gadget.top_instructions) > prefix_len:
+        lines.append(f"    ; Top vector ({top_reg}) operations:")
+        _emit_instructions(
+            gadget.top_instructions,
+            is_top=True,
+            side_label="top",
+            skip_prefix=prefix_len,
+            precomputed_results=shared_results,
+        )
+
+    # Emit bottom-side suffix (or all bottom instructions if no shared prefix)
+    if (
+        gadget.bottom_instructions
+        and bottom_reg
+        and len(gadget.bottom_instructions) > prefix_len
+    ):
         lines.append(f"    ; Bottom vector ({bottom_reg}) operations:")
         _emit_instructions(
             gadget.bottom_instructions,
             is_top=False,
             side_label="bot",
+            skip_prefix=prefix_len,
+            precomputed_results=shared_results,
         )
+
+    # Edge case: if ALL instructions were shared, copy the last shared result
+    # to the appropriate destination registers.
+    if prefix_len > 0:
+        mov_mnemonic = (
+            "vmovdqa64" if reg_allocator.vm == vector_machine.AVX512 else "vmovdqa32"
+        )
+        last_shared = shared_results[prefix_len - 1]
+        if prefix_len == len(gadget.top_instructions) and is_dual_side:
+            lines.append(
+                f"    {mov_mnemonic:20s} {dst_top_reg}, {last_shared}"
+                f"  ; shared → top"
+            )
+        if (
+            prefix_len == len(gadget.bottom_instructions)
+            and is_dual_side
+            and bottom_reg
+        ):
+            lines.append(
+                f"    {mov_mnemonic:20s} {dst_bottom_reg}, {last_shared}"
+                f"  ; shared → bottom"
+            )
 
     return lines, is_dual_side
 

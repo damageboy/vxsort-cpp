@@ -130,6 +130,9 @@ class PermutationGadget:
     _unified_cache: tuple[list[InstructionSpec], int, int] | None = field(
         default=None, repr=False, compare=False
     )
+    _unified_map_cache: tuple[list[int], list[int]] | None = field(
+        default=None, repr=False, compare=False
+    )
 
     def instruction_count(self) -> int:
         """Total number of deduplicated instructions in this gadget."""
@@ -204,7 +207,23 @@ class PermutationGadget:
         bottom_out = bottom_unified_indices[-1] if bottom_unified_indices else -1
 
         self._unified_cache = (unified, top_out, bottom_out)
+        self._unified_map_cache = (top_unified_indices, bottom_unified_indices)
         return self._unified_cache
+
+    def unified_instruction_map(
+        self,
+    ) -> tuple[list[InstructionSpec], list[int], list[int], int, int]:
+        """Like unified_instructions() but returns full per-chain index mappings.
+
+        Returns:
+            (unified, top_indices, bottom_indices, top_output_idx, bottom_output_idx)
+            where top_indices[i] is the unified list index for top_instructions[i],
+            and similarly for bottom_indices.
+        """
+        unified, top_out, bottom_out = self.unified_instructions()
+        assert self._unified_map_cache is not None
+        top_indices, bottom_indices = self._unified_map_cache
+        return (unified, top_indices, bottom_indices, top_out, bottom_out)
 
     def __repr__(self):
         return f"Gadget(top={len(self.top_instructions)}, bottom={len(self.bottom_instructions)}, validated={self.validated})"
