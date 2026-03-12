@@ -55,7 +55,27 @@
                 "imm8": 33
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 12
+              }
+            },
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 33
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -77,7 +97,27 @@
                 "imm8": 12
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 33
+              }
+            },
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 12
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         }
       ],
       "gadget_count": 2,
@@ -134,7 +174,27 @@
                 "imm8": 3
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_alignr_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 2
+              }
+            },
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 3
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -156,7 +216,27 @@
                 "imm8": 18
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_alignr_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 2
+              }
+            },
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 18
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -178,7 +258,27 @@
                 "imm8": 2
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 3
+              }
+            },
+            {
+              "name": "_mm256_alignr_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 2
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -200,7 +300,27 @@
                 "imm8": 3
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 3
+              }
+            },
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 3
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -222,7 +342,27 @@
                 "imm8": 2
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 18
+              }
+            },
+            {
+              "name": "_mm256_alignr_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 2
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -244,7 +384,27 @@
                 "imm8": 3
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 3
+              }
+            },
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 3
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         }
       ],
       "gadget_count": 6,
@@ -301,7 +461,27 @@
                 "imm8": 5
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 10
+              }
+            },
+            {
+              "name": "_mm256_shuffle_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 5
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -322,7 +502,26 @@
                 "b": "bottom"
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_shuffle_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            },
+            {
+              "name": "_mm256_unpackhi_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom"
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -343,7 +542,26 @@
                 "b": "bottom"
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_shuffle_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 15
+              }
+            },
+            {
+              "name": "_mm256_unpacklo_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom"
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -365,7 +583,27 @@
                 "imm8": 10
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_shuffle_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 5
+              }
+            },
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 10
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -386,7 +624,26 @@
                 "imm8": 0
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_unpackhi_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom"
+              }
+            },
+            {
+              "name": "_mm256_shuffle_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -406,7 +663,25 @@
                 "b": "bottom"
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_unpackhi_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom"
+              }
+            },
+            {
+              "name": "_mm256_unpacklo_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom"
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -427,7 +702,26 @@
                 "imm8": 15
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_unpacklo_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom"
+              }
+            },
+            {
+              "name": "_mm256_shuffle_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 15
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -447,7 +741,25 @@
                 "b": "bottom"
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_unpacklo_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom"
+              }
+            },
+            {
+              "name": "_mm256_unpackhi_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom"
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         }
       ],
       "gadget_count": 8,
@@ -497,7 +809,18 @@
                 "imm8": 27
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute4x64_epi64",
+              "args": {
+                "a": "bottom",
+                "imm8": 27
+              }
+            }
+          ],
+          "top_output_index": -1,
+          "bottom_output_index": 0
         },
         {
           "top_instructions": [],
@@ -509,7 +832,18 @@
                 "op_idx": 340282366920938463500268095579187314691
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permutexvar_epi64",
+              "args": {
+                "a": "bottom",
+                "op_idx": 340282366920938463500268095579187314691
+              }
+            }
+          ],
+          "top_output_index": -1,
+          "bottom_output_index": 0
         },
         {
           "top_instructions": [
@@ -530,7 +864,26 @@
                 "imm8": 27
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            },
+            {
+              "name": "_mm256_permute4x64_epi64",
+              "args": {
+                "a": "bottom",
+                "imm8": 27
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -551,7 +904,26 @@
                 "op_idx": 340282366920938463500268095579187314691
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            },
+            {
+              "name": "_mm256_permutexvar_epi64",
+              "args": {
+                "a": "bottom",
+                "op_idx": 340282366920938463500268095579187314691
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -572,7 +944,26 @@
                 "imm8": 27
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 16
+              }
+            },
+            {
+              "name": "_mm256_permute4x64_epi64",
+              "args": {
+                "a": "bottom",
+                "imm8": 27
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -593,7 +984,26 @@
                 "op_idx": 340282366920938463500268095579187314691
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 16
+              }
+            },
+            {
+              "name": "_mm256_permutexvar_epi64",
+              "args": {
+                "a": "bottom",
+                "op_idx": 340282366920938463500268095579187314691
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -613,7 +1023,25 @@
                 "imm8": 27
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "top",
+                "imm8": 2
+              }
+            },
+            {
+              "name": "_mm256_permute4x64_epi64",
+              "args": {
+                "a": "bottom",
+                "imm8": 27
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -633,7 +1061,25 @@
                 "op_idx": 340282366920938463500268095579187314691
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "top",
+                "imm8": 2
+              }
+            },
+            {
+              "name": "_mm256_permutexvar_epi64",
+              "args": {
+                "a": "bottom",
+                "op_idx": 340282366920938463500268095579187314691
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         }
       ],
       "gadget_count": 8,
@@ -692,7 +1138,27 @@
                 "imm8": 5
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 10
+              }
+            },
+            {
+              "name": "_mm256_shuffle_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 5
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -713,7 +1179,26 @@
                 "b": "bottom"
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_shuffle_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            },
+            {
+              "name": "_mm256_unpackhi_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom"
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -734,7 +1219,26 @@
                 "b": "bottom"
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_shuffle_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 15
+              }
+            },
+            {
+              "name": "_mm256_unpacklo_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom"
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -756,7 +1260,27 @@
                 "imm8": 10
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_shuffle_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 5
+              }
+            },
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 10
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -777,7 +1301,26 @@
                 "imm8": 0
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_unpackhi_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom"
+              }
+            },
+            {
+              "name": "_mm256_shuffle_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -797,7 +1340,25 @@
                 "b": "bottom"
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_unpackhi_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom"
+              }
+            },
+            {
+              "name": "_mm256_unpacklo_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom"
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -818,7 +1379,26 @@
                 "imm8": 15
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_unpacklo_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom"
+              }
+            },
+            {
+              "name": "_mm256_shuffle_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 15
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -838,7 +1418,25 @@
                 "b": "bottom"
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_unpacklo_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom"
+              }
+            },
+            {
+              "name": "_mm256_unpackhi_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom"
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         }
       ],
       "gadget_count": 8,
@@ -887,7 +1485,18 @@
                 "imm8": 177
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute4x64_epi64",
+              "args": {
+                "a": "bottom",
+                "imm8": 177
+              }
+            }
+          ],
+          "top_output_index": -1,
+          "bottom_output_index": 0
         },
         {
           "top_instructions": [],
@@ -899,7 +1508,18 @@
                 "imm8": 1
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "bottom",
+                "imm8": 1
+              }
+            }
+          ],
+          "top_output_index": -1,
+          "bottom_output_index": 0
         },
         {
           "top_instructions": [],
@@ -911,7 +1531,18 @@
                 "b": 680564733841876926926749214863536422914
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permutevar_pd",
+              "args": {
+                "a": "bottom",
+                "b": 680564733841876926926749214863536422914
+              }
+            }
+          ],
+          "top_output_index": -1,
+          "bottom_output_index": 0
         },
         {
           "top_instructions": [],
@@ -923,7 +1554,18 @@
                 "op_idx": 12554203470773361528692425947178148222594834711223373660161
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permutexvar_epi64",
+              "args": {
+                "a": "bottom",
+                "op_idx": 12554203470773361528692425947178148222594834711223373660161
+              }
+            }
+          ],
+          "top_output_index": -1,
+          "bottom_output_index": 0
         },
         {
           "top_instructions": [
@@ -944,7 +1586,26 @@
                 "imm8": 177
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            },
+            {
+              "name": "_mm256_permute4x64_epi64",
+              "args": {
+                "a": "bottom",
+                "imm8": 177
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -965,7 +1626,26 @@
                 "imm8": 1
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            },
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "bottom",
+                "imm8": 1
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -986,7 +1666,26 @@
                 "b": 680564733841876926926749214863536422914
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            },
+            {
+              "name": "_mm256_permutevar_pd",
+              "args": {
+                "a": "bottom",
+                "b": 680564733841876926926749214863536422914
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1007,7 +1706,26 @@
                 "op_idx": 12554203470773361528692425947178148222594834711223373660161
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            },
+            {
+              "name": "_mm256_permutexvar_epi64",
+              "args": {
+                "a": "bottom",
+                "op_idx": 12554203470773361528692425947178148222594834711223373660161
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1028,7 +1746,26 @@
                 "imm8": 177
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 16
+              }
+            },
+            {
+              "name": "_mm256_permute4x64_epi64",
+              "args": {
+                "a": "bottom",
+                "imm8": 177
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1049,7 +1786,26 @@
                 "imm8": 1
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 16
+              }
+            },
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "bottom",
+                "imm8": 1
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1070,7 +1826,26 @@
                 "b": 680564733841876926926749214863536422914
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 16
+              }
+            },
+            {
+              "name": "_mm256_permutevar_pd",
+              "args": {
+                "a": "bottom",
+                "b": 680564733841876926926749214863536422914
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1091,7 +1866,26 @@
                 "op_idx": 12554203470773361528692425947178148222594834711223373660161
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 16
+              }
+            },
+            {
+              "name": "_mm256_permutexvar_epi64",
+              "args": {
+                "a": "bottom",
+                "op_idx": 12554203470773361528692425947178148222594834711223373660161
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1111,7 +1905,25 @@
                 "imm8": 1
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute4x64_epi64",
+              "args": {
+                "a": "top",
+                "imm8": 228
+              }
+            },
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "bottom",
+                "imm8": 1
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1131,7 +1943,25 @@
                 "imm8": 177
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "top",
+                "imm8": 2
+              }
+            },
+            {
+              "name": "_mm256_permute4x64_epi64",
+              "args": {
+                "a": "bottom",
+                "imm8": 177
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1151,7 +1981,25 @@
                 "imm8": 1
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "top",
+                "imm8": 2
+              }
+            },
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "bottom",
+                "imm8": 1
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1171,7 +2019,25 @@
                 "b": 680564733841876926926749214863536422914
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "top",
+                "imm8": 2
+              }
+            },
+            {
+              "name": "_mm256_permutevar_pd",
+              "args": {
+                "a": "bottom",
+                "b": 680564733841876926926749214863536422914
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1191,7 +2057,25 @@
                 "op_idx": 12554203470773361528692425947178148222594834711223373660161
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "top",
+                "imm8": 2
+              }
+            },
+            {
+              "name": "_mm256_permutexvar_epi64",
+              "args": {
+                "a": "bottom",
+                "op_idx": 12554203470773361528692425947178148222594834711223373660161
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1211,7 +2095,25 @@
                 "imm8": 1
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permutevar_pd",
+              "args": {
+                "a": "top",
+                "b": 12554203470773361527671578846415332832241604377075488129024
+              }
+            },
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "bottom",
+                "imm8": 1
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1231,7 +2133,25 @@
                 "imm8": 1
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permutexvar_epi64",
+              "args": {
+                "a": "top",
+                "op_idx": 18831305206160042292187933003464876175252262292329349513216
+              }
+            },
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "bottom",
+                "imm8": 1
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         }
       ],
       "gadget_count": 19,
@@ -1272,7 +2192,10 @@
       "gadgets": [
         {
           "top_instructions": [],
-          "bottom_instructions": []
+          "bottom_instructions": [],
+          "unified_instructions": [],
+          "top_output_index": -1,
+          "bottom_output_index": -1
         },
         {
           "top_instructions": [],
@@ -1285,7 +2208,19 @@
                 "imm8": 0
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_alignr_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            }
+          ],
+          "top_output_index": -1,
+          "bottom_output_index": 0
         },
         {
           "top_instructions": [],
@@ -1298,7 +2233,19 @@
                 "imm8": 15
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 15
+              }
+            }
+          ],
+          "top_output_index": -1,
+          "bottom_output_index": 0
         },
         {
           "top_instructions": [],
@@ -1311,7 +2258,19 @@
                 "imm8": 50
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 50
+              }
+            }
+          ],
+          "top_output_index": -1,
+          "bottom_output_index": 0
         },
         {
           "top_instructions": [],
@@ -1323,7 +2282,18 @@
                 "imm8": 228
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute4x64_epi64",
+              "args": {
+                "a": "bottom",
+                "imm8": 228
+              }
+            }
+          ],
+          "top_output_index": -1,
+          "bottom_output_index": 0
         },
         {
           "top_instructions": [],
@@ -1335,7 +2305,18 @@
                 "imm8": 2
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "bottom",
+                "imm8": 2
+              }
+            }
+          ],
+          "top_output_index": -1,
+          "bottom_output_index": 0
         },
         {
           "top_instructions": [],
@@ -1347,7 +2328,18 @@
                 "b": 12554203470773361527671578846415332832241604377075488129024
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permutevar_pd",
+              "args": {
+                "a": "bottom",
+                "b": 12554203470773361527671578846415332832241604377075488129024
+              }
+            }
+          ],
+          "top_output_index": -1,
+          "bottom_output_index": 0
         },
         {
           "top_instructions": [],
@@ -1359,7 +2351,18 @@
                 "op_idx": 18831305206160042292187933003464876175252262292329349513216
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permutexvar_epi64",
+              "args": {
+                "a": "bottom",
+                "op_idx": 18831305206160042292187933003464876175252262292329349513216
+              }
+            }
+          ],
+          "top_output_index": -1,
+          "bottom_output_index": 0
         },
         {
           "top_instructions": [
@@ -1381,7 +2384,27 @@
                 "imm8": 0
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_alignr_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            },
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1403,7 +2426,27 @@
                 "imm8": 16
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_alignr_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            },
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 16
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1416,7 +2459,19 @@
               }
             }
           ],
-          "bottom_instructions": []
+          "bottom_instructions": [],
+          "unified_instructions": [
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": -1
         },
         {
           "top_instructions": [
@@ -1438,7 +2493,27 @@
                 "imm8": 0
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            },
+            {
+              "name": "_mm256_alignr_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1460,7 +2535,27 @@
                 "imm8": 50
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            },
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 50
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1481,7 +2576,26 @@
                 "imm8": 228
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            },
+            {
+              "name": "_mm256_permute4x64_epi64",
+              "args": {
+                "a": "bottom",
+                "imm8": 228
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1502,7 +2616,26 @@
                 "imm8": 2
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            },
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "bottom",
+                "imm8": 2
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1523,7 +2656,26 @@
                 "b": 12554203470773361527671578846415332832241604377075488129024
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            },
+            {
+              "name": "_mm256_permutevar_pd",
+              "args": {
+                "a": "bottom",
+                "b": 12554203470773361527671578846415332832241604377075488129024
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1544,7 +2696,26 @@
                 "op_idx": 18831305206160042292187933003464876175252262292329349513216
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            },
+            {
+              "name": "_mm256_permutexvar_epi64",
+              "args": {
+                "a": "bottom",
+                "op_idx": 18831305206160042292187933003464876175252262292329349513216
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1566,7 +2737,27 @@
                 "imm8": 18
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 12
+              }
+            },
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 18
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1588,7 +2779,27 @@
                 "imm8": 48
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 3
+              }
+            },
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 48
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1610,7 +2821,27 @@
                 "imm8": 10
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 5
+              }
+            },
+            {
+              "name": "_mm256_shuffle_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 10
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1623,7 +2854,19 @@
               }
             }
           ],
-          "bottom_instructions": []
+          "bottom_instructions": [],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 16
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": -1
         },
         {
           "top_instructions": [
@@ -1645,7 +2888,27 @@
                 "imm8": 0
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 16
+              }
+            },
+            {
+              "name": "_mm256_alignr_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1667,7 +2930,27 @@
                 "imm8": 15
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 16
+              }
+            },
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 15
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1688,7 +2971,26 @@
                 "imm8": 228
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 16
+              }
+            },
+            {
+              "name": "_mm256_permute4x64_epi64",
+              "args": {
+                "a": "bottom",
+                "imm8": 228
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1709,7 +3011,26 @@
                 "imm8": 2
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 16
+              }
+            },
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "bottom",
+                "imm8": 2
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1730,7 +3051,26 @@
                 "b": 12554203470773361527671578846415332832241604377075488129024
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 16
+              }
+            },
+            {
+              "name": "_mm256_permutevar_pd",
+              "args": {
+                "a": "bottom",
+                "b": 12554203470773361527671578846415332832241604377075488129024
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1751,7 +3091,26 @@
                 "op_idx": 18831305206160042292187933003464876175252262292329349513216
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 16
+              }
+            },
+            {
+              "name": "_mm256_permutexvar_epi64",
+              "args": {
+                "a": "bottom",
+                "op_idx": 18831305206160042292187933003464876175252262292329349513216
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1773,7 +3132,27 @@
                 "imm8": 12
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 18
+              }
+            },
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 12
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1795,7 +3174,27 @@
                 "imm8": 3
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 48
+              }
+            },
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 3
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1807,7 +3206,18 @@
               }
             }
           ],
-          "bottom_instructions": []
+          "bottom_instructions": [],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute4x64_epi64",
+              "args": {
+                "a": "top",
+                "imm8": 228
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": -1
         },
         {
           "top_instructions": [
@@ -1828,7 +3238,26 @@
                 "imm8": 0
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute4x64_epi64",
+              "args": {
+                "a": "top",
+                "imm8": 228
+              }
+            },
+            {
+              "name": "_mm256_alignr_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1849,7 +3278,26 @@
                 "imm8": 15
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute4x64_epi64",
+              "args": {
+                "a": "top",
+                "imm8": 228
+              }
+            },
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 15
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1870,7 +3318,26 @@
                 "imm8": 50
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute4x64_epi64",
+              "args": {
+                "a": "top",
+                "imm8": 228
+              }
+            },
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 50
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1890,7 +3357,25 @@
                 "imm8": 2
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute4x64_epi64",
+              "args": {
+                "a": "top",
+                "imm8": 228
+              }
+            },
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "bottom",
+                "imm8": 2
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1902,7 +3387,18 @@
               }
             }
           ],
-          "bottom_instructions": []
+          "bottom_instructions": [],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "top",
+                "imm8": 2
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": -1
         },
         {
           "top_instructions": [
@@ -1923,7 +3419,26 @@
                 "imm8": 0
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "top",
+                "imm8": 2
+              }
+            },
+            {
+              "name": "_mm256_alignr_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1944,7 +3459,26 @@
                 "imm8": 15
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "top",
+                "imm8": 2
+              }
+            },
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 15
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1965,7 +3499,26 @@
                 "imm8": 50
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "top",
+                "imm8": 2
+              }
+            },
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 50
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -1985,7 +3538,25 @@
                 "imm8": 228
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "top",
+                "imm8": 2
+              }
+            },
+            {
+              "name": "_mm256_permute4x64_epi64",
+              "args": {
+                "a": "bottom",
+                "imm8": 228
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -2005,7 +3576,25 @@
                 "imm8": 2
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "top",
+                "imm8": 2
+              }
+            },
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "bottom",
+                "imm8": 2
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -2025,7 +3614,25 @@
                 "b": 12554203470773361527671578846415332832241604377075488129024
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "top",
+                "imm8": 2
+              }
+            },
+            {
+              "name": "_mm256_permutevar_pd",
+              "args": {
+                "a": "bottom",
+                "b": 12554203470773361527671578846415332832241604377075488129024
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -2045,7 +3652,25 @@
                 "op_idx": 18831305206160042292187933003464876175252262292329349513216
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "top",
+                "imm8": 2
+              }
+            },
+            {
+              "name": "_mm256_permutexvar_epi64",
+              "args": {
+                "a": "bottom",
+                "op_idx": 18831305206160042292187933003464876175252262292329349513216
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -2057,7 +3682,18 @@
               }
             }
           ],
-          "bottom_instructions": []
+          "bottom_instructions": [],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permutevar_pd",
+              "args": {
+                "a": "top",
+                "b": 12554203470773361527671578846415332832241604377075488129024
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": -1
         },
         {
           "top_instructions": [
@@ -2078,7 +3714,26 @@
                 "imm8": 0
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permutevar_pd",
+              "args": {
+                "a": "top",
+                "b": 12554203470773361527671578846415332832241604377075488129024
+              }
+            },
+            {
+              "name": "_mm256_alignr_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -2099,7 +3754,26 @@
                 "imm8": 15
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permutevar_pd",
+              "args": {
+                "a": "top",
+                "b": 12554203470773361527671578846415332832241604377075488129024
+              }
+            },
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 15
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -2120,7 +3794,26 @@
                 "imm8": 50
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permutevar_pd",
+              "args": {
+                "a": "top",
+                "b": 12554203470773361527671578846415332832241604377075488129024
+              }
+            },
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 50
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -2140,7 +3833,25 @@
                 "imm8": 2
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permutevar_pd",
+              "args": {
+                "a": "top",
+                "b": 12554203470773361527671578846415332832241604377075488129024
+              }
+            },
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "bottom",
+                "imm8": 2
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -2152,7 +3863,18 @@
               }
             }
           ],
-          "bottom_instructions": []
+          "bottom_instructions": [],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permutexvar_epi64",
+              "args": {
+                "a": "top",
+                "op_idx": 18831305206160042292187933003464876175252262292329349513216
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": -1
         },
         {
           "top_instructions": [
@@ -2173,7 +3895,26 @@
                 "imm8": 0
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permutexvar_epi64",
+              "args": {
+                "a": "top",
+                "op_idx": 18831305206160042292187933003464876175252262292329349513216
+              }
+            },
+            {
+              "name": "_mm256_alignr_epi64",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 0
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -2194,7 +3935,26 @@
                 "imm8": 15
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permutexvar_epi64",
+              "args": {
+                "a": "top",
+                "op_idx": 18831305206160042292187933003464876175252262292329349513216
+              }
+            },
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 15
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -2215,7 +3975,26 @@
                 "imm8": 50
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permutexvar_epi64",
+              "args": {
+                "a": "top",
+                "op_idx": 18831305206160042292187933003464876175252262292329349513216
+              }
+            },
+            {
+              "name": "_mm256_permute2x128_si256",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 50
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -2235,7 +4014,25 @@
                 "imm8": 2
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permutexvar_epi64",
+              "args": {
+                "a": "top",
+                "op_idx": 18831305206160042292187933003464876175252262292329349513216
+              }
+            },
+            {
+              "name": "_mm256_permute_pd",
+              "args": {
+                "a": "bottom",
+                "imm8": 2
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         },
         {
           "top_instructions": [
@@ -2257,7 +4054,27 @@
                 "imm8": 5
               }
             }
-          ]
+          ],
+          "unified_instructions": [
+            {
+              "name": "_mm256_shuffle_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 10
+              }
+            },
+            {
+              "name": "_mm256_blend_pd",
+              "args": {
+                "a": "top",
+                "b": "bottom",
+                "imm8": 5
+              }
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": 1
         }
       ],
       "gadget_count": 53,
@@ -2265,5 +4082,8 @@
         "n1"
       ]
     }
-  }
+  },
+  "vector_machine": "AVX2",
+  "primitive_type": "i64",
+  "num_vecs": 2
 }

@@ -9,6 +9,8 @@ pipeline — no SMT solver invocation needed, just simplify(). This keeps
 test time well under a second.
 """
 
+import glob
+import json
 import os
 import random
 
@@ -780,3 +782,156 @@ def test_shape_f_asymmetric_parameterless_dual_has_cross_ordering():
             "unpacklo (asymmetric, no Symbolics) must use cross-ordering "
             "(top and bottom tails have swapped operands)"
         )
+
+
+# ---------------------------------------------------------------------------
+# JSON fixture schema validation
+# ---------------------------------------------------------------------------
+
+FIXTURE_DIR = os.path.join(os.path.dirname(__file__))
+
+
+def _validate_instruction(inst: dict, path: str) -> list[str]:
+    """Validate a single instruction dict. Returns list of error strings."""
+    errors = []
+    if "name" not in inst:
+        errors.append(f"{path}: missing 'name'")
+    elif not isinstance(inst["name"], str):
+        errors.append(f"{path}: 'name' must be str")
+    if "args" not in inst:
+        errors.append(f"{path}: missing 'args'")
+    elif not isinstance(inst["args"], dict):
+        errors.append(f"{path}: 'args' must be dict")
+    return errors
+
+
+def _validate_gadget(gadget: dict, path: str) -> list[str]:
+    """Validate a gadget dict. Returns list of error strings."""
+    errors = []
+    for key in ("top_instructions", "bottom_instructions", "unified_instructions"):
+        if key not in gadget:
+            errors.append(f"{path}: missing '{key}'")
+        elif not isinstance(gadget[key], list):
+            errors.append(f"{path}: '{key}' must be list")
+        else:
+            for i, inst in enumerate(gadget[key]):
+                errors.extend(_validate_instruction(inst, f"{path}.{key}[{i}]"))
+
+    for key in ("top_output_index", "bottom_output_index"):
+        if key not in gadget:
+            errors.append(f"{path}: missing '{key}'")
+        elif not isinstance(gadget[key], int):
+            errors.append(f"{path}: '{key}' must be int")
+
+    # unified_instructions must be <= sum of top + bottom
+    if (
+        "unified_instructions" in gadget
+        and "top_instructions" in gadget
+        and "bottom_instructions" in gadget
+        and isinstance(gadget["unified_instructions"], list)
+    ):
+        n_unified = len(gadget["unified_instructions"])
+        n_raw = len(gadget["top_instructions"]) + len(gadget["bottom_instructions"])
+        if n_unified > n_raw:
+            errors.append(f"{path}: unified ({n_unified}) > top+bottom ({n_raw})")
+
+    return errors
+
+
+def _validate_fixture(data: dict) -> list[str]:
+    """Validate a full solution JSON fixture. Returns list of error strings."""
+    errors = []
+
+    # Top-level keys
+    for key in ("roots", "nodes", "vector_machine", "primitive_type", "num_vecs"):
+        if key not in data:
+            errors.append(f"missing top-level key '{key}'")
+
+    if not isinstance(data.get("roots"), list):
+        errors.append("'roots' must be a list")
+    if not isinstance(data.get("nodes"), dict):
+        errors.append("'nodes' must be a dict")
+        return errors  # can't continue without nodes
+
+    # Validate each node
+    for node_id, node in data["nodes"].items():
+        npath = f"nodes.{node_id}"
+        for key in ("stage", "input_state", "output_state", "gadgets", "children"):
+            if key not in node:
+                errors.append(f"{npath}: missing '{key}'")
+
+        if not isinstance(node.get("gadgets"), list):
+            errors.append(f"{npath}: 'gadgets' must be list")
+        else:
+            for i, gadget in enumerate(node["gadgets"]):
+                errors.extend(_validate_gadget(gadget, f"{npath}.gadgets[{i}]"))
+
+        # Children must reference existing nodes
+        for child_id in node.get("children", []):
+            if child_id not in data["nodes"]:
+                errors.append(f"{npath}: child '{child_id}' not in nodes")
+
+    # Roots must reference existing nodes
+    for root_id in data.get("roots", []):
+        if root_id not in data["nodes"]:
+            errors.append(f"root '{root_id}' not in nodes")
+
+    return errors
+
+
+@pytest.mark.parametrize(
+    "fixture_path",
+    sorted(glob.glob(os.path.join(FIXTURE_DIR, "fixture_*.json"))),
+    ids=lambda p: os.path.basename(p),
+)
+def test_fixture_schema_validation(fixture_path):
+    """All JSON fixtures must conform to the solution schema."""
+    with open(fixture_path) as f:
+        data = json.load(f)
+    errors = _validate_fixture(data)
+    assert errors == [], (
+        f"Schema errors in {os.path.basename(fixture_path)}:\n" + "\n".join(errors)
+    )
+
+
+@pytest.mark.parametrize(
+    "fixture_path",
+    sorted(glob.glob(os.path.join(FIXTURE_DIR, "fixture_*.json"))),
+    ids=lambda p: os.path.basename(p),
+)
+def test_fixture_unified_instructions_consistency(fixture_path):
+    """unified_instructions in fixtures must match recomputed values."""
+    from bitonic_super_optimizer import InstructionSpec, PermutationGadget
+
+    with open(fixture_path) as f:
+        data = json.load(f)
+
+    for node_id, node in data["nodes"].items():
+        for gi, gd in enumerate(node["gadgets"]):
+            top_insts = [
+                InstructionSpec(i["name"], dict(i["args"]))
+                for i in gd["top_instructions"]
+            ]
+            bottom_insts = [
+                InstructionSpec(i["name"], dict(i["args"]))
+                for i in gd["bottom_instructions"]
+            ]
+            gadget = PermutationGadget(
+                top_instructions=top_insts,
+                bottom_instructions=bottom_insts,
+                validated=True,
+            )
+            unified, top_out, bottom_out = gadget.unified_instructions()
+
+            # Check counts match
+            assert len(gd["unified_instructions"]) == len(unified), (
+                f"{node_id}.gadgets[{gi}]: unified count mismatch: "
+                f"fixture={len(gd['unified_instructions'])}, "
+                f"recomputed={len(unified)}"
+            )
+            assert (
+                gd["top_output_index"] == top_out
+            ), f"{node_id}.gadgets[{gi}]: top_output_index mismatch"
+            assert (
+                gd["bottom_output_index"] == bottom_out
+            ), f"{node_id}.gadgets[{gi}]: bottom_output_index mismatch"
