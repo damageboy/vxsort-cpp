@@ -259,7 +259,7 @@ def export_solutions_to_asm(
 ):
     """Export solutions as NASM-valid assembly code.
 
-    Uses the canonical emitter from osaca_estimator (_generate_osaca_asm)
+    Uses the canonical emitter from osaca_estimator (generate_solution_asm)
     for each solution, optionally verifies each with NASM, then concatenates
     all solutions into a single output file with separators.
 
@@ -278,7 +278,7 @@ def export_solutions_to_asm(
     import tempfile
 
     from cost_model import CostModel
-    from osaca_estimator import _generate_osaca_asm, _verify_with_nasm
+    from perf_estimator import generate_solution_asm, _verify_with_nasm
     from path_selector import PathSelector
 
     # If selected_paths is provided, use them directly
@@ -312,7 +312,7 @@ def export_solutions_to_asm(
             solution_index = i + 1
 
             # Generate NASM-valid assembly for this solution
-            asm_content = _generate_osaca_asm(
+            asm_content = generate_solution_asm(
                 path, vm, dtype, num_vecs, natural_order, solution_index, total
             )
 

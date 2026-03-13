@@ -24,35 +24,35 @@ class ArchInfo:
 
     canonical: str  # XML arch name, e.g. "SKX"
     aliases: tuple[str, ...]  # User-friendly names, e.g. ("skylake-x",)
-    osaca_code: str | None  # OSACA model name, or None
     vendor: str  # "Intel" or "AMD"
+    llvm_mca_cpu: str | None  # llvm-mca -mcpu= value
 
 
 # Authoritative registry of all supported architectures.
 _ARCH_REGISTRY: list[ArchInfo] = [
     # Intel
-    ArchInfo("SNB", ("sandybridge",), "SNB", "Intel"),
-    ArchInfo("IVB", ("ivybridge",), "IVB", "Intel"),
-    ArchInfo("HSW", ("haswell",), "HSW", "Intel"),
-    ArchInfo("BDW", ("broadwell",), "BDW", "Intel"),
-    ArchInfo("SKL", ("skylake",), "SKX", "Intel"),
-    ArchInfo("KBL", ("kabylake",), "SKX", "Intel"),
-    ArchInfo("CFL", ("coffeelake",), "SKX", "Intel"),
-    ArchInfo("CNL", ("cannonlake",), "ICL", "Intel"),
-    ArchInfo("ICL", ("icelake",), "ICL", "Intel"),
-    ArchInfo("TGL", ("tigerlake",), "ICL", "Intel"),
-    ArchInfo("RKL", ("rocketlake",), "ICL", "Intel"),
-    ArchInfo("SKX", ("skylake-x",), "SKX", "Intel"),
-    ArchInfo("CLX", ("cascadelake",), "CSX", "Intel"),
-    ArchInfo("ADL-P", ("alderlake-p",), "SPR", "Intel"),
-    ArchInfo("ADL-E", ("alderlake-e",), "SPR", "Intel"),
+    ArchInfo("SNB", ("sandybridge",), "Intel", "sandybridge"),
+    ArchInfo("IVB", ("ivybridge",), "Intel", "ivybridge"),
+    ArchInfo("HSW", ("haswell",), "Intel", "haswell"),
+    ArchInfo("BDW", ("broadwell",), "Intel", "broadwell"),
+    ArchInfo("SKL", ("skylake",), "Intel", "skylake"),
+    ArchInfo("KBL", ("kabylake",), "Intel", "skylake"),
+    ArchInfo("CFL", ("coffeelake",), "Intel", "skylake"),
+    ArchInfo("CNL", ("cannonlake",), "Intel", "cannonlake"),
+    ArchInfo("ICL", ("icelake",), "Intel", "icelake-server"),
+    ArchInfo("TGL", ("tigerlake",), "Intel", "icelake-server"),
+    ArchInfo("RKL", ("rocketlake",), "Intel", "icelake-server"),
+    ArchInfo("SKX", ("skylake-x",), "Intel", "skylake-avx512"),
+    ArchInfo("CLX", ("cascadelake",), "Intel", "cascadelake"),
+    ArchInfo("ADL-P", ("alderlake-p",), "Intel", "alderlake"),
+    ArchInfo("ADL-E", ("alderlake-e",), "Intel", "alderlake"),
     # AMD
-    ArchInfo("ZEN+", ("zen+",), "ZEN1", "AMD"),
-    ArchInfo("ZEN1", ("zen1",), "ZEN1", "AMD"),
-    ArchInfo("ZEN2", ("zen2",), "ZEN2", "AMD"),
-    ArchInfo("ZEN3", ("zen3",), "ZEN3", "AMD"),
-    ArchInfo("ZEN4", ("zen4",), "ZEN4", "AMD"),
-    ArchInfo("ZEN5", ("zen5",), "ZEN5", "AMD"),
+    ArchInfo("ZEN+", ("zen+",), "AMD", "znver1"),
+    ArchInfo("ZEN1", ("zen1",), "AMD", "znver1"),
+    ArchInfo("ZEN2", ("zen2",), "AMD", "znver2"),
+    ArchInfo("ZEN3", ("zen3",), "AMD", "znver3"),
+    ArchInfo("ZEN4", ("zen4",), "AMD", "znver4"),
+    ArchInfo("ZEN5", ("zen5",), "AMD", "znver5"),
 ]
 
 # Derived lookup: friendly name (lowercase) -> canonical XML name.
@@ -90,10 +90,10 @@ def resolve_arch_name(target_cpu: str) -> str | None:
     return target_cpu
 
 
-def resolve_osaca_arch(target_cpu: str) -> str | None:
-    """Resolve a --target-cpu value to an OSACA architecture code.
+def resolve_llvm_mca_cpu(target_cpu: str) -> str | None:
+    """Resolve a --target-cpu value to an llvm-mca -mcpu= value.
 
-    Returns None if the architecture is not supported by OSACA.
+    Returns None if target_cpu is "generic".
     """
     canonical = resolve_arch_name(target_cpu)
     if canonical is None:
@@ -101,7 +101,7 @@ def resolve_osaca_arch(target_cpu: str) -> str | None:
     info = _ARCH_BY_CANONICAL.get(canonical)
     if info is None:
         return None
-    return info.osaca_code
+    return info.llvm_mca_cpu
 
 
 def get_supported_cpus() -> list[ArchInfo]:

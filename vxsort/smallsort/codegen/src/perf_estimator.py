@@ -1,7 +1,7 @@
-"""OSACA-based performance estimation for bitonic sort solutions.
+"""Performance estimation for bitonic sort solutions.
 
-Generates per-solution .asm files with OSACA markers, optionally verifies
-them with NASM, runs OSACA analysis, and prints a comparison table.
+Generates per-solution .asm files with analysis markers, optionally verifies
+them with NASM, runs performance analysis, and prints a comparison table.
 """
 
 from __future__ import annotations
@@ -22,26 +22,25 @@ from asm_exporter import (
     _emit_compare_swap_lines,
     _format_control_vector_bits,
     _format_vector_state_as_comment,
-    _get_compare_swap_mnemonics,
     _get_instruction_metadata,
     _intrinsic_to_asm_mnemonic,
     _is_masked_intrinsic,
     _resolve_source,
 )
 from z3_avx import mm_shuffle2_str, mm_shuffle_str
-from cost_model import get_supported_cpus, resolve_osaca_arch
+from cost_model import get_supported_cpus
 from utils import primitive_type, vector_machine, width_dict
 
 
 @dataclass
-class OsacaResult:
-    """Result from running OSACA on a single solution."""
+class EstimationResult:
+    """Result from performance estimation on a single solution."""
 
     solution_index: int
     asm_path: str
-    yaml_path: str
-    critical_path: float
     throughput: float
+    simulated_cycles: float = -1.0
+    analysis_path: str = ""
     warnings: list[str] = field(default_factory=list)
 
 
@@ -502,7 +501,7 @@ def _emit_gadget_asm(
     return lines, is_dual_side
 
 
-def _generate_osaca_asm(
+def generate_solution_asm(
     path,
     vm: vector_machine,
     dtype: primitive_type,
@@ -511,7 +510,7 @@ def _generate_osaca_asm(
     solution_index: int,
     total_solutions: int,
 ) -> str:
-    """Generate a complete, NASM-valid .asm file for OSACA analysis.
+    """Generate a complete, NASM-valid .asm file for performance analysis.
 
     Args:
         path: CompletePath with steps
@@ -641,17 +640,6 @@ def _generate_osaca_asm(
 
         reg_allocator.reset_temps()
 
-    # If results ended up in pair 1, move back to pair 0
-    if reg_allocator._pair_index != 0:
-        mnemonics = _get_compare_swap_mnemonics(dtype, vm)
-        mov = mnemonics[0] if mnemonics else "vmovdqa"
-        text_lines.append(
-            f"    {mov:20s} {reg_allocator.dst_top}, {reg_allocator.src_top}"
-        )
-        text_lines.append(
-            f"    {mov:20s} {reg_allocator.dst_bottom}, {reg_allocator.src_bottom}"
-        )
-
     text_lines.append("    ; OSACA-END")
     text_lines.append("    ret")
     text_lines.append("")
@@ -713,201 +701,69 @@ def _verify_with_nasm(asm_path: str, nasm_path: str) -> bool:
             os.unlink(obj_path)
 
 
-def _build_mnemonic_fixups(arch: str) -> dict[str, str]:
-    """Build a mnemonic substitution table based on what the OSACA DB has.
+# Lines to strip entirely (NASM-specific directives, data, scaffolding)
+_LLVM_STRIP_PATTERNS = [
+    re.compile(r"^\s*bits\s+\d+"),
+    re.compile(r"^\s*default\s+rel"),
+    re.compile(r"^\s*section\s+"),
+    re.compile(r"^\s*global\s+"),
+    re.compile(r"^\s*align\s+\d+"),
+    re.compile(r"^\s*\w+:$"),  # labels
+    re.compile(r"^\s*d[dqbw]\s+"),  # data directives
+    re.compile(r"^\s*ret\b"),
+]
 
-    OSACA databases are inconsistent about ``vmovdqa`` vs the EVEX-suffixed
-    ``vmovdqa32`` / ``vmovdqa64``:
 
-    - Older DBs (e.g. SKX) have 2-operand forms only under ``vmovdqa``;
-      their ``vmovdqa32`` entries are 3-operand masked forms we don't use.
-    - Newer DBs (e.g. ZEN5) have 2-operand forms only under ``vmovdqa32``
-      and lack ``vmovdqa`` entirely.
+def sanitize_asm_for_llvm_mca(asm_text: str) -> str:
+    """Sanitize NASM-syntax assembly for LLVM-MCA's Intel parser.
 
-    We probe the machine model to decide which direction to normalize.
+    LLVM-MCA with -x86-asm-syntax=intel accepts Intel operand ordering
+    natively. Only NASM-specific constructs need transformation:
+    - [rel label] → [rip + label]
+    - ; comments → # comments
+    - OSACA markers → LLVM-MCA markers
+    - NASM directives, data sections, labels → stripped
     """
-    from osaca.semantics import MachineModel
+    output_lines: list[str] = []
 
-    mm = MachineModel(arch=arch)
+    for line in asm_text.splitlines():
+        stripped = line.strip()
 
-    # Check which mnemonics have usable 2-operand (reg,reg or reg,mem) forms
-    has_bare_2op = False
-    has_32_2op = False
+        # OSACA markers → LLVM-MCA markers
+        if "; OSACA-BEGIN" in line:
+            output_lines.append("# LLVM-MCA-BEGIN")
+            continue
+        if "; OSACA-END" in line:
+            output_lines.append("# LLVM-MCA-END")
+            continue
 
-    for e in mm["instruction_forms"]:
-        name = e.get("name", "").lower()
-        nops = len(e.get("operands", []))
-        if nops == 2:
-            if name == "vmovdqa":
-                has_bare_2op = True
-            elif name == "vmovdqa32":
-                has_32_2op = True
+        # Strip NASM-only directives
+        if any(p.match(stripped) for p in _LLVM_STRIP_PATTERNS):
+            continue
 
-    fixups: dict[str, str] = {}
+        # Empty lines
+        if not stripped:
+            continue
 
-    if has_bare_2op and not has_32_2op:
-        # SKX-style: normalize suffixed → bare
-        fixups["vmovdqa32"] = "vmovdqa"
-        fixups["vmovdqa64"] = "vmovdqa"
-    elif has_32_2op and not has_bare_2op:
-        # ZEN5-style: normalize bare → suffixed
-        fixups["vmovdqa"] = "vmovdqa32"
+        # Comment-only lines
+        if stripped.startswith(";"):
+            output_lines.append(f"# {stripped[1:].strip()}")
+            continue
 
-    return fixups
+        # Instruction lines: fix memory operands and comments
+        # [rel label] → [rip + label]
+        line = re.sub(r"\[rel\s+(\w+)\]", r"[rip + \1]", line)
 
-
-def _sanitize_asm_for_osaca(code: str, arch: str) -> str:
-    """Pre-process NASM assembly text into forms OSACA's Intel parser accepts.
-
-    OSACA cannot parse NASM-specific ``[rel label]`` memory operands.
-    We replace them with ``[rdi]`` (register-indirect), which is
-    semantically equivalent for throughput / latency analysis.  Inline
-    comments are also stripped so that bracket characters inside comments
-    (e.g. ``; [7, 6, 5, 4, 3, 2, 1, 0]``) don't confuse the tokenizer,
-    while OSACA marker comments (``; OSACA-BEGIN`` / ``; OSACA-END``) are
-    preserved.
-
-    Mnemonic fixups (e.g. ``vmovdqa32`` → ``vmovdqa``) are applied only
-    when the target arch's OSACA database lacks the original form.
-    """
-    fixups = _build_mnemonic_fixups(arch)
-
-    out_lines: list[str] = []
-    for line in code.splitlines():
-        # Replace [rel <label>] with [rdi]
-        line = re.sub(r"\[rel\s+\w+\]", "[rdi]", line)
-
-        # Apply arch-specific mnemonic fixups
-        for src, dst in fixups.items():
-            line = re.sub(rf"\b{src}\b", dst, line)
-
-        # Strip inline comments, but keep OSACA markers
+        # ; inline comment → # inline comment
         semi_pos = line.find(";")
         if semi_pos >= 0:
-            comment = line[semi_pos:]
-            if "OSACA-BEGIN" in comment or "OSACA-END" in comment:
-                pass  # keep marker comments
-            else:
-                line = line[:semi_pos].rstrip()
+            line = line[:semi_pos].rstrip() + " # " + line[semi_pos + 1 :].strip()
 
-        out_lines.append(line)
-    return "\n".join(out_lines) + "\n"
+        output_lines.append(line.rstrip())
 
-
-def _run_osaca(
-    asm_path: str,
-    arch: str,
-    output_dir: str,
-    solution_index: int,
-) -> OsacaResult:
-    """Run OSACA on an assembly file using the Python API.
-
-    Computes only the critical path (CP) and port pressure — skips the
-    loop-carried dependency (LCD) analysis entirely.  OSACA's LCD uses
-    nx.all_simple_paths on a doubled dependency graph, which is exponential
-    in the number of register fan-out paths.  For our straight-line bitonic
-    sort kernels (not loop bodies) LCD is meaningless anyway.
-
-    We bypass KernelDG.__init__ and call create_DG + dag_longest_path
-    directly on the full kernel.
-    """
-    import networkx as nx
-    from osaca.osaca import get_asm_parser
-    from osaca.semantics import INSTR_FLAGS, ArchSemantics, MachineModel
-    from osaca.semantics.kernel_dg import KernelDG
-    from osaca.semantics.marker_utils import reduce_to_section
-
-    output_path = os.path.join(output_dir, f"solution_{solution_index:03d}.txt")
-    warnings: list[str] = []
-
-    try:
-        # Parse the assembly file, sanitizing NASM constructs OSACA can't handle
-        code = Path(asm_path).read_text()
-        code = _sanitize_asm_for_osaca(code, arch)
-        parser = get_asm_parser(arch, "intel")
-        parsed = parser.parse_file(code)
-
-        # Reduce to marked section
-        kernel = reduce_to_section(parsed, parser)
-
-        # Build machine model and add semantics
-        mm = MachineModel(arch=arch)
-        sem = ArchSemantics(parser, mm)
-        sem.normalize_instruction_forms(kernel)
-        sem.add_semantics(kernel)
-
-        # Bail out if any instruction is missing from OSACA's database
-        unknown_mnemonics: list[str] = []
-        for instr in kernel:
-            if not instr.mnemonic:
-                continue
-            flags = getattr(instr, "flags", [])
-            if INSTR_FLAGS.TP_UNKWN in flags or INSTR_FLAGS.LT_UNKWN in flags:
-                unknown_mnemonics.append(instr.mnemonic)
-        if unknown_mnemonics:
-            unique = sorted(set(unknown_mnemonics))
-            raise ValueError(
-                f"OSACA {arch} database is missing {len(unique)} instruction(s): "
-                + ", ".join(unique)
-            )
-
-        sem.assign_optimal_throughput(kernel)
-
-        # Build dependency graph directly — skip LCD (exponential cost)
-        kdg = object.__new__(KernelDG)
-        kdg.timed_out = False
-        kdg.kernel = kernel
-        kdg.parser = parser
-        kdg.model = mm
-        kdg.arch_sem = sem
-        kdg.dg = kdg.create_DG(kernel)
-        kdg.loopcarried_deps = {}
-
-        # Compute critical path via dag_longest_path on the DG
-        total_cp = 0.0
-        if nx.algorithms.dag.is_directed_acyclic_graph(kdg.dg):
-            longest = nx.algorithms.dag.dag_longest_path(kdg.dg, weight="latency")
-            for s, d in nx.utils.pairwise(longest):
-                total_cp += kdg.dg.edges[(s, d)]["latency"]
-            # Add latency of the last instruction in the path
-            if longest:
-                last_node = kdg.dg.nodes[longest[-1]]["instruction_form"]
-                if last_node.latency is not None:
-                    total_cp += last_node.latency
-
-        # Compute throughput (port pressure sum)
-        tp_sum = ArchSemantics.get_throughput_sum(kernel)
-        tp_max = max(tp_sum) if tp_sum else 0.0
-
-        # Write details to output file
-        with open(output_path, "w") as f:
-            f.write(f"OSACA analysis for {Path(asm_path).name}\n")
-            f.write(f"Architecture: {arch}\n\n")
-            f.write(f"Critical Path: {total_cp:.1f} cycles\n")
-            f.write(f"Throughput (port bottleneck): {tp_max:.2f} cycles\n")
-            f.write(f"Instructions: {len(kernel)}\n")
-            f.write(f"DG nodes: {kdg.dg.number_of_nodes()}, ")
-            f.write(f"edges: {kdg.dg.number_of_edges()}\n")
-
-    except Exception as e:
-        warnings.append(f"OSACA error: {e}")
-        return OsacaResult(
-            solution_index=solution_index,
-            asm_path=asm_path,
-            yaml_path=output_path,
-            critical_path=-1.0,
-            throughput=-1.0,
-            warnings=warnings,
-        )
-
-    return OsacaResult(
-        solution_index=solution_index,
-        asm_path=asm_path,
-        yaml_path=output_path,
-        critical_path=total_cp,
-        throughput=tp_max,
-        warnings=warnings,
-    )
+    result = "\n".join(output_lines)
+    result = re.sub(r"\n{3,}", "\n\n", result)
+    return result.strip() + "\n" if result.strip() else ""
 
 
 def estimate_solutions(
@@ -918,8 +774,9 @@ def estimate_solutions(
     natural_order: bool,
     target_cpu: str,
     nasm_path: str | None = None,
-) -> list[OsacaResult]:
-    """Run OSACA estimation on a list of CompletePath solutions.
+    llvm_mca_path: str | None = None,
+) -> list[EstimationResult]:
+    """Run LLVM-MCA estimation on a list of CompletePath solutions.
 
     Args:
         paths: List of CompletePath objects
@@ -929,32 +786,46 @@ def estimate_solutions(
         natural_order: Whether the final stage is natural-order
         target_cpu: Target CPU string (same as --target-cpu)
         nasm_path: Optional path to nasm binary for verification
+        llvm_mca_path: Optional explicit path to llvm-mca binary
 
     Returns:
-        List of OsacaResult objects, one per path.
+        List of EstimationResult objects, one per path.
     """
-    arch = resolve_osaca_arch(target_cpu)
-    if arch is None:
-        supported = [info.canonical for info in get_supported_cpus() if info.osaca_code]
+    from cost_model import resolve_llvm_mca_cpu
+    from llvm_mca_runner import find_llvm_mca, run_llvm_mca
+
+    mcpu = resolve_llvm_mca_cpu(target_cpu)
+    if mcpu is None:
+        supported = [
+            info.canonical for info in get_supported_cpus() if info.llvm_mca_cpu
+        ]
         print(
-            f"Warning: Cannot resolve OSACA architecture for '{target_cpu}'. "
-            f"Supported architectures: {', '.join(supported)}",
+            f"Warning: Cannot resolve llvm-mca CPU for '{target_cpu}'. "
+            f"Supported: {', '.join(supported)}",
+            file=sys.stderr,
+        )
+        return []
+
+    mca_bin = find_llvm_mca(llvm_mca_path)
+    if mca_bin is None:
+        print(
+            "Warning: llvm-mca not found. Install LLVM or use --llvm-mca-path.",
             file=sys.stderr,
         )
         return []
 
     # Create temp directory
-    output_dir = tempfile.mkdtemp(prefix="vxsort_osaca_", dir="/tmp")
-    print(f"OSACA estimation: arch: {arch}, output_dir: {output_dir}")
+    output_dir = tempfile.mkdtemp(prefix="vxsort_mca_", dir="/tmp")
+    print(f"LLVM-MCA estimation: mcpu={mcpu}, output_dir={output_dir}")
 
-    results: list[OsacaResult] = []
+    results: list[EstimationResult] = []
     total = len(paths)
 
     for i, path in enumerate(paths):
         solution_index = i + 1
 
-        # Generate assembly
-        asm_content = _generate_osaca_asm(
+        # Generate Intel/NASM assembly
+        asm_content = generate_solution_asm(
             path,
             vm,
             dtype,
@@ -969,30 +840,61 @@ def estimate_solutions(
         if nasm_path is not None:
             _verify_with_nasm(asm_path, nasm_path)
 
-        # Run OSACA
-        result = _run_osaca(asm_path, arch, output_dir, solution_index)
-        results.append(result)
+        # Sanitize for LLVM-MCA and run
+        sanitized = sanitize_asm_for_llvm_mca(asm_content)
+        mca_result = run_llvm_mca(sanitized, mcpu, mca_bin, solution_index, output_dir)
+
+        results.append(
+            EstimationResult(
+                solution_index=mca_result.solution_index,
+                asm_path=asm_path,
+                throughput=mca_result.throughput,
+                simulated_cycles=mca_result.simulated_cycles,
+                analysis_path=mca_result.analysis_path,
+                warnings=mca_result.warnings,
+            )
+        )
 
     return results
 
 
-def print_estimation_table(results: list[OsacaResult], paths) -> None:
-    """Print a table comparing OSACA results across solutions."""
+def print_estimation_table(results: list[EstimationResult], paths) -> None:
+    """Print a table comparing LLVM-MCA results across solutions."""
     if not results:
-        print("No OSACA results to display.")
+        print("No estimation results to display.")
         return
 
-    headers = ["Solution", "ASM File", "CP", "TP", "Stages", "CVs", "Our Cost"]
+    headers = [
+        "Solution",
+        "ASM File",
+        "Analysis",
+        "Sim.Cy",
+        "TP",
+        "Stages",
+        "CVs",
+        "Our Cost",
+    ]
     rows = []
 
     for result, path in zip(results, paths):
-        cp_str = f"{result.critical_path:.2f}" if result.critical_path >= 0 else "err"
+        sc_str = (
+            f"{result.simulated_cycles:.2f}" if result.simulated_cycles >= 0 else "err"
+        )
         tp_str = f"{result.throughput:.2f}" if result.throughput >= 0 else "err"
+        if result.analysis_path:
+            analysis_name = Path(result.analysis_path).name
+            analysis_link = (
+                f"\033]8;;subl://open?url=file://{result.analysis_path}\033\\"
+                f"{analysis_name}\033]8;;\033\\"
+            )
+        else:
+            analysis_link = "-"
         rows.append(
             [
                 result.solution_index,
-                Path(result.asm_path).name,
-                cp_str,
+                f"\033]8;;subl://open?url=file://{result.asm_path}\033\\{Path(result.asm_path).name}\033]8;;\033\\",
+                analysis_link,
+                sc_str,
                 tp_str,
                 len(path.steps),
                 path.total_cv_count,

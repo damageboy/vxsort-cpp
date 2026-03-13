@@ -103,6 +103,7 @@ def verify_only_from_json(
     target_cpu: str = "generic",
     estimate: bool = False,
     nasm_path: str | None = None,
+    llvm_mca_path: str | None = None,
     max_workers: int | None = None,
     max_tasks_per_child: int | None = 1000,
 ):
@@ -115,8 +116,9 @@ def verify_only_from_json(
         json_path: Path to a JSON solutions file.
         top_k: Number of best paths to verify. If None, verify all paths.
         target_cpu: Target CPU for cost model during path selection.
-        estimate: If True, run OSACA performance estimation on selected paths.
+        estimate: If True, run LLVM-MCA performance estimation on selected paths.
         nasm_path: Path to nasm binary for assembly verification (used with estimate).
+        llvm_mca_path: Explicit path to llvm-mca binary. If None, auto-detected.
     """
     bundle = load_solutions_from_json(json_path)
 
@@ -155,7 +157,7 @@ def verify_only_from_json(
                 f"Error: {json_path} has no num_vecs metadata. "
                 "Re-export the solutions with a current version of the tool."
             )
-        from osaca_estimator import estimate_solutions, print_estimation_table
+        from perf_estimator import estimate_solutions, print_estimation_table
 
         results = estimate_solutions(
             paths,
@@ -165,6 +167,7 @@ def verify_only_from_json(
             bundle.natural_order,
             target_cpu,
             nasm_path,
+            llvm_mca_path,
         )
         print_estimation_table(results, paths)
 
@@ -174,8 +177,9 @@ def estimate_only_from_json(
     top_k: int | None = None,
     target_cpu: str = "generic",
     nasm_path: str | None = None,
+    llvm_mca_path: str | None = None,
 ):
-    """Load solutions from a JSON file and run OSACA estimation without verification.
+    """Load solutions from a JSON file and run LLVM-MCA estimation without verification.
 
     Args:
         json_path: Path to a JSON solutions file.
@@ -211,7 +215,7 @@ def estimate_only_from_json(
     path_selector = PathSelector(cost_model)
     paths = path_selector.select_top_k_paths(bundle.roots, top_k or 10_000)
 
-    from osaca_estimator import estimate_solutions, print_estimation_table
+    from perf_estimator import estimate_solutions, print_estimation_table
 
     results = estimate_solutions(
         paths,
@@ -221,6 +225,7 @@ def estimate_only_from_json(
         bundle.natural_order,
         target_cpu,
         nasm_path,
+        llvm_mca_path,
     )
     print_estimation_table(results, paths)
 
@@ -264,6 +269,7 @@ def generate_bitonic_sorter(
     resume_file: str | None = None,
     estimate: bool = False,
     nasm_path: str | None = None,
+    llvm_mca_path: str | None = None,
     max_workers: int | None = None,
     max_tasks_per_child: int | None = 1000,
 ):
@@ -290,8 +296,9 @@ def generate_bitonic_sorter(
             If None, no checkpoints are saved.
         resume_file: Path to a checkpoint file to resume from. If provided, completed
             stages are skipped and synthesis continues from where it left off.
-        estimate: If True, run OSACA performance estimation on selected paths.
+        estimate: If True, run LLVM-MCA performance estimation on selected paths.
         nasm_path: Path to nasm binary for assembly verification (used with --estimate).
+        llvm_mca_path: Explicit path to llvm-mca binary. If None, auto-detected.
         max_tasks_per_child: Maximum tasks per worker process before recycling.
             Limits memory growth in long runs. None disables recycling.
 
@@ -432,9 +439,9 @@ def generate_bitonic_sorter(
             max_tasks_per_child=max_tasks_per_child,
         )
 
-    # OSACA performance estimation
+    # LLVM-MCA performance estimation
     if estimate:
-        from osaca_estimator import estimate_solutions, print_estimation_table
+        from perf_estimator import estimate_solutions, print_estimation_table
 
         paths_to_estimate = selected_paths
         if paths_to_estimate is None:
@@ -452,6 +459,7 @@ def generate_bitonic_sorter(
             natural_order,
             target_cpu,
             nasm_path,
+            llvm_mca_path,
         )
         print_estimation_table(results, paths_to_estimate)
 
@@ -567,7 +575,7 @@ def main():
         "--estimate",
         action="store_true",
         default=False,
-        help="Run OSACA performance estimation on selected paths",
+        help="Run LLVM-MCA performance estimation on selected paths",
     )
     parser.add_argument(
         "--nasm-path",
@@ -577,12 +585,20 @@ def main():
         help="Path to nasm binary for assembly verification (used with --estimate)",
     )
     parser.add_argument(
+        "--llvm-mca-path",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Explicit path to the llvm-mca binary. "
+        "If not specified, searches Homebrew locations and PATH.",
+    )
+    parser.add_argument(
         "--estimate-only",
         type=str,
         default=None,
         metavar="JSON_FILE",
         help="Skip synthesis and verification; load solutions from a JSON file "
-        "and run OSACA performance estimation only.",
+        "and run LLVM-MCA performance estimation only.",
     )
     parser.add_argument(
         "--max-workers",
@@ -604,7 +620,7 @@ def main():
         "--list-cpus",
         action="store_true",
         default=False,
-        help="List all supported CPU architectures with uops.info and OSACA availability, then exit",
+        help="List all supported CPU architectures with uops.info and LLVM-MCA availability, then exit",
     )
 
     args = parser.parse_args()
@@ -624,12 +640,12 @@ def main():
         for info in get_supported_cpus():
             aliases = ", ".join(info.aliases)
             uops_col = "yes" if info.canonical in xml_archs else "-"
-            osaca_col = info.osaca_code if info.osaca_code else "-"
-            rows.append([info.canonical, aliases, info.vendor, uops_col, osaca_col])
+            mca_col = info.llvm_mca_cpu if info.llvm_mca_cpu else "-"
+            rows.append([info.canonical, aliases, info.vendor, uops_col, mca_col])
 
         from tabulate import tabulate
 
-        headers = ["Arch", "Alias", "Vendor", "uops.info", "OSACA model"]
+        headers = ["Arch", "Alias", "Vendor", "uops.info", "llvm-mca CPU"]
         print(tabulate(rows, headers=headers, tablefmt="rounded_outline"))
         raise SystemExit(0)
 
@@ -641,18 +657,20 @@ def main():
             target_cpu=args.target_cpu,
             estimate=args.estimate,
             nasm_path=args.nasm_path,
+            llvm_mca_path=args.llvm_mca_path,
             max_workers=args.max_workers,
             max_tasks_per_child=max_tasks_per_child,
         )
         raise SystemExit(0)
 
-    # --estimate-only mode: load JSON and run OSACA estimation without synthesis or verification
+    # --estimate-only mode: load JSON and run LLVM-MCA estimation without synthesis or verification
     if args.estimate_only is not None:
         estimate_only_from_json(
             args.estimate_only,
             top_k=args.top_k,
             target_cpu=args.target_cpu,
             nasm_path=args.nasm_path,
+            llvm_mca_path=args.llvm_mca_path,
         )
         raise SystemExit(0)
 
@@ -686,6 +704,7 @@ def main():
         resume_file=args.resume,
         estimate=args.estimate,
         nasm_path=args.nasm_path,
+        llvm_mca_path=args.llvm_mca_path,
         max_workers=args.max_workers,
         max_tasks_per_child=max_tasks_per_child,
     )
