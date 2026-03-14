@@ -333,4 +333,10 @@ def export_solutions_to_asm(
 
     if nasm_failures:
         print(f"Warning: {nasm_failures} of {total} solutions failed NASM verification")
-    print(f"Exported {total} solutions to {output_path}")
+
+    from pathlib import Path
+
+    abs_path = Path(output_path).absolute()
+    url = f"subl://open?url=file://{abs_path}"
+    link = f"\033]8;;{url}\033\\{output_path}\033]8;;\033\\"
+    print(f"Exported {total} solutions to {link}")
