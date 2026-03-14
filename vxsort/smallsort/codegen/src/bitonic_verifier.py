@@ -3,12 +3,19 @@
 Given a CompletePath (sequence of stages with specific gadget choices),
 wire all stages together as a single Z3 expression and prove the output
 is sorted for ALL possible inputs.
+
+Supports chunked verification that exploits the recursive structure of
+bitonic sorting networks: instead of one monolithic proof over all stages,
+splits at recursion boundaries and verifies each chunk with preconditions
+asserting that sub-lists from the previous level are already sorted.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from z3 import (
@@ -135,6 +142,67 @@ class VerificationResult:
     solver_time: float = 0.0
 
 
+_MIN_GROUP_SIZE = 4  # Smallest sub-problem for chunked verification
+
+
+def compute_recursion_boundaries(
+    n: int, min_group_size: int = _MIN_GROUP_SIZE
+) -> list[int]:
+    """Compute the stage boundaries of the bitonic sort recursion.
+
+    For n elements, the bitonic sort recursion sorts sub-lists of increasing
+    size.  sort(2^k) completes after stage T(2^k)-1 where T(n) = T(n/2) + log2(n).
+
+    Returns the stage indices *after which* sorted sub-lists of the given
+    minimum size exist.  For n=16, min_group_size=4 this returns [2, 5]
+    meaning:
+      - after stage 2: four 4-element sorted groups
+      - after stage 5: two 8-element sorted groups
+    The final boundary (full sort) is NOT included — the caller handles it
+    as the postcondition of the last chunk.
+    """
+    if n < 2 or (n & (n - 1)) != 0:
+        raise ValueError(f"n must be a power of 2, got {n}")
+
+    # T(n) = total stages for sort(n)
+    # T(1) = 0, T(n) = T(n/2) + log2(n)
+    def total_stages(k: int) -> int:
+        if k <= 1:
+            return 0
+        return total_stages(k // 2) + int(math.log2(k))
+
+    boundaries = []
+    group_size = min_group_size
+    while group_size < n:
+        boundary_stage = total_stages(group_size) - 1  # last stage of sort(group_size)
+        boundaries.append(boundary_stage)
+        group_size *= 2
+
+    return boundaries
+
+
+def num_verify_chunks(total_elements: int) -> int:
+    """Return the number of verification steps for a given element count.
+
+    For N elements with min_group_size=4:
+      N=4:  1 (just verify the 4-element sort)
+      N=8:  3 (2×4-element + 1×8-element merge)
+      N=16: 7 (4×4-element + 2×8-element merge + 1×16-element merge)
+      N=32: 15 (8×4 + 4×8 + 2×16 + 1×32)
+    General: N/4 + N/8 + ... + 1 = N/2 - 1  (for N >= 8)
+    """
+    boundaries = compute_recursion_boundaries(total_elements)
+    if not boundaries:
+        return 1
+    # Each level has N/post_group_size groups to verify, plus 1 for the final merge
+    total = 0
+    for level_idx in range(len(boundaries)):
+        post_gs = _MIN_GROUP_SIZE * (2**level_idx)
+        total += total_elements // post_gs
+    total += 1  # final merge
+    return total
+
+
 @dataclass
 class VerifyStep:
     """Lightweight step data for verification (picklable, no tree references).
@@ -160,6 +228,15 @@ def extract_verify_steps(path: CompletePath) -> list[VerifyStep]:
     ]
 
 
+_chunk_progress_queue = None
+
+
+def _init_verify_worker(queue):
+    """Pool initializer: stash the shared progress queue in each worker."""
+    global _chunk_progress_queue
+    _chunk_progress_queue = queue
+
+
 def _verify_path_worker(
     job: tuple,
 ) -> tuple[int, VerificationResult]:
@@ -173,8 +250,13 @@ def _verify_path_worker(
         (path_index, VerificationResult)
     """
     path_index, steps, vm, prim_type, natural_order = job
+
+    def _on_chunk_done():
+        if _chunk_progress_queue is not None:
+            _chunk_progress_queue.put(path_index)
+
     verifier = BitonicPathVerifier(vm, prim_type)
-    result = verifier.verify_steps(steps, natural_order)
+    result = verifier.verify_steps(steps, natural_order, chunk_callback=_on_chunk_done)
     return path_index, result
 
 
@@ -206,36 +288,64 @@ class BitonicPathVerifier:
         return self.verify_steps(extract_verify_steps(path), natural_order)
 
     def verify_steps(
-        self, steps: list[VerifyStep], natural_order: bool = False
+        self,
+        steps: list[VerifyStep],
+        natural_order: bool = False,
+        chunk_callback: Callable[[], None] | None = None,
     ) -> VerificationResult:
         """Verify that a sequence of gadget steps sorts all inputs correctly.
+
+        Automatically uses chunked verification when the element count is
+        large enough to benefit (>= 16 elements).  For smaller networks the
+        monolithic proof is fast enough.
 
         Args:
             steps: List of VerifyStep (gadget + input/output state per stage).
             natural_order: If True, the last stage restores natural element
                 order and has no min/max compare-swap.
+            chunk_callback: Optional callable invoked after each chunk completes
+                (used for progress reporting in chunked mode).
 
         Returns:
             VerificationResult with verified=True if the path is a correct
             sorting network, or verified=False with a counterexample.
         """
         N = 2 * self.elements_per_vector
+        # Use chunked verification when recursion boundaries exist
+        boundaries = compute_recursion_boundaries(N)
+        if boundaries:
+            return self._verify_steps_chunked(steps, natural_order, chunk_callback)
+        result = self._verify_steps_monolithic(steps, natural_order)
+        if chunk_callback:
+            chunk_callback()
+        return result
+
+    def _simulate_steps(
+        self, steps: list[VerifyStep], natural_order: bool
+    ) -> tuple[list, list]:
+        """Run gadget steps symbolically, returning (elems, sorted_elems).
+
+        Creates N symbolic BitVec elements, wires them through the given
+        stages (applying gadget permutations + min/max), and extracts the
+        output elements in label order.
+
+        Returns:
+            elems: The N unconstrained symbolic input elements.
+            sorted_elems: The N output elements after all stages.
+        """
+        N = 2 * self.elements_per_vector
         num_stages = len(steps)
 
-        # Step 1: Create N unconstrained symbolic elements
         elems = [BitVec(f"e_{i}", self.lane_width) for i in range(N)]
 
-        # Step 2: Build initial registers from the first stage's input state
         initial_state = steps[0].input_state
         top_vec = self._build_register(elems, initial_state.top)
         bottom_vec = self._build_register(elems, initial_state.bottom)
 
-        # Step 3: Process each stage
         for step_idx, step in enumerate(steps):
             gadget = step.gadget
             is_last_stage = step_idx == num_stages - 1
 
-            # Apply gadget instructions to get permuted registers
             new_top = self._apply_concrete_instructions(
                 top_vec, bottom_vec, gadget.top_instructions, is_top=True
             )
@@ -243,7 +353,6 @@ class BitonicPathVerifier:
                 top_vec, bottom_vec, gadget.bottom_instructions, is_top=False
             )
 
-            # Apply min/max compare-swap (unless natural_order final stage)
             if natural_order and is_last_stage:
                 top_vec = new_top
                 bottom_vec = new_bottom
@@ -255,14 +364,19 @@ class BitonicPathVerifier:
                     new_top, new_bottom, self.total_bits, self.lane_width
                 )
 
-        # Step 4: Extract output elements in label order
         final_state = steps[-1].output_state
         sorted_elems = self._extract_output_elements(
             top_vec, bottom_vec, final_state, N
         )
+        return elems, sorted_elems
 
-        # Step 5: Assert NOT sorted, check UNSAT
-        # Use signed <= (bvsle) since the sorting network uses signed min/max
+    def _verify_steps_monolithic(
+        self, steps: list[VerifyStep], natural_order: bool = False
+    ) -> VerificationResult:
+        """Original monolithic verification — one Z3 proof across all stages."""
+        N = 2 * self.elements_per_vector
+        elems, sorted_elems = self._simulate_steps(steps, natural_order)
+
         start = time.perf_counter()
         solver = Solver()
         sorted_ok = simplify(
@@ -275,7 +389,141 @@ class BitonicPathVerifier:
         if result == unsat:
             return VerificationResult(verified=True, solver_time=solver_time)
 
-        # SAT means there's a counterexample
+        model = solver.model()
+        ce = [model.evaluate(e, model_completion=True).as_long() for e in elems]
+        return VerificationResult(
+            verified=False, counterexample=ce, solver_time=solver_time
+        )
+
+    def _verify_steps_chunked(
+        self,
+        steps: list[VerifyStep],
+        natural_order: bool = False,
+        chunk_callback: Callable[[], None] | None = None,
+    ) -> VerificationResult:
+        """Chunked verification exploiting bitonic recursion structure.
+
+        Splits the stage sequence at recursion boundaries and verifies each
+        sub-group independently.  Each sub-group gets preconditions asserting
+        that sub-lists from the previous recursion level are already sorted,
+        and must prove that one specific group at the next level is sorted.
+
+        For 16 elements this produces 7 verification steps:
+          Level 0 (stages 0-2): 4 × prove one 4-element group sorted
+          Level 1 (stages 3-5): 2 × prove one 8-element group sorted
+          Level 2 (stages 6-9): 1 × prove full 16-element sort
+        """
+        N = 2 * self.elements_per_vector
+        num_stages = len(steps)
+
+        # Determine how many stages belong to the "real" sort (excluding
+        # a possible appended natural-order stage)
+        sort_stages = num_stages - 1 if natural_order else num_stages
+
+        boundaries = compute_recursion_boundaries(N)
+
+        # Build levels: [(stage_start, stage_end, pre_group_size, post_group_size)]
+        levels: list[tuple[int, int, int, int]] = []
+        prev = 0
+        for level_idx, boundary_stage in enumerate(boundaries):
+            end = boundary_stage + 1
+            if end > sort_stages:
+                break
+            if end > prev:
+                pre_gs = (
+                    0 if level_idx == 0 else _MIN_GROUP_SIZE * (2 ** (level_idx - 1))
+                )
+                post_gs = _MIN_GROUP_SIZE * (2**level_idx)
+                levels.append((prev, end, pre_gs, post_gs))
+                prev = end
+
+        # Final level: remaining stages (+ natural-order stage if any)
+        if prev < num_stages:
+            pre_gs = levels[-1][3] if levels else 0
+            levels.append((prev, num_stages, pre_gs, N))
+
+        total_solver_time = 0.0
+
+        for level_idx, (start, end, pre_gs, post_gs) in enumerate(levels):
+            is_last_level = level_idx == len(levels) - 1
+            chunk_steps = steps[start:end]
+            chunk_natural_order = natural_order and is_last_level
+
+            # Verify each sub-group at this level independently
+            num_groups = N // post_gs
+            for group_idx in range(num_groups):
+                group_elem_start = group_idx * post_gs
+                group_elem_end = group_elem_start + post_gs
+
+                result = self._verify_chunk(
+                    chunk_steps,
+                    precondition_group_size=pre_gs,
+                    postcondition_range=(group_elem_start, group_elem_end),
+                    natural_order=chunk_natural_order,
+                )
+
+                total_solver_time += result.solver_time
+
+                if chunk_callback:
+                    chunk_callback()
+
+                if not result.verified:
+                    return VerificationResult(
+                        verified=False,
+                        counterexample=result.counterexample,
+                        solver_time=total_solver_time,
+                    )
+
+        return VerificationResult(verified=True, solver_time=total_solver_time)
+
+    def _verify_chunk(
+        self,
+        steps: list[VerifyStep],
+        precondition_group_size: int,
+        postcondition_range: tuple[int, int],
+        natural_order: bool = False,
+    ) -> VerificationResult:
+        """Verify a single chunk of stages for one output group.
+
+        Args:
+            steps: The subset of VerifyStep for this chunk.
+            precondition_group_size: Elements are pre-sorted in groups of
+                this size (0 = unconstrained).  E.g. 4 means [1-4] sorted,
+                [5-8] sorted, etc.
+            postcondition_range: (start, end) 0-based element indices for the
+                group that must be sorted after this chunk.
+            natural_order: If True, the last step in this chunk skips min/max.
+        """
+        N = 2 * self.elements_per_vector
+        elems, sorted_elems = self._simulate_steps(steps, natural_order)
+
+        start = time.perf_counter()
+        solver = Solver()
+
+        # Precondition: sub-lists of precondition_group_size are sorted
+        if precondition_group_size > 0:
+            pre_constraints = []
+            for gs in range(0, N, precondition_group_size):
+                ge = gs + precondition_group_size
+                for i in range(gs, ge - 1):
+                    pre_constraints.append(elems[i] <= elems[i + 1])
+            solver.add(And(pre_constraints))
+
+        # Postcondition: the specific group range is sorted
+        post_start, post_end = postcondition_range
+        post_constraints = [
+            sorted_elems[i] <= sorted_elems[i + 1]
+            for i in range(post_start, post_end - 1)
+        ]
+
+        sorted_ok = simplify(And(post_constraints))
+        solver.add(Not(sorted_ok))
+        result = solver.check()
+        solver_time = time.perf_counter() - start
+
+        if result == unsat:
+            return VerificationResult(verified=True, solver_time=solver_time)
+
         model = solver.model()
         ce = [model.evaluate(e, model_completion=True).as_long() for e in elems]
         return VerificationResult(

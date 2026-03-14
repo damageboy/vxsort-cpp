@@ -3,8 +3,9 @@ from __future__ import annotations
 import argparse
 import os
 import tempfile
-
-from multiprocessing import Pool
+import time
+from multiprocessing import Pool, Queue
+from queue import Empty
 
 from json_exporter import export_solutions_to_json
 
@@ -19,6 +20,8 @@ try:
         load_solutions_from_json,
         extract_verify_steps,
         _verify_path_worker,
+        _init_verify_worker,
+        num_verify_chunks,
     )
     from .success_progress import SuccessProgress
     from .checkpoint import (
@@ -37,6 +40,8 @@ except ImportError:
         load_solutions_from_json,
         extract_verify_steps,
         _verify_path_worker,
+        _init_verify_worker,
+        num_verify_chunks,
     )
     from success_progress import SuccessProgress
     from checkpoint import (  # type: ignore
@@ -56,9 +61,16 @@ def _run_verification(
 ):
     """Run Z3 end-to-end verification on a list of paths using multiprocessing.
 
+    Reports progress at chunk granularity (each path is split into multiple
+    chunks by the chunked verifier), so the user sees advancement within
+    long-running paths.
+
     Raises SystemExit(1) if any path fails.
     """
-    total = len(paths_to_verify)
+    total_paths = len(paths_to_verify)
+    total_elements = 2 * (width_dict[vm] // int(prim_type.value[0]))
+    chunks_per_path = num_verify_chunks(total_elements)
+    total_chunks = total_paths * chunks_per_path
 
     # Build lightweight picklable jobs (no SolutionNode tree references)
     jobs = [
@@ -66,35 +78,72 @@ def _run_verification(
         for i, path in enumerate(paths_to_verify)
     ]
 
+    # Shared queue for per-chunk progress from workers
+    chunk_queue: Queue = Queue()
+
     progress = SuccessProgress.create(
         description_column="[orange1]{task.description}",
         width=60,
         success_style="green",
-        attempt_style="red",
+        attempt_style="green",
         success_label="Verified",
     )
     progress.enable_memory_monitor()
     progress.start()
-    task_id = progress.add_task("Verifying paths", total=total, successes=0)
+    task_id = progress.add_task("Verifying paths", total=total_chunks, successes=0)
 
     failures = []
+    paths_done = 0
     try:
-        with Pool(processes=max_workers, maxtasksperchild=max_tasks_per_child) as pool:
-            for path_index, result in pool.imap_unordered(_verify_path_worker, jobs):
-                progress.update(task_id, advance=1, success=1 if result.verified else 0)
-                if not result.verified:
-                    failures.append((path_index, result))
+        with Pool(
+            processes=max_workers,
+            maxtasksperchild=max_tasks_per_child,
+            initializer=_init_verify_worker,
+            initargs=(chunk_queue,),
+        ) as pool:
+            # Submit all jobs asynchronously
+            async_results = [
+                pool.apply_async(_verify_path_worker, (job,)) for job in jobs
+            ]
+
+            while paths_done < total_paths:
+                # Drain chunk progress queue — each entry = one chunk verified
+                try:
+                    while True:
+                        chunk_queue.get_nowait()
+                        progress.update(task_id, advance=1, success=1)
+                except Empty:
+                    pass
+
+                # Check for completed paths
+                for ar in async_results:
+                    if ar.ready():
+                        try:
+                            path_index, result = ar.get()
+                        except Exception as exc:
+                            raise SystemExit(
+                                f"Verification worker crashed: {exc}"
+                            ) from exc
+                        paths_done += 1
+                        if not result.verified:
+                            failures.append((path_index, result))
+
+                # Remove completed results to avoid re-processing
+                async_results = [ar for ar in async_results if not ar.ready()]
+
+                if paths_done < total_paths:
+                    time.sleep(0.1)
     finally:
         progress.stop()
 
     if failures:
         failures.sort(key=lambda x: x[0])
-        print(f"\nVERIFICATION FAILED: {len(failures)}/{total} paths failed")
+        print(f"\nVERIFICATION FAILED: {len(failures)}/{total_paths} paths failed")
         for path_index, result in failures:
             print(f"  Path {path_index + 1}: counterexample={result.counterexample}")
         raise SystemExit(1)
 
-    print(f"\nAll {total} paths verified correct.")
+    print(f"\nAll {total_paths} paths verified correct.")
 
 
 def _load_and_select_paths(
