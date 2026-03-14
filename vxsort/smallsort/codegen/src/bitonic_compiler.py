@@ -11,7 +11,7 @@ from json_exporter import export_solutions_to_json
 # Handle both relative and absolute imports
 try:
     from .cost_model import CostModel, get_supported_cpus
-    from .bitonic_super_optimizer import BitonicSuperVectorizer
+    from .bitonic_super_optimizer import BitonicSuperVectorizer, apply_retroactive_input
     from .utils import vector_machine, primitive_type, width_dict
     from .asm_exporter import export_solutions_to_asm
     from .path_selector import PathSelector
@@ -29,7 +29,7 @@ try:
 
 except ImportError:
     from cost_model import CostModel, get_supported_cpus
-    from bitonic_super_optimizer import BitonicSuperVectorizer
+    from bitonic_super_optimizer import BitonicSuperVectorizer, apply_retroactive_input
     from utils import vector_machine, primitive_type, width_dict
     from asm_exporter import export_solutions_to_asm
     from path_selector import PathSelector
@@ -272,6 +272,7 @@ def generate_bitonic_sorter(
     llvm_mca_path: str | None = None,
     max_workers: int | None = None,
     max_tasks_per_child: int | None = 1000,
+    retroactive_input: bool = False,
 ):
     """
     Generate bitonic sorter with super-optimized permutation sequences.
@@ -368,6 +369,14 @@ def generate_bitonic_sorter(
     )
 
     print(f"Found {len(solutions)} root solutions")
+
+    if retroactive_input:
+        before = len(solutions)
+        solutions = apply_retroactive_input(solutions)
+        print(
+            f"Retroactive input: {before} roots → {len(solutions)} "
+            f"(deduped {before - len(solutions)})"
+        )
 
     if not all_stages_complete:
         print(
@@ -526,6 +535,14 @@ def main():
         action="store_true",
         default=False,
         help="Add final permutation stage to restore natural element order for memory writeback",
+    )
+    parser.add_argument(
+        "--retroactive-input",
+        action="store_true",
+        default=False,
+        help="Post-process Stage 0: retroactively redefine initial state to match "
+        "each root's output, replacing Stage 0 gadgets with free identity. "
+        "Reduces total cost by eliminating Stage 0 permutation instructions.",
     )
     parser.add_argument(
         "--max-gadget-solutions",
@@ -707,6 +724,7 @@ def main():
         llvm_mca_path=args.llvm_mca_path,
         max_workers=args.max_workers,
         max_tasks_per_child=max_tasks_per_child,
+        retroactive_input=args.retroactive_input,
     )
 
 
@@ -715,6 +733,14 @@ def estimate_main():
     import sys
 
     sys.argv.insert(1, "--estimate-only")
+    main()
+
+
+def verify_main():
+    """Entry point for 'uv run verify'. Prepends --verify-only to argv."""
+    import sys
+
+    sys.argv.insert(1, "--verify-only")
     main()
 
 

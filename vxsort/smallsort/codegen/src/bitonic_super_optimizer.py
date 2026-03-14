@@ -54,6 +54,7 @@ __all__ = [
     "BitonicSuperVectorizer",
     "StageTracker",
     "_BATCH_THRESHOLDS",
+    "apply_retroactive_input",
 ]
 
 
@@ -62,6 +63,48 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 _BATCH_THRESHOLDS = (0.5, 0.75, 0.875, 1.0)
+
+
+def apply_retroactive_input(roots: list[SolutionNode]) -> list[SolutionNode]:
+    """Replace Stage 0 permutation gadgets with identity by retroactively
+    redefining the initial state to match the post-min/max output.
+
+    For each root node (Stage 0):
+    - input_state := output_state (retroactive initial state)
+    - gadgets := [identity gadget]
+    - output_state and children unchanged
+
+    Deduplicates roots that collapse to the same (input, output) transition.
+    """
+    identity_gadget = PermutationGadget(
+        top_instructions=[], bottom_instructions=[], validated=True
+    )
+
+    seen: dict[tuple, SolutionNode] = {}
+    seen_child_ids: dict[tuple, set[int]] = {}
+    deduped_roots = []
+
+    for root in roots:
+        assert root.stage == 0
+        root.input_state = root.output_state.copy()
+        root.gadgets = [identity_gadget]
+
+        # After transform, input == output; key on output_state alone
+        key = root.output_state.as_tuple()
+        if key in seen:
+            existing = seen[key]
+            child_ids = seen_child_ids[key]
+            for child in root.children:
+                cid = id(child)
+                if cid not in child_ids:
+                    existing.children.append(child)
+                    child_ids.add(cid)
+        else:
+            seen[key] = root
+            seen_child_ids[key] = {id(c) for c in root.children}
+            deduped_roots.append(root)
+
+    return deduped_roots
 
 
 @dataclass

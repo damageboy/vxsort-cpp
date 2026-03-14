@@ -73,10 +73,20 @@ The super-optimizer generates AVX permutation sequences for bitonic sort stages:
 ### ASM Export Architecture
 
 **There must be exactly ONE assembly emitter.** The canonical ASM emission path lives in
-`osaca_estimator.py` (`_emit_gadget_asm` + `_generate_osaca_asm`). All ASM output — whether
-for OSACA estimation or `--output-format=asm` — must go through this single code path.
+`perf_estimator.py` (`_emit_gadget_asm` + `generate_solution_asm`). All ASM output — whether
+for LLVM-MCA estimation or `--output-format=asm` — must go through this single code path.
 Never duplicate gadget emission logic. The old `asm_exporter.py` `_format_instruction` /
 `_print_solution_step_as_assembly` path is legacy and must be replaced.
+
+### Performance Estimation
+
+Performance estimation uses **LLVM-MCA** (not OSACA). The pipeline:
+1. `generate_solution_asm()` emits Intel/NASM syntax assembly
+2. `sanitize_asm_for_llvm_mca()` converts NASM constructs for LLVM-MCA's Intel parser
+3. `llvm_mca_runner.py` runs `llvm-mca --json` and parses `BlockRThroughput` + `TotalCycles/Iterations`
+
+Use `--estimate` or `--estimate-only` with `--target-cpu` to run estimation.
+Use `--llvm-mca-path` if auto-detection doesn't find your LLVM installation.
 
 ### Generated Output
 
