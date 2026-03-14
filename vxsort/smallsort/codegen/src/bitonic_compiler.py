@@ -97,6 +97,40 @@ def _run_verification(
     print(f"\nAll {total} paths verified correct.")
 
 
+def _load_and_select_paths(
+    json_path: str, top_k: int | None, target_cpu: str, require_num_vecs: bool = False
+):
+    """Helper to load solutions, validate metadata, and select top K paths."""
+    bundle = load_solutions_from_json(json_path)
+
+    if bundle.vm_name is None or bundle.prim_type_name is None:
+        raise SystemExit(
+            f"Error: {json_path} has no vector_machine/primitive_type metadata.\n"
+            "Re-export the solutions with a current version of the tool."
+        )
+
+    if require_num_vecs and bundle.num_vecs is None:
+        raise SystemExit(
+            f"Error: {json_path} has no num_vecs metadata. "
+            "Re-export the solutions with a current version of the tool."
+        )
+
+    vm = vector_machine[bundle.vm_name]
+    prim_type = primitive_type[bundle.prim_type_name]
+
+    print(
+        f"Loaded {len(bundle.roots)} roots from {json_path} "
+        f"({vm.name} {prim_type.name}, "
+        f"natural_order={bundle.natural_order})"
+    )
+
+    cost_model = CostModel(target_cpu)
+    path_selector = PathSelector(cost_model)
+    paths = path_selector.select_top_k_paths(bundle.roots, top_k or 10_000)
+
+    return bundle, vm, prim_type, paths
+
+
 def verify_only_from_json(
     json_path: str,
     top_k: int | None = None,
@@ -120,27 +154,7 @@ def verify_only_from_json(
         nasm_path: Path to nasm binary for assembly verification (used with estimate).
         llvm_mca_path: Explicit path to llvm-mca binary. If None, auto-detected.
     """
-    bundle = load_solutions_from_json(json_path)
-
-    if bundle.vm_name is None or bundle.prim_type_name is None:
-        raise SystemExit(
-            f"Error: {json_path} has no vector_machine/primitive_type metadata.\n"
-            "Re-export the solutions with a current version of the tool."
-        )
-
-    vm = vector_machine[bundle.vm_name]
-    prim_type = primitive_type[bundle.prim_type_name]
-
-    print(
-        f"Loaded {len(bundle.roots)} roots from {json_path} "
-        f"({vm.name} {prim_type.name}, "
-        f"natural_order={bundle.natural_order})"
-    )
-
-    # Select paths
-    cost_model = CostModel(target_cpu)
-    path_selector = PathSelector(cost_model)
-    paths = path_selector.select_top_k_paths(bundle.roots, top_k or 10_000)
+    bundle, vm, prim_type, paths = _load_and_select_paths(json_path, top_k, target_cpu)
 
     _run_verification(
         paths,
@@ -187,33 +201,9 @@ def estimate_only_from_json(
         target_cpu: Target CPU for cost model during path selection.
         nasm_path: Path to nasm binary for assembly verification.
     """
-    bundle = load_solutions_from_json(json_path)
-
-    if bundle.vm_name is None or bundle.prim_type_name is None:
-        raise SystemExit(
-            f"Error: {json_path} has no vector_machine/primitive_type metadata.\n"
-            "Re-export the solutions with a current version of the tool."
-        )
-
-    if bundle.num_vecs is None:
-        raise SystemExit(
-            f"Error: {json_path} has no num_vecs metadata. "
-            "Re-export the solutions with a current version of the tool."
-        )
-
-    vm = vector_machine[bundle.vm_name]
-    prim_type = primitive_type[bundle.prim_type_name]
-
-    print(
-        f"Loaded {len(bundle.roots)} roots from {json_path} "
-        f"({vm.name} {prim_type.name}, "
-        f"natural_order={bundle.natural_order})"
+    bundle, vm, prim_type, paths = _load_and_select_paths(
+        json_path, top_k, target_cpu, require_num_vecs=True
     )
-
-    # Select paths
-    cost_model = CostModel(target_cpu)
-    path_selector = PathSelector(cost_model)
-    paths = path_selector.select_top_k_paths(bundle.roots, top_k or 10_000)
 
     from perf_estimator import estimate_solutions, print_estimation_table
 
@@ -228,6 +218,52 @@ def estimate_only_from_json(
         llvm_mca_path,
     )
     print_estimation_table(results, paths)
+
+
+def export_only_from_json(
+    json_path: str,
+    export_formats: list[str],
+    top_k: int | None = None,
+    target_cpu: str = "generic",
+    nasm_path: str | None = None,
+    output_path: str | None = None,
+):
+    """Load solutions from a JSON file and export them to other formats.
+
+    Args:
+        json_path: Path to a JSON solutions file.
+        export_formats: List of output formats (e.g., ["asm"]).
+        top_k: Number of best paths to export. If None, export all paths.
+        target_cpu: Target CPU for cost model during path selection.
+        nasm_path: Path to nasm binary for assembly verification.
+        output_path: Explicit output path for the exported file.
+    """
+    if not export_formats:
+        export_formats = ["asm"]
+
+    bundle, vm, prim_type, paths = _load_and_select_paths(
+        json_path, top_k, target_cpu, require_num_vecs=True
+    )
+
+    for export_format in export_formats:
+        if export_format == "asm":
+            if output_path is not None:
+                asm_output_path = output_path
+            else:
+                base_name = os.path.splitext(os.path.basename(json_path))[0]
+                asm_output_path = f"{base_name}.asm"
+            export_solutions_to_asm(
+                bundle.roots,
+                bundle.num_vecs,
+                prim_type,
+                vm,
+                asm_output_path,
+                selected_paths=paths,
+                natural_order=bundle.natural_order,
+                nasm_path=nasm_path,
+            )
+        else:
+            print(f"Warning: Unknown export format '{export_format}', skipping")
 
 
 def _count_dag_paths(roots):
@@ -258,7 +294,6 @@ def generate_bitonic_sorter(
     vm: vector_machine,
     depth_limit: int | None = None,
     top_k: int | None = None,
-    output_formats: list[str] = None,
     gadget_depth: int = 1,
     smt2_dump_dir: str | None = None,
     natural_order: bool = False,
@@ -283,7 +318,6 @@ def generate_bitonic_sorter(
         vm: Vector machine (AVX2, AVX512)
         depth_limit: Maximum stage depth to explore (inclusive). If None, all stages are explored.
         top_k: Number of best solutions to keep. If None, all solutions are kept.
-        output_formats: List of output formats (e.g., ["json", "asm"]). Default is ["json"].
         gadget_depth: Maximum instruction depth per gadget (1-3, default 1)
         smt2_dump_dir: Directory to dump SMT2 files if requested
         natural_order: If True, add final stage restoring natural element order for memory writeback
@@ -306,8 +340,6 @@ def generate_bitonic_sorter(
     Returns:
         List of SolutionNode trees representing different optimized solutions
     """
-    if output_formats is None:
-        output_formats = ["json"]
     total_elements = int(num_vecs * (width_dict[vm] / int(prim_type.value[0])))
 
     print(
@@ -402,31 +434,17 @@ def generate_bitonic_sorter(
 
     # Export solutions in the requested format(s)
     order_suffix = "_natural" if natural_order else ""
-    for output_format in output_formats:
-        if output_format == "asm":
-            output_path = f"bitonic_solutions_{num_vecs}x{vm.name}_{prim_type.name}{order_suffix}.asm"
-            export_solutions_to_asm(
-                solutions,
-                num_vecs,
-                prim_type,
-                vm,
-                output_path,
-                selected_paths=selected_paths,
-                natural_order=natural_order,
-                nasm_path=nasm_path,
-            )
-        elif output_format == "json":
-            output_path = f"bitonic_solutions_{num_vecs}x{vm.name}_{prim_type.name}{order_suffix}.json"
-            export_solutions_to_json(
-                solutions,
-                output_path,
-                natural_order=natural_order,
-                vm_name=vm.name,
-                prim_type_name=prim_type.name,
-                num_vecs=num_vecs,
-            )
-        else:
-            print(f"Warning: Unknown output format '{output_format}', skipping")
+    output_path = (
+        f"bitonic_solutions_{num_vecs}x{vm.name}_{prim_type.name}{order_suffix}.json"
+    )
+    export_solutions_to_json(
+        solutions,
+        output_path,
+        natural_order=natural_order,
+        vm_name=vm.name,
+        prim_type_name=prim_type.name,
+        num_vecs=num_vecs,
+    )
 
     # End-to-end verification
     if verify:
@@ -512,11 +530,26 @@ def main():
         help="Number of best solutions to keep in output. If not specified, all solutions are kept.",
     )
     parser.add_argument(
-        "--output-format",
+        "--export-only",
+        type=str,
+        default=None,
+        metavar="JSON_FILE",
+        help="Skip synthesis and verify, load solutions from a JSON file "
+        "and export them to other formats.",
+    )
+    parser.add_argument(
+        "--export-format",
         type=str,
         action="append",
-        choices=["json", "asm"],
-        help="Output format: 'json' for structured JSON output, 'asm' for readable assembly code. Can be specified multiple times (default: json)",
+        choices=["asm"],
+        help="Export format: 'asm' for readable assembly code. Can be specified multiple times (default: asm)",
+    )
+    parser.add_argument(
+        "--output-path",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Explicit output path for exported files (used with --export-only). If not provided, derives from the input JSON filename.",
     )
     parser.add_argument(
         "--gadget-depth",
@@ -691,6 +724,18 @@ def main():
         )
         raise SystemExit(0)
 
+    # --export-only mode: load JSON and export solutions
+    if args.export_only is not None:
+        export_only_from_json(
+            args.export_only,
+            args.export_format,
+            top_k=args.top_k,
+            target_cpu=args.target_cpu,
+            nasm_path=args.nasm_path,
+            output_path=args.output_path,
+        )
+        raise SystemExit(0)
+
     # Normal synthesis mode requires --vector-machine and --datatype
     if not args.vector_machine or not args.datatype:
         parser.error("--vector-machine and --datatype are required")
@@ -741,6 +786,14 @@ def verify_main():
     import sys
 
     sys.argv.insert(1, "--verify-only")
+    main()
+
+
+def export_main():
+    """Entry point for 'uv run export'. Prepends --export-only to argv."""
+    import sys
+
+    sys.argv.insert(1, "--export-only")
     main()
 
 

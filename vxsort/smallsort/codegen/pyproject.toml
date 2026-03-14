@@ -19,6 +19,7 @@ dependencies = [
 solve = "bitonic_compiler:main"
 estimate = "bitonic_compiler:estimate_main"
 verify = "bitonic_compiler:verify_main"
+export = "bitonic_compiler:export_main"
 
 [build-system]
 requires = ["setuptools>=80.9.0"]
