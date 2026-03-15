@@ -224,6 +224,25 @@ class TestFinalizeStage:
 # ---------------------------------------------------------------------------
 
 
+class TestStageTrackerDepthFields:
+    """Tests for depth-stratified search fields on StageTracker."""
+
+    def test_default_depth_fields(self):
+        """New StageTracker has depth fields with correct defaults."""
+        t = StageTracker(stage_idx=0, stage_pairs=[(1, 2)])
+        assert not t.shallow_complete
+        assert not t.depth_escalated
+        assert t.all_input_states == []
+
+    def test_all_input_states_accumulation(self):
+        """all_input_states records forwarded inputs."""
+        t = StageTracker(stage_idx=1, stage_pairs=[(1, 2)])
+        state_a = VectorState(top=[1, 2], bottom=[3, 4])
+        state_b = VectorState(top=[2, 1], bottom=[4, 3])
+        t.all_input_states.extend([(state_a, ()), (state_b, ())])
+        assert len(t.all_input_states) == 2
+
+
 class TestPipelinedExecution:
     """Verify pipelined execution works correctly."""
 
@@ -235,6 +254,19 @@ class TestPipelinedExecution:
             depth_limit=1,
             gadget_depth=1,
             max_unique_outputs=1,
+        )
+        assert len(roots) > 0
+        assert complete
+
+    @pytest.mark.slow
+    def test_depth2_threshold_skips_deep(self):
+        """With gadget_depth=2 and high coverage, depth-2 should be skipped."""
+        sv = BitonicSuperVectorizer(2, primitive_type.i64, vector_machine.AVX2)
+        roots, complete = sv.build_solution_tree(
+            depth_limit=1,
+            gadget_depth=2,
+            max_unique_outputs=1,
+            depth2_threshold=0.1,
         )
         assert len(roots) > 0
         assert complete

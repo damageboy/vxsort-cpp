@@ -15,6 +15,7 @@ from bitonic_super_optimizer import (
     InstructionSpec,
     PermutationGadget,
     VectorState,
+    graph_max_depth,
 )
 from bitonic_types import (
     GadgetGraph,
@@ -23,6 +24,7 @@ from bitonic_types import (
     Mux,
     Symbolic,
 )
+from gadget_synthesizer import _node_depth
 from functional import seq
 from utils import primitive_type, vector_machine
 from z3 import And, If, Int, Not, Solver, unsat
@@ -944,6 +946,101 @@ def test_intrinsic_filter_rejects_unknown():
             primitive_type.i32,
             intrinsic_filter={"_mm512_permutexvar_epi64"},
         )
+
+
+# ---------------------------------------------------------------------------
+# Depth classification tests
+# ---------------------------------------------------------------------------
+
+
+def test_node_depth_none():
+    """None node has depth 0."""
+    assert _node_depth(None) == 0
+
+
+def test_node_depth_leaf():
+    """A single IntrinsicNode with no IntrinsicNode children has depth 1."""
+    node = IntrinsicNode(
+        "_mm256_permute_ps",
+        {"a": InputRef("top"), "imm8": Symbolic("ctrl", 8)},
+    )
+    assert _node_depth(node) == 1
+
+
+def test_node_depth_chain():
+    """Two chained IntrinsicNodes have depth 2."""
+    inner = IntrinsicNode(
+        "_mm256_permute_ps",
+        {"a": InputRef("top"), "imm8": Symbolic("ctrl1", 8)},
+    )
+    outer = IntrinsicNode(
+        "_mm256_permute_ps",
+        {"a": inner, "imm8": Symbolic("ctrl2", 8)},
+    )
+    assert _node_depth(outer) == 2
+
+
+def test_node_depth_with_mux():
+    """Mux containing an IntrinsicNode increases depth."""
+    inner = IntrinsicNode(
+        "_mm256_permute_ps",
+        {"a": InputRef("top"), "imm8": Symbolic("ctrl1", 8)},
+    )
+    mux = Mux(
+        select=Symbolic("sel", 2),
+        sources=(InputRef("top"), InputRef("bottom"), inner),
+    )
+    outer = IntrinsicNode(
+        "_mm256_shuffle_ps",
+        {"a": mux, "b": InputRef("bottom"), "imm8": Symbolic("ctrl2", 8)},
+    )
+    assert _node_depth(outer) == 2
+
+
+def test_graph_max_depth_identity():
+    """Identity graph (both None) has depth 0."""
+    g = GadgetGraph(top=None, bottom=None)
+    assert graph_max_depth(g) == 0
+
+
+def test_graph_max_depth_asymmetric():
+    """Depth is the max of top and bottom."""
+    inner = IntrinsicNode(
+        "_mm256_permute_ps",
+        {"a": InputRef("top"), "imm8": Symbolic("ctrl1", 8)},
+    )
+    outer = IntrinsicNode(
+        "_mm256_permute_ps",
+        {"a": inner, "imm8": Symbolic("ctrl2", 8)},
+    )
+    leaf = IntrinsicNode(
+        "_mm256_permute_ps",
+        {"a": InputRef("bottom"), "imm8": Symbolic("ctrl3", 8)},
+    )
+    g = GadgetGraph(top=outer, bottom=leaf)
+    assert graph_max_depth(g) == 2
+
+
+def test_stratified_candidates_counts():
+    """Stratified split sums to total candidates, shallow has expected count."""
+    synth = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i64)
+    shallow, deep = synth.precompute_candidates_stratified(2)
+    all_cands = synth.precompute_all_candidates(2)
+    assert len(shallow) + len(deep) == len(all_cands)
+    # All shallow candidates should have graph_max_depth <= 1
+    for g in shallow:
+        assert graph_max_depth(g) <= 1
+    # All deep candidates should have graph_max_depth >= 2
+    for g in deep:
+        assert graph_max_depth(g) >= 2
+
+
+def test_stratified_depth1_no_deep():
+    """With gadget_depth=1, deep list should be empty."""
+    synth = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i64)
+    shallow, deep = synth.precompute_candidates_stratified(1)
+    assert len(deep) == 0
+    assert len(shallow) > 0
 
 
 def run_all_tests():

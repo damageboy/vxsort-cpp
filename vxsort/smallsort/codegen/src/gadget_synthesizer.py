@@ -335,6 +335,26 @@ flowchart TD
 """
 
 
+def _node_depth(node: IntrinsicNode | None) -> int:
+    """Depth of an IntrinsicNode DAG. None=0, leaf intrinsic=1, chained=2+."""
+    if node is None:
+        return 0
+    max_child = 0
+    for operand in node.operands.values():
+        if isinstance(operand, IntrinsicNode):
+            max_child = max(max_child, _node_depth(operand))
+        elif isinstance(operand, Mux):
+            for source in operand.sources:
+                if isinstance(source, IntrinsicNode):
+                    max_child = max(max_child, _node_depth(source))
+    return 1 + max_child
+
+
+def graph_max_depth(graph: GadgetGraph) -> int:
+    """Max instruction chain depth across both sides of a GadgetGraph."""
+    return max(_node_depth(graph.top), _node_depth(graph.bottom))
+
+
 class GadgetSynthesizer:
     """Synthesizes permutation gadgets using Z3."""
 
@@ -482,6 +502,7 @@ class GadgetSynthesizer:
         max_unique_outputs: int = 3,
         solver_callback: callable | None = None,
         allow_any_lane_order: bool = True,
+        exclude_outputs: list[tuple] | None = None,
     ) -> tuple[list[tuple[PermutationGadget, VectorState]], float, float]:
         """Synthesize gadgets from a data-flow graph using Z3.
 
@@ -500,6 +521,9 @@ class GadgetSynthesizer:
             solver_callback: Optional callback receiving the Solver instance.
             allow_any_lane_order: When True (default), any target pair can land
                 in any lane and the output state is canonicalized.
+            exclude_outputs: Optional list of (top_tuple, bottom_tuple) output
+                states to exclude from enumeration. Used during depth-2
+                escalation to skip outputs already found by depth-1.
         """
         start_construction = time.perf_counter()
         ctx = main_ctx()
@@ -604,7 +628,15 @@ class GadgetSynthesizer:
                     for name, var in select_vars.items()
                 ]
 
+                # Pre-seed with already-known outputs to increase diversity
                 output_blocks = []
+                if exclude_outputs:
+                    for top_tuple, bottom_tuple in exclude_outputs:
+                        ex_top = self._pack_elements_to_bitvec(top_tuple, ctx)
+                        ex_bot = self._pack_elements_to_bitvec(bottom_tuple, ctx)
+                        output_blocks.append(
+                            Or(top_output != ex_top, bottom_output != ex_bot)
+                        )
                 for _ in range(max_unique_outputs):
                     opt_k = Optimize(ctx=ctx)
                     for a in original_assertions:
@@ -793,6 +825,20 @@ class GadgetSynthesizer:
             mux_constraints.append(
                 Or(*(ULE(BitVecVal(last, sel.size()), sel) for sel, last in joint))
             )
+
+    def _pack_elements_to_bitvec(self, elements: tuple, ctx: Context):
+        """Pack a tuple of element values into a single BitVecVal.
+
+        Elements are packed in lane order: element[0] in bits [0:lane_width-1],
+        element[1] in bits [lane_width:2*lane_width-1], etc.
+        """
+        packed = 0
+        for lane_idx, elem in enumerate(elements):
+            packed |= (elem & ((1 << self.lane_width) - 1)) << (
+                lane_idx * self.lane_width
+            )
+        total_bits = self.elements_per_vector * self.lane_width
+        return BitVecVal(packed, total_bits, ctx=ctx)
 
     def _extract_solution_from_graph(
         self,
@@ -1356,6 +1402,20 @@ class GadgetSynthesizer:
             all_candidates.extend(self._build_shared_prefix_graphs())
         return all_candidates
 
+    def precompute_candidates_stratified(
+        self, gadget_depth: int
+    ) -> tuple[list[GadgetGraph], list[GadgetGraph]]:
+        """Split candidates into (shallow, deep) tiers.
+
+        shallow: graph_max_depth <= 1 (identity + single-instruction per side)
+        deep: graph_max_depth >= 2 (multi-instruction, shared-prefix)
+        """
+        all_candidates = self.precompute_all_candidates(gadget_depth)
+        shallow, deep = [], []
+        for g in all_candidates:
+            (shallow if graph_max_depth(g) <= 1 else deep).append(g)
+        return shallow, deep
+
     # ------------------------------------------------------------------
     # Intrinsic node enumeration (graph-based replacements)
     # ------------------------------------------------------------------
@@ -1414,6 +1474,7 @@ def _validate_gadget_worker(job):
 
     allow_any_lane_order = metadata.get("allow_any_lane_order", True)
     max_unique_outputs = metadata.get("max_unique_outputs", 3)
+    exclude_outputs = metadata.get("exclude_outputs")
 
     gadget_results, construction_time, solver_time = (
         synthesizer.synthesize_gadget_with_symbolic(
@@ -1424,6 +1485,7 @@ def _validate_gadget_worker(job):
             max_unique_outputs=max_unique_outputs,
             solver_callback=dump_smt2_to_tar,
             allow_any_lane_order=allow_any_lane_order,
+            exclude_outputs=exclude_outputs,
         )
     )
 

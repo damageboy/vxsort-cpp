@@ -357,6 +357,7 @@ def generate_bitonic_sorter(
     max_workers: int | None = None,
     max_tasks_per_child: int | None = 1000,
     retroactive_input: bool = False,
+    depth2_threshold: float = 0.1,
 ):
     """
     Generate bitonic sorter with super-optimized permutation sequences.
@@ -385,6 +386,7 @@ def generate_bitonic_sorter(
         llvm_mca_path: Explicit path to llvm-mca binary. If None, auto-detected.
         max_tasks_per_child: Maximum tasks per worker process before recycling.
             Limits memory growth in long runs. None disables recycling.
+        depth2_threshold: Coverage threshold for depth-2 escalation (default: 0.1).
 
     Returns:
         List of SolutionNode trees representing different optimized solutions
@@ -447,6 +449,7 @@ def generate_bitonic_sorter(
         resume_data=resume_data,
         max_workers=max_workers,
         max_tasks_per_child=max_tasks_per_child,
+        depth2_threshold=depth2_threshold,
     )
 
     print(f"Found {len(solutions)} root solutions")
@@ -716,6 +719,15 @@ def main():
         "Limits memory growth in long runs. Set to 0 to disable recycling.",
     )
     parser.add_argument(
+        "--depth2-threshold",
+        type=float,
+        default=0.1,
+        metavar="FRAC",
+        help="Coverage threshold for depth-2 escalation (default: 0.1). "
+        "After depth-1 completes, if coverage >= threshold, depth-2 is skipped. "
+        "Set to 0 to always escalate. Values > 1.0 are allowed as multipliers.",
+    )
+    parser.add_argument(
         "--list-cpus",
         action="store_true",
         default=False,
@@ -804,7 +816,6 @@ def main():
         vm,
         depth_limit=args.depth_limit,
         top_k=args.top_k,
-        output_formats=args.output_format,  # Will be None if not specified, handled by function default
         gadget_depth=args.gadget_depth,
         smt2_dump_dir=smt2_dump_dir,
         natural_order=args.natural_order,
@@ -819,6 +830,7 @@ def main():
         max_workers=args.max_workers,
         max_tasks_per_child=max_tasks_per_child,
         retroactive_input=args.retroactive_input,
+        depth2_threshold=args.depth2_threshold,
     )
 
 

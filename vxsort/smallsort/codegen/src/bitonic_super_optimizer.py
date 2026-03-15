@@ -21,6 +21,7 @@ try:
         _match_dispatch_rule,
         get_available_intrinsics,
         _validate_gadget_worker,
+        graph_max_depth,
     )
 except ImportError:
     from success_progress import SuccessProgress
@@ -38,6 +39,7 @@ except ImportError:
         _match_dispatch_rule,
         get_available_intrinsics,
         _validate_gadget_worker,
+        graph_max_depth,
     )
 
 # Re-export all public names so existing importers keep working.
@@ -55,6 +57,7 @@ __all__ = [
     "StageTracker",
     "_BATCH_THRESHOLDS",
     "apply_retroactive_input",
+    "graph_max_depth",
 ]
 
 
@@ -141,6 +144,11 @@ class StageTracker:
 
     # Progress
     progress_task_id: int | None = None
+
+    # Depth-stratified search
+    shallow_complete: bool = False
+    depth_escalated: bool = False
+    all_input_states: list = field(default_factory=list)
 
     @property
     def is_complete(self) -> bool:
@@ -237,6 +245,7 @@ class BitonicSuperVectorizer:
         resume_data: dict | None = None,
         max_workers: int | None = None,
         max_tasks_per_child: int | None = 1000,
+        depth2_threshold: float = 0.1,
     ) -> tuple[list[SolutionNode], bool]:
         """
         Iteratively explore all stage transitions to build solution tree.
@@ -257,6 +266,11 @@ class BitonicSuperVectorizer:
                 to os.cpu_count().
             max_tasks_per_child: Maximum tasks per worker process before recycling.
                 Limits memory growth in long runs. None disables recycling.
+            depth2_threshold: Coverage threshold for depth-2 escalation.
+                After depth-1 completes for a stage, coverage is computed as
+                unique_outputs / 2^K (K = number of comparison pairs).
+                If coverage >= threshold, depth-2 is skipped for that stage.
+                Default: 0.1 (10%).
 
         Returns:
             Tuple of (root nodes, all_stages_complete) where all_stages_complete
@@ -290,8 +304,10 @@ class BitonicSuperVectorizer:
         self._stages_completed: set[int] = set()
 
         initial_state = self._create_initial_state()
-        # Pre-compute all candidates once - they're independent of stage/input state
-        all_candidates = self.synthesizer.precompute_all_candidates(gadget_depth)
+        # Pre-compute candidates split by depth tier
+        shallow_candidates, deep_candidates = (
+            self.synthesizer.precompute_candidates_stratified(gadget_depth)
+        )
 
         # Build checkpoint config if checkpoint_dir is provided
         checkpoint_config = None
@@ -316,7 +332,9 @@ class BitonicSuperVectorizer:
         nodes_by_path = self._build_tree_pipelined(
             input_states_with_context,
             depth_limit,
-            all_candidates,
+            shallow_candidates,
+            deep_candidates,
+            depth2_threshold=depth2_threshold,
             max_unique_outputs=max_unique_outputs,
             checkpoint_dir=checkpoint_dir,
             checkpoint_config=checkpoint_config,
@@ -345,8 +363,15 @@ class BitonicSuperVectorizer:
         stage_pairs: list,
         perm_gadget_candidates: list[tuple],
         max_unique_outputs: int,
+        exclude_outputs: list[tuple] | None = None,
     ) -> list[tuple]:
-        """Create validation jobs for a set of input states (Phase 1)."""
+        """Create validation jobs for a set of input states (Phase 1).
+
+        Args:
+            exclude_outputs: Optional list of (top_tuple, bottom_tuple) output
+                states to exclude from solver enumeration. Workers will skip
+                these outputs, increasing diversity of newly-found solutions.
+        """
         jobs = []
         for input_state, parent_path in input_states_with_context:
             metadata = {
@@ -355,6 +380,8 @@ class BitonicSuperVectorizer:
                 "stage_idx": stage_idx,
                 "max_unique_outputs": max_unique_outputs,
             }
+            if exclude_outputs:
+                metadata["exclude_outputs"] = exclude_outputs
             if (
                 self._natural_order_stage is not None
                 and stage_idx == self._natural_order_stage
@@ -502,7 +529,9 @@ class BitonicSuperVectorizer:
         self,
         initial_inputs: list[tuple[VectorState, tuple]],
         depth_limit: int | None,
-        all_candidates: list[tuple],
+        shallow_candidates: list[tuple],
+        deep_candidates: list[tuple],
+        depth2_threshold: float = 0.1,
         max_unique_outputs: int = 3,
         checkpoint_dir: str | None = None,
         checkpoint_config=None,
@@ -513,6 +542,10 @@ class BitonicSuperVectorizer:
         Uses an event-driven pipeline where stage N+1 jobs are submitted as
         soon as unique outputs from stage N are discovered (at geometric-series
         thresholds), allowing overlap.
+
+        Depth-stratified search: shallow_candidates (depth <= 1) are tried
+        first. If coverage after depth-1 is below depth2_threshold,
+        deep_candidates (depth >= 2) are submitted for that stage.
 
         The final output is deterministic: ``_finalize_stage`` sorts transitions
         and gadgets in canonical order.
@@ -663,62 +696,52 @@ class BitonicSuperVectorizer:
             next_stage_idx: int,
             new_outputs: list[tuple[VectorState, tuple]],
         ) -> None:
-            """Submit jobs for newly-discovered outputs to the next stage."""
+            """Submit shallow jobs for newly-discovered outputs to the next stage."""
             if next_stage_idx >= effective_limit:
                 return
 
             stage_pairs = self.bitonic_sorter.stages[next_stage_idx]
+            is_new = next_stage_idx not in trackers
 
-            if next_stage_idx not in trackers:
-                # Launch new stage
+            if is_new:
                 tracker = StageTracker(
                     stage_idx=next_stage_idx, stage_pairs=stage_pairs
                 )
                 tracker.progress_task_id = stage_task_ids.get(next_stage_idx)
                 trackers[next_stage_idx] = tracker
+            else:
+                tracker = trackers[next_stage_idx]
 
-                jobs = self._make_jobs_for_inputs(
-                    new_outputs,
-                    next_stage_idx,
-                    stage_pairs,
-                    all_candidates,
-                    max_unique_outputs,
-                )
-                self._submit_stage_jobs(
-                    pool, tracker, jobs, pending_count, completion_queue
-                )
+            # Common: create jobs, submit, record inputs
+            jobs = self._make_jobs_for_inputs(
+                new_outputs,
+                next_stage_idx,
+                stage_pairs,
+                shallow_candidates,
+                max_unique_outputs,
+            )
+            self._submit_stage_jobs(
+                pool, tracker, jobs, pending_count, completion_queue
+            )
+            tracker.all_input_states.extend(new_outputs)
 
+            if is_new:
                 if tracker.progress_task_id is not None:
                     progress.start_task(tracker.progress_task_id)
                     progress.update(
                         tracker.progress_task_id,
                         total=tracker.total_jobs_submitted,
                     )
-
                 progress.console.print(
                     f"Stage {next_stage_idx}: Launched {tracker.total_jobs_submitted} jobs "
                     f"(pipelined from stage {next_stage_idx - 1})"
                 )
             else:
-                # Add more jobs to existing stage
-                tracker = trackers[next_stage_idx]
-                jobs = self._make_jobs_for_inputs(
-                    new_outputs,
-                    next_stage_idx,
-                    stage_pairs,
-                    all_candidates,
-                    max_unique_outputs,
-                )
-                self._submit_stage_jobs(
-                    pool, tracker, jobs, pending_count, completion_queue
-                )
-
                 if tracker.progress_task_id is not None:
                     progress.update(
                         tracker.progress_task_id,
                         total=tracker.total_jobs_submitted,
                     )
-
                 progress.console.print(
                     f"Stage {next_stage_idx}: Added {len(jobs)} jobs "
                     f"(total: {tracker.total_jobs_submitted})"
@@ -750,13 +773,14 @@ class BitonicSuperVectorizer:
                         current_inputs,
                         start_stage,
                         new_tracker.stage_pairs,
-                        all_candidates,
+                        shallow_candidates,
                         max_unique_outputs,
                     )
                     self._submit_stage_jobs(
                         pool, new_tracker, jobs, pending_count, completion_queue
                     )
                     new_tracker.total_jobs_expected = new_tracker.total_jobs_submitted
+                    new_tracker.all_input_states = list(current_inputs)
 
                     if new_tracker.progress_task_id is not None:
                         progress.start_task(new_tracker.progress_task_id)
@@ -769,6 +793,73 @@ class BitonicSuperVectorizer:
                         f"Stage {start_stage}: Launched {new_tracker.total_jobs_submitted} jobs "
                         f"for {len(current_inputs)} inputs"
                     )
+
+                def _escalate_stage(stage_idx: int) -> None:
+                    """Escalate a stage to depth-2 if coverage is below threshold."""
+                    if not deep_candidates:
+                        return
+                    tracker = trackers[stage_idx]
+                    if tracker.depth_escalated:
+                        return
+                    tracker.depth_escalated = True
+
+                    # Coverage check: unique_outputs / 2^K
+                    k = len(tracker.stage_pairs)
+                    comparison_space = 2**k
+                    n_outputs = len(tracker.unique_outputs)
+                    coverage = n_outputs / comparison_space
+
+                    if coverage >= depth2_threshold:
+                        progress.console.print(
+                            f"Stage {stage_idx}: {n_outputs} unique outputs = "
+                            f"{coverage:.1%} of 2^{k} ({comparison_space}) — "
+                            f"above {depth2_threshold:.0%} threshold, skipping depth-2"
+                        )
+                        return
+
+                    progress.console.print(
+                        f"Stage {stage_idx}: {n_outputs} unique outputs = "
+                        f"{coverage:.1%} of 2^{k} ({comparison_space}) — "
+                        f"below {depth2_threshold:.0%} threshold, escalating to depth-2 "
+                        f"for {len(tracker.all_input_states)} inputs "
+                        f"({len(deep_candidates)} deep candidates)"
+                    )
+
+                    # Pass known outputs so depth-2 workers skip them,
+                    # increasing diversity of newly-found solutions.
+                    known_outputs = list(tracker.unique_outputs.keys())
+
+                    jobs = self._make_jobs_for_inputs(
+                        tracker.all_input_states,
+                        stage_idx,
+                        tracker.stage_pairs,
+                        deep_candidates,
+                        max_unique_outputs,
+                        exclude_outputs=known_outputs,
+                    )
+                    shallow_jobs = tracker.total_jobs_submitted
+                    self._submit_stage_jobs(
+                        pool, tracker, jobs, pending_count, completion_queue
+                    )
+                    deep_jobs = tracker.total_jobs_submitted - shallow_jobs
+                    tracker.total_jobs_expected = tracker.total_jobs_submitted
+                    tracker.next_threshold_index = 0
+
+                    progress.console.print(
+                        f"Stage {stage_idx}: Submitted {deep_jobs} depth-2 jobs "
+                        f"(total: {tracker.total_jobs_submitted}, "
+                        f"shallow: {shallow_jobs}, deep: {deep_jobs})"
+                    )
+
+                    if tracker.progress_task_id is not None:
+                        progress.update(
+                            tracker.progress_task_id,
+                            description=f"Stage {stage_idx} (depth-2)",
+                            total=tracker.total_jobs_submitted,
+                        )
+
+                    # Free accumulated inputs — no longer needed after job creation
+                    tracker.all_input_states = []
 
                 # Event loop: process completed results via callback queue
                 while pending_count[0] > 0:
@@ -812,7 +903,24 @@ class BitonicSuperVectorizer:
 
                     # Check completion
                     if tracker.is_complete and not tracker.finalized:
-                        _finalize_and_cascade(stage_idx)
+                        if (
+                            not tracker.shallow_complete
+                            and deep_candidates
+                            and tracker.all_inputs_received
+                        ):
+                            # Shallow phase done. Process remaining, then escalate.
+                            tracker.shallow_complete = True
+                            if tracker.unprocessed_results:
+                                new_outputs = self._process_batch(tracker)
+                                if new_outputs and stage_idx + 1 < effective_limit:
+                                    _forward_outputs(stage_idx + 1, new_outputs)
+                            _escalate_stage(stage_idx)
+                            # After escalation, re-check: finalize unless deep
+                            # jobs made is_complete False again.
+                            if tracker.is_complete:
+                                _finalize_and_cascade(stage_idx)
+                        else:
+                            _finalize_and_cascade(stage_idx)
 
                 # Finalize any stages that haven't been finalized yet
                 # (e.g., stages with 0 jobs due to no inputs)
@@ -872,6 +980,7 @@ class BitonicSuperVectorizer:
         resume_data: dict | None = None,
         max_workers: int | None = None,
         max_tasks_per_child: int | None = 1000,
+        depth2_threshold: float = 0.1,
     ) -> tuple[list[SolutionNode], bool]:
         """Entry point: builds solution tree for all stages.
 
@@ -907,4 +1016,5 @@ class BitonicSuperVectorizer:
             resume_data=resume_data,
             max_workers=max_workers,
             max_tasks_per_child=max_tasks_per_child,
+            depth2_threshold=depth2_threshold,
         )
