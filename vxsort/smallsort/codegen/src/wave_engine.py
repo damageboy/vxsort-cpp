@@ -17,6 +17,7 @@ from multiprocessing import Pool
 try:
     from .bitonic_sorter import BitonicSorter
     from .bitonic_types import (
+        PermutationGadget,
         SolutionNode,
         VectorState,
     )
@@ -30,6 +31,7 @@ try:
 except ImportError:
     from bitonic_sorter import BitonicSorter  # type: ignore[no-redef]
     from bitonic_types import (  # type: ignore[no-redef]
+        PermutationGadget,
         SolutionNode,
         VectorState,
     )
@@ -40,6 +42,62 @@ except ImportError:
     from transition_table import TransitionTable  # type: ignore[no-redef]
     from utils import primitive_type, vector_machine, width_dict  # type: ignore[no-redef]
     from wave_checkpoint import WaveCheckpoint, WaveMasterConfig  # type: ignore[no-redef]
+
+
+# ---------------------------------------------------------------------------
+# Hill-climbing optimiser (module-level, no WaveEngine dependency)
+# ---------------------------------------------------------------------------
+
+
+def hill_climb_path(
+    path: list[tuple],
+    tt: TransitionTable,
+    scorer: callable,
+    max_passes: int = 3,
+) -> tuple[list[PermutationGadget], float]:
+    """First-improvement hill climbing for gadget assignment.
+
+    Args:
+        path: list of (stage, input_tuple, output_tuple) tuples
+        tt: TransitionTable with gadget alternatives
+        scorer: callable(path, gadget_assignments) -> float (lower is better)
+        max_passes: maximum number of full passes through stages
+
+    Returns:
+        (best_gadget_assignments, best_score)
+    """
+    # 1. Initial assignment: pick the gadget with fewest instructions
+    assignments: list[PermutationGadget] = []
+    for stage, in_t, out_t in path:
+        gadgets = tt.get_all_transitions(stage)[(in_t, out_t)]
+        assignments.append(min(gadgets, key=lambda g: g.instruction_count()))
+
+    best_score = scorer(path, assignments)
+
+    # 2. First-improvement hill climbing, capped at max_passes
+    for _pass in range(max_passes):
+        improved = False
+        for idx, (stage, in_t, out_t) in enumerate(path):
+            all_gadgets = tt.get_all_transitions(stage)[(in_t, out_t)]
+            current = assignments[idx]
+            for candidate in all_gadgets:
+                if candidate is current:
+                    continue
+                # Try the candidate
+                assignments[idx] = candidate
+                new_score = scorer(path, assignments)
+                if new_score < best_score:
+                    best_score = new_score
+                    improved = True
+                    break  # first improvement: restart from stage 0
+                else:
+                    assignments[idx] = current
+            if improved:
+                break  # restart outer loop from stage 0
+        if not improved:
+            break  # no improvement in a full pass, converged
+
+    return assignments, best_score
 
 
 # ---------------------------------------------------------------------------
