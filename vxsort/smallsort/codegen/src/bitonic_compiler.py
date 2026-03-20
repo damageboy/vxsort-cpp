@@ -180,6 +180,59 @@ def _load_and_select_paths(
     return bundle, vm, prim_type, paths
 
 
+def _load_solutions_from_checkpoint(
+    checkpoint_dir: str,
+    top_k: int | None,
+    target_cpu: str,
+):
+    """Load solutions from a wave checkpoint directory and select top K paths.
+
+    Returns (solutions, vm, prim_type, natural_order, num_vecs, paths).
+    """
+    from wave_engine import WaveEngine, WaveConfig
+    from wave_checkpoint import WaveCheckpoint
+
+    ckpt = WaveCheckpoint(checkpoint_dir)
+    master = ckpt.load_master()
+    vm = vector_machine[master.vm]
+    pt = primitive_type[master.prim_type]
+
+    # Create a minimal WaveEngine to load checkpoint and export
+    config = WaveConfig(
+        num_vecs=master.num_vecs,
+        vm=vm,
+        prim_type=pt,
+        gadget_depth=master.gadget_depth,
+        natural_order=master.natural_order,
+        retroactive_input=master.retroactive_input,
+        wave_attempts=1,
+        wave_outputs=1,
+        propagation_divisor=10,
+        max_paths_per_wave=1,
+        target_cpus=[],
+        max_workers=1,
+        max_tasks_per_child=None,
+        depth2_threshold=0.1,
+    )
+    engine = WaveEngine(config)
+    engine.resume(checkpoint_dir)
+    solutions = engine.export_to_solution_nodes()
+
+    if master.retroactive_input:
+        solutions = apply_retroactive_input(solutions)
+
+    print(
+        f"Loaded {len(solutions)} roots from checkpoint {checkpoint_dir} "
+        f"({vm.name} {pt.name}, natural_order={master.natural_order})"
+    )
+
+    cost_model = CostModel(target_cpu)
+    path_selector = PathSelector(cost_model)
+    paths = path_selector.select_top_k_paths(solutions, top_k or 10_000)
+
+    return solutions, vm, pt, master.natural_order, master.num_vecs, paths
+
+
 def verify_only_from_json(
     json_path: str,
     top_k: int | None = None,
@@ -190,32 +243,41 @@ def verify_only_from_json(
     max_workers: int | None = None,
     max_tasks_per_child: int | None = 1000,
 ):
-    """Load solutions from a JSON file and verify them without re-running synthesis.
+    """Load solutions from a JSON file or checkpoint dir and verify without re-running synthesis.
 
     The JSON file must contain vector_machine and primitive_type metadata
     (written by json_exporter since Feb 2026).
 
     Args:
-        json_path: Path to a JSON solutions file.
+        json_path: Path to a JSON solutions file or a wave checkpoint directory.
         top_k: Number of best paths to verify. If None, verify all paths.
         target_cpu: Target CPU for cost model during path selection.
         estimate: If True, run LLVM-MCA performance estimation on selected paths.
         nasm_path: Path to nasm binary for assembly verification (used with estimate).
         llvm_mca_path: Explicit path to llvm-mca binary. If None, auto-detected.
     """
-    bundle, vm, prim_type, paths = _load_and_select_paths(json_path, top_k, target_cpu)
+    if os.path.isdir(json_path):
+        _solutions, vm, prim_type, natural_order, num_vecs, paths = (
+            _load_solutions_from_checkpoint(json_path, top_k, target_cpu)
+        )
+    else:
+        bundle, vm, prim_type, paths = _load_and_select_paths(
+            json_path, top_k, target_cpu
+        )
+        natural_order = bundle.natural_order
+        num_vecs = bundle.num_vecs
 
     _run_verification(
         paths,
         vm,
         prim_type,
-        bundle.natural_order,
+        natural_order,
         max_workers=max_workers,
         max_tasks_per_child=max_tasks_per_child,
     )
 
     if estimate:
-        if bundle.num_vecs is None:
+        if num_vecs is None:
             raise SystemExit(
                 f"Error: {json_path} has no num_vecs metadata. "
                 "Re-export the solutions with a current version of the tool."
@@ -226,8 +288,8 @@ def verify_only_from_json(
             paths,
             vm,
             prim_type,
-            bundle.num_vecs,
-            bundle.natural_order,
+            num_vecs,
+            natural_order,
             target_cpu,
             nasm_path,
             llvm_mca_path,
@@ -242,17 +304,30 @@ def estimate_only_from_json(
     nasm_path: str | None = None,
     llvm_mca_path: str | None = None,
 ):
-    """Load solutions from a JSON file and run LLVM-MCA estimation without verification.
+    """Load solutions from a JSON file or checkpoint dir and run LLVM-MCA estimation.
 
     Args:
-        json_path: Path to a JSON solutions file.
+        json_path: Path to a JSON solutions file or a wave checkpoint directory.
         top_k: Number of best paths to estimate. If None, estimate all paths.
         target_cpu: Target CPU for cost model during path selection.
         nasm_path: Path to nasm binary for assembly verification.
     """
-    bundle, vm, prim_type, paths = _load_and_select_paths(
-        json_path, top_k, target_cpu, require_num_vecs=True
-    )
+    if os.path.isdir(json_path):
+        _solutions, vm, prim_type, natural_order, num_vecs, paths = (
+            _load_solutions_from_checkpoint(json_path, top_k, target_cpu)
+        )
+    else:
+        bundle, vm, prim_type, paths = _load_and_select_paths(
+            json_path, top_k, target_cpu, require_num_vecs=True
+        )
+        natural_order = bundle.natural_order
+        num_vecs = bundle.num_vecs
+
+    if num_vecs is None:
+        raise SystemExit(
+            f"Error: {json_path} has no num_vecs metadata. "
+            "Re-export the solutions with a current version of the tool."
+        )
 
     from perf_estimator import estimate_solutions, print_estimation_table
 
@@ -260,8 +335,8 @@ def estimate_only_from_json(
         paths,
         vm,
         prim_type,
-        bundle.num_vecs,
-        bundle.natural_order,
+        num_vecs,
+        natural_order,
         target_cpu,
         nasm_path,
         llvm_mca_path,
@@ -277,10 +352,10 @@ def export_only_from_json(
     nasm_path: str | None = None,
     output_path: str | None = None,
 ):
-    """Load solutions from a JSON file and export them to other formats.
+    """Load solutions from a JSON file or checkpoint dir and export to other formats.
 
     Args:
-        json_path: Path to a JSON solutions file.
+        json_path: Path to a JSON solutions file or a wave checkpoint directory.
         export_formats: List of output formats (e.g., ["asm"]).
         top_k: Number of best paths to export. If None, export all paths.
         target_cpu: Target CPU for cost model during path selection.
@@ -290,9 +365,24 @@ def export_only_from_json(
     if not export_formats:
         export_formats = ["asm"]
 
-    bundle, vm, prim_type, paths = _load_and_select_paths(
-        json_path, top_k, target_cpu, require_num_vecs=True
-    )
+    if os.path.isdir(json_path):
+        solutions, vm, prim_type, natural_order, num_vecs, paths = (
+            _load_solutions_from_checkpoint(json_path, top_k, target_cpu)
+        )
+        roots = solutions
+    else:
+        bundle, vm, prim_type, paths = _load_and_select_paths(
+            json_path, top_k, target_cpu, require_num_vecs=True
+        )
+        roots = bundle.roots
+        natural_order = bundle.natural_order
+        num_vecs = bundle.num_vecs
+
+    if num_vecs is None:
+        raise SystemExit(
+            f"Error: {json_path} has no num_vecs metadata. "
+            "Re-export the solutions with a current version of the tool."
+        )
 
     for export_format in export_formats:
         if export_format == "asm":
@@ -302,13 +392,13 @@ def export_only_from_json(
                 base_name = os.path.splitext(os.path.basename(json_path))[0]
                 asm_output_path = f"{base_name}.asm"
             export_solutions_to_asm(
-                bundle.roots,
-                bundle.num_vecs,
+                roots,
+                num_vecs,
                 prim_type,
                 vm,
                 asm_output_path,
                 selected_paths=paths,
-                natural_order=bundle.natural_order,
+                natural_order=natural_order,
                 nasm_path=nasm_path,
             )
         else:
@@ -669,9 +759,9 @@ def main():
         "--resume",
         type=str,
         default=None,
-        metavar="CHECKPOINT_FILE",
-        help="Resume synthesis from a checkpoint file (.json.zst). "
-        "Completed stages are skipped.",
+        metavar="CHECKPOINT_DIR",
+        help="Resume synthesis from a wave checkpoint directory. "
+        "Restores the TransitionTable and wave count from the checkpoint.",
     )
     parser.add_argument(
         "--estimate",
@@ -732,6 +822,28 @@ def main():
         action="store_true",
         default=False,
         help="List all supported CPU architectures with uops.info and LLVM-MCA availability, then exit",
+    )
+    parser.add_argument(
+        "--max-waves",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Maximum number of waves before termination. If not specified, runs until "
+        "Ctrl-C or exhaustion.",
+    )
+    parser.add_argument(
+        "--wave-attempts",
+        type=int,
+        default=10_000,
+        metavar="N",
+        help="Budget per stage per wave in attempts (default: 10000).",
+    )
+    parser.add_argument(
+        "--wave-outputs",
+        type=int,
+        default=100,
+        metavar="N",
+        help="Budget per stage per wave in distinct outputs (default: 100).",
     )
 
     args = parser.parse_args()
@@ -810,28 +922,123 @@ def main():
         smt2_dump_dir = tempfile.mkdtemp(prefix="vxsort_smt2_", dir="/tmp")
         print(f"SMT2 dump directory: {smt2_dump_dir}")
 
-    generate_bitonic_sorter(
-        args.num_vecs,
-        prim_type,
-        vm,
-        depth_limit=args.depth_limit,
-        top_k=args.top_k,
+    from wave_engine import WaveEngine, WaveConfig
+
+    wave_config = WaveConfig(
+        num_vecs=args.num_vecs,
+        vm=vm,
+        prim_type=prim_type,
         gadget_depth=args.gadget_depth,
-        smt2_dump_dir=smt2_dump_dir,
         natural_order=args.natural_order,
-        max_gadget_solutions=args.max_gadget_solutions,
-        target_cpu=args.target_cpu,
-        verify=args.verify,
-        checkpoint_dir=args.checkpoint_dir,
-        resume_file=args.resume,
-        estimate=args.estimate,
-        nasm_path=args.nasm_path,
-        llvm_mca_path=args.llvm_mca_path,
+        retroactive_input=args.retroactive_input,
+        wave_attempts=args.wave_attempts,
+        wave_outputs=args.wave_outputs,
+        propagation_divisor=10,
+        max_paths_per_wave=1000,
+        target_cpus=[args.target_cpu] if args.target_cpu != "generic" else [],
         max_workers=args.max_workers,
         max_tasks_per_child=max_tasks_per_child,
-        retroactive_input=args.retroactive_input,
         depth2_threshold=args.depth2_threshold,
+        smt2_dump_dir=smt2_dump_dir,
+        checkpoint_dir=args.checkpoint_dir,
+        llvm_mca_path=getattr(args, "llvm_mca_path", None),
+        max_waves=args.max_waves,
+        top_k=args.top_k or 10,
     )
+
+    engine = WaveEngine(wave_config)
+
+    if args.resume:
+        engine.resume(args.resume)
+
+    engine.run()
+
+    # Export to legacy SolutionNode format
+    solutions = engine.export_to_solution_nodes()
+
+    print(f"Found {len(solutions)} root solutions")
+
+    if args.retroactive_input:
+        before = len(solutions)
+        solutions = apply_retroactive_input(solutions)
+        print(
+            f"Retroactive input: {before} roots -> {len(solutions)} "
+            f"(deduped {before - len(solutions)})"
+        )
+
+    # Filter to top K cheapest root-to-leaf paths if requested
+    selected_paths = None
+    if args.top_k is not None:
+        total_paths = _count_dag_paths(solutions)
+        if total_paths > args.top_k:
+            print(
+                f"Filtering to top {args.top_k} cheapest paths "
+                f"(out of {total_paths} total)..."
+            )
+            cost_model = CostModel(args.target_cpu)
+            path_selector = PathSelector(cost_model)
+            solutions, selected_paths = path_selector.prune_to_top_k_paths(
+                solutions, args.top_k
+            )
+            print(f"Kept {len(solutions)} roots after pruning")
+
+    # Export solutions to JSON
+    order_suffix = "_natural" if args.natural_order else ""
+    output_path = (
+        f"bitonic_solutions_{args.num_vecs}x{vm.name}"
+        f"_{prim_type.name}{order_suffix}.json"
+    )
+    export_solutions_to_json(
+        solutions,
+        output_path,
+        natural_order=args.natural_order,
+        vm_name=vm.name,
+        prim_type_name=prim_type.name,
+        num_vecs=args.num_vecs,
+    )
+
+    # End-to-end verification
+    if args.verify:
+        paths_to_verify = selected_paths
+        if paths_to_verify is None:
+            cost_model = CostModel(args.target_cpu)
+            path_selector = PathSelector(cost_model)
+            paths_to_verify = path_selector.select_top_k_paths(
+                solutions, args.top_k or 10_000
+            )
+
+        _run_verification(
+            paths_to_verify,
+            vm,
+            prim_type,
+            args.natural_order,
+            max_workers=args.max_workers,
+            max_tasks_per_child=max_tasks_per_child,
+        )
+
+    # LLVM-MCA performance estimation
+    if args.estimate:
+        from perf_estimator import estimate_solutions, print_estimation_table
+
+        paths_to_estimate = selected_paths
+        if paths_to_estimate is None:
+            cost_model = CostModel(args.target_cpu)
+            path_selector = PathSelector(cost_model)
+            paths_to_estimate = path_selector.select_top_k_paths(
+                solutions, args.top_k or 10_000
+            )
+
+        results = estimate_solutions(
+            paths_to_estimate,
+            vm,
+            prim_type,
+            args.num_vecs,
+            args.natural_order,
+            args.target_cpu,
+            args.nasm_path,
+            args.llvm_mca_path,
+        )
+        print_estimation_table(results, paths_to_estimate)
 
 
 def estimate_main():
