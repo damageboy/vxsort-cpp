@@ -230,3 +230,44 @@ class TestExportToSolutionNodes:
         # Children should link to stage 1
         assert len(nodes[0].children) == 1
         assert nodes[0].children[0].stage == 1
+
+
+class TestEndToEnd:
+    """Full pipeline: synthesis -> checkpoint -> resume -> export."""
+
+    def test_avx2_i64_full_pipeline(self, tmp_path):
+        """Full pipeline: synthesis -> checkpoint -> resume -> export."""
+        config = _fast_config(
+            wave_attempts=1000,
+            wave_outputs=20,
+            max_paths_per_wave=50,
+            max_waves=2,
+            checkpoint_dir=str(tmp_path / "ckpt"),
+        )
+
+        # Run 2 waves
+        engine = WaveEngine(config)
+        engine.run()
+        assert engine.wave_count == 2
+
+        # Verify checkpoint exists
+        import os
+
+        assert os.path.exists(str(tmp_path / "ckpt" / "master.json"))
+
+        # Resume and run 1 more wave
+        config2 = _fast_config(
+            wave_attempts=1000,
+            wave_outputs=20,
+            max_paths_per_wave=50,
+            max_waves=3,
+            checkpoint_dir=str(tmp_path / "ckpt"),
+        )
+        engine2 = WaveEngine(config2)
+        engine2.resume(str(tmp_path / "ckpt"))
+        engine2.run()
+        assert engine2.wave_count == 3
+
+        # Export to SolutionNode tree
+        solutions = engine2.export_to_solution_nodes()
+        assert len(solutions) > 0
