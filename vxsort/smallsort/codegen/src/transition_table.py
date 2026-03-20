@@ -29,9 +29,11 @@ class StageData:
         default_factory=dict
     )
 
-    unique_outputs: set[StateTuple] = field(default_factory=set)
+    # output_tuple -> VectorState (canonical instances)
+    unique_outputs: dict[StateTuple, VectorState] = field(default_factory=dict)
     unique_inputs: set[StateTuple] = field(default_factory=set)
-    attempted_pairs: set[TransitionKey] = field(default_factory=set)
+    # (input_state_tuple, candidate_index) pairs
+    attempted_pairs: set[tuple[StateTuple, int]] = field(default_factory=set)
     forwarded_outputs: set[StateTuple] = field(default_factory=set)
 
     consecutive_zero_budgets: int = 0
@@ -93,9 +95,30 @@ class TransitionTable:
         sd.transitions[trans_key].append(gadget)
 
         sd.unique_inputs.add(inp_key)
-        sd.unique_outputs.add(out_key)
+        if out_key not in sd.unique_outputs:
+            sd.unique_outputs[out_key] = output_state
 
         return True
+
+    # ------------------------------------------------------------------
+    # Attempt tracking
+    # ------------------------------------------------------------------
+
+    def record_attempt(self, stage: int, count: int = 1) -> None:
+        """Increment the attempt counter for a stage."""
+        self.stages[stage].attempts += count
+
+    def record_attempted_pair(
+        self, stage: int, input_tuple: StateTuple, candidate_index: int
+    ) -> None:
+        """Record that (input_tuple, candidate_index) has been attempted."""
+        self.stages[stage].attempted_pairs.add((input_tuple, candidate_index))
+
+    def was_attempted(
+        self, stage: int, input_tuple: StateTuple, candidate_index: int
+    ) -> bool:
+        """Check whether (input_tuple, candidate_index) was already attempted."""
+        return (input_tuple, candidate_index) in self.stages[stage].attempted_pairs
 
     # ------------------------------------------------------------------
     # Lookup
@@ -114,6 +137,39 @@ class TransitionTable:
             if inp == input_tuple:
                 result[out] = gadgets
         return result
+
+    def get_all_transitions(
+        self, stage: int
+    ) -> dict[TransitionKey, list[PermutationGadget]]:
+        """Return all transitions for a stage as a dict keyed by (input, output)."""
+        return self.stages[stage].transitions
+
+    def get_unique_outputs(self, stage: int) -> dict[StateTuple, VectorState]:
+        """Return the unique output states for a stage (tuple -> VectorState)."""
+        return self.stages[stage].unique_outputs
+
+    def unique_output_count(self, stage: int) -> int:
+        """Return the number of unique output states for a stage."""
+        return len(self.stages[stage].unique_outputs)
+
+    # ------------------------------------------------------------------
+    # Forwarding
+    # ------------------------------------------------------------------
+
+    def get_unforwarded_outputs(
+        self, stage: int
+    ) -> list[tuple[StateTuple, VectorState]]:
+        """Return outputs not yet in forwarded_outputs."""
+        sd = self.stages[stage]
+        result: list[tuple[StateTuple, VectorState]] = []
+        for out_t, vs in sd.unique_outputs.items():
+            if out_t not in sd.forwarded_outputs:
+                result.append((out_t, vs))
+        return result
+
+    def mark_forwarded(self, stage: int, output_tuples: list[StateTuple]) -> None:
+        """Add tuples to the stage's forwarded_outputs set."""
+        self.stages[stage].forwarded_outputs.update(output_tuples)
 
     # ------------------------------------------------------------------
     # Statistics
@@ -140,16 +196,26 @@ class TransitionTable:
             "total_gadgets": total_gadgets,
         }
 
-    def weakest_stage(self) -> int:
+    def weakest_stage(self, exclude_exhausted: set[int] | None = None) -> int | None:
         """Return the index of the stage with the lowest success rate.
+
+        Parameters
+        ----------
+        exclude_exhausted :
+            Stage indices to skip.  If all stages are excluded (or the
+            table is empty), returns ``None``.
 
         Ties are broken by earliest stage index.  Stages with zero attempts
         are treated as having a success rate of 0.0.
         """
-        best_idx = 0
+        excluded = exclude_exhausted or set()
+        best_idx: int | None = None
         best_rate = float("inf")
 
         for i, sd in enumerate(self.stages):
+            if i in excluded:
+                continue
+
             if sd.attempts > 0:
                 rate = len(sd.unique_outputs) / sd.attempts
             else:
@@ -167,62 +233,63 @@ class TransitionTable:
 
     def enumerate_complete_paths(
         self,
-        start: StateTuple,
+        start: StateTuple | None = None,
         *,
         max_paths: int | None = None,
         exclude_paths: set[tuple] | None = None,
-    ) -> list[list[tuple[StateTuple, StateTuple, PermutationGadget]]]:
-        """Enumerate all complete paths from *start* through every stage.
+    ) -> list[list[tuple[int, StateTuple, StateTuple]]]:
+        """Enumerate complete paths through every stage.
 
-        A complete path has exactly ``len(self.stages)`` steps, one per stage.
-        Each step is a ``(input_tuple, output_tuple, gadget)`` triple.
+        A complete path has exactly ``len(self.stages)`` steps, one per
+        transition (not per gadget).  Each step is a
+        ``(stage_index, input_tuple, output_tuple)`` triple.
 
         Parameters
         ----------
         start :
-            The input state tuple to begin from (stage 0 input).
+            If given, only paths beginning with this stage-0 input are
+            returned.  If ``None``, paths from every stage-0 input are
+            enumerated.
         max_paths :
             If set, stop after collecting this many paths.
         exclude_paths :
             Set of path keys to skip.  A path key is
-            ``tuple((input_tuple, output_tuple) for each step)``.
+            ``tuple((stage, input_tuple, output_tuple) for each step)``.
 
         Returns
         -------
         list of paths, where each path is a list of
-        ``(input_tuple, output_tuple, gadget)`` triples.
+        ``(stage_index, input_tuple, output_tuple)`` triples.
         """
         if not self.stages:
             return []
 
         exclude = exclude_paths or set()
-        results: list[list[tuple[StateTuple, StateTuple, PermutationGadget]]] = []
+        results: list[list[tuple[int, StateTuple, StateTuple]]] = []
 
-        # DFS with explicit stack: (stage, current_input, path_so_far)
-        stack: list[
-            tuple[
-                int, StateTuple, list[tuple[StateTuple, StateTuple, PermutationGadget]]
-            ]
-        ] = [(0, start, [])]
-
-        while stack:
+        def _dfs(
+            stage: int,
+            current_path: list[tuple[int, StateTuple, StateTuple]],
+            required_input: StateTuple | None,
+        ) -> None:
             if max_paths is not None and len(results) >= max_paths:
-                break
-
-            stage, inp, path = stack.pop()
+                return
 
             if stage >= len(self.stages):
-                # Completed all stages -- check exclusion
-                path_key = tuple((step[0], step[1]) for step in path)
+                path_key = tuple(current_path)
                 if path_key not in exclude:
-                    results.append(path)
-                continue
+                    results.append(list(current_path))
+                return
 
-            # Find all transitions from inp at this stage
-            transitions = self.get_transitions(stage, inp)
-            for out, gadgets in transitions.items():
-                for gadget in gadgets:
-                    new_path = path + [(inp, out, gadget)]
-                    stack.append((stage + 1, out, new_path))
+            sd = self.stages[stage]
+            for in_t, out_t in sd.transitions:
+                if required_input is not None and in_t != required_input:
+                    continue
+                current_path.append((stage, in_t, out_t))
+                _dfs(stage + 1, current_path, out_t)
+                current_path.pop()
+                if max_paths is not None and len(results) >= max_paths:
+                    return
 
+        _dfs(0, [], start)
         return results
