@@ -272,6 +272,9 @@ class WaveEngine:
                     "max_unique_outputs": 3,
                     "candidate_index": cand_idx,
                 }
+                # Final natural-order stage must enforce strict lane order
+                if self.config.natural_order and stage_idx == len(self.all_stages) - 1:
+                    metadata["allow_any_lane_order"] = False
                 if self.config.smt2_dump_dir:
                     metadata["smt2_dump_dir"] = self.config.smt2_dump_dir
 
