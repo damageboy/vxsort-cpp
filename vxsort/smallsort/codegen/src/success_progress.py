@@ -149,15 +149,22 @@ class SuccessProgress(Progress):
 
     def __init__(self, *args, **kwargs):
         self._memory_monitor_enabled = False
+        self._status_text: str | None = None
         super().__init__(*args, **kwargs)
 
     def enable_memory_monitor(self) -> None:
         """Enable the memory usage status line below the progress bars."""
         self._memory_monitor_enabled = True
 
+    def set_status(self, text: str | None) -> None:
+        """Set a persistent status line shown below the progress bars."""
+        self._status_text = text
+
     def get_renderables(self) -> Iterable[RenderableType]:
-        """Yield standard progress table, optionally followed by memory stats."""
+        """Yield standard progress table, optionally followed by status and memory stats."""
         yield self.make_tasks_table(self.tasks)
+        if self._status_text is not None:
+            yield Text(self._status_text, style="bold green")
         if self._memory_monitor_enabled:
             snapshot = collect_memory_snapshot()
             if snapshot is not None:

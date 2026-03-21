@@ -764,17 +764,21 @@ class WaveEngine:
                     # Print wave summary
                     target = result["target_stage"]
                     stats = self.tt.stage_stats(target)
-                    best_str = ""
-                    for cpu, scores in self.best_scores.items():
-                        best_str += f" {scores['cycles']:.1f}cy ({cpu})"
                     progress.console.print(
                         f"Wave {result['wave_index']}: "
                         f"stage {target}, "
                         f"+{result['new_outputs']} outputs "
                         f"({stats['distinct_outputs']} total), "
-                        f"{result['total_paths']} paths"
-                        + (f" | [bold green]Best:{best_str}[/]" if best_str else ""),
+                        f"{result['total_paths']} paths scored",
                     )
+
+                    # Update persistent status line with best scores per CPU
+                    if self.best_scores:
+                        parts = [
+                            f"{cpu}: {s['cycles']:.1f}cy (throughput {s['throughput']:.2f})"
+                            for cpu, s in sorted(self.best_scores.items())
+                        ]
+                        progress.set_status("Best: " + "  |  ".join(parts))
         finally:
             signal.signal(signal.SIGINT, original_sigint)
 
