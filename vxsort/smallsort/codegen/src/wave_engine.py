@@ -307,6 +307,15 @@ class WaveEngine:
         if not jobs:
             # All candidates exhausted for this stage
             self.exhausted_stages.add(stage_idx)
+            if progress is not None and progress_task_id is not None:
+                task = progress._tasks.get(progress_task_id)
+                total = task.total if task and task.total else 1
+                progress.update(
+                    progress_task_id,
+                    description=f"Stage {stage_idx} (exhausted)",
+                    total=total,
+                    completed=total,
+                )
             return 0
 
         # Limit to budget
@@ -752,11 +761,26 @@ class WaveEngine:
                         )
                         break
 
+                    prev_exhausted = set(self.exhausted_stages)
+
                     result = self.run_wave(
                         progress=progress,
                         stage_task_ids=stage_task_ids,
                     )
                     waves.append(result)
+
+                    # Update progress for any newly exhausted stages
+                    for s in self.exhausted_stages - prev_exhausted:
+                        tid = stage_task_ids.get(s)
+                        if tid is not None:
+                            task = progress._tasks.get(tid)
+                            total = task.total if task and task.total else 1
+                            progress.update(
+                                tid,
+                                description=f"Stage {s} (exhausted)",
+                                total=total,
+                                completed=total,
+                            )
 
                     if result["target_stage"] is None:
                         break
