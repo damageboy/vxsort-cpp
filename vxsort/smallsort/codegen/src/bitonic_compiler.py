@@ -934,7 +934,7 @@ def main():
         wave_attempts=args.wave_attempts,
         wave_outputs=args.wave_outputs,
         propagation_divisor=10,
-        max_paths_per_wave=1000,
+        max_paths_per_wave=50,
         target_cpus=[args.target_cpu] if args.target_cpu != "generic" else [],
         max_workers=args.max_workers,
         max_tasks_per_child=max_tasks_per_child,

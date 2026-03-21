@@ -304,10 +304,13 @@ class WaveEngine:
 
         jobs = self._make_jobs(stage_idx, input_states)
 
+        if not jobs:
+            # All candidates exhausted for this stage
+            self.exhausted_stages.add(stage_idx)
+            return 0
+
         # Limit to budget
         jobs = jobs[:budget_attempts]
-        if not jobs:
-            return 0
 
         new_outputs = 0
         tt = self.tt
@@ -346,8 +349,13 @@ class WaveEngine:
             while completed < pending:
                 if new_outputs >= budget_outputs:
                     break
+                if self._interrupted:
+                    break
 
-                status, payload = completion_queue.get()
+                try:
+                    status, payload = completion_queue.get(timeout=0.5)
+                except queue_mod.Empty:
+                    continue
                 completed += 1
 
                 if status == "err":
@@ -544,12 +552,20 @@ class WaveEngine:
         if target is None:
             return None
 
-        # Bubble-up: if stage is stuck, try the stage before it
+        # Bubble-up: if stage is stuck after 2 consecutive zero-output budgets,
+        # try going upstream to produce different inputs. Keep bubbling up
+        # until we find a non-exhausted stage or reach stage 0.
         sd = self.tt.stages[target]
-        if sd.consecutive_zero_budgets >= 2 and target > 0:
+        if sd.consecutive_zero_budgets >= 2:
             upstream = target - 1
-            if upstream not in self.exhausted_stages:
-                return upstream
+            while upstream >= 0:
+                if upstream not in self.exhausted_stages:
+                    return upstream
+                upstream -= 1
+            # All upstream stages exhausted too — mark target as exhausted
+            self.exhausted_stages.add(target)
+            # Re-select without the newly exhausted stage
+            return self.tt.weakest_stage(exclude_exhausted=self.exhausted_stages)
 
         return target
 
