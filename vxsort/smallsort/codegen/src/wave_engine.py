@@ -323,21 +323,16 @@ class WaveEngine:
 
         new_outputs = 0
         tt = self.tt
+        num_workers = self.config.max_workers or os.cpu_count() or 4
 
-        raw_jobs = [job for _, job in jobs]
-
-        # Record all attempts and mark pairs before submitting
-        for cand_idx, job in jobs:
-            input_state = job[1]
-            tt.record_attempted_pair(stage_idx, input_state.as_tuple(), cand_idx)
-
-        tt.record_attempt(stage_idx, count=len(raw_jobs))
-
-        # Update progress bar total
+        # Update progress bar total (may grow if we don't hit output limit)
         if progress is not None and progress_task_id is not None:
-            progress.update(progress_task_id, total=len(raw_jobs))
+            progress.update(progress_task_id, total=len(jobs))
 
-        # Run via multiprocessing Pool with async callbacks for progress
+        # Submit in batches to avoid wasting work when output budget is hit.
+        # Batch size = 2x workers so the pool stays saturated while we
+        # process results, but we don't commit thousands of jobs upfront.
+        batch_size = num_workers * 2
         completion_queue: queue_mod.Queue = queue_mod.Queue()
 
         pool = Pool(
@@ -345,26 +340,40 @@ class WaveEngine:
             maxtasksperchild=self.config.max_tasks_per_child,
         )
         try:
-            pending = len(raw_jobs)
-            for job in raw_jobs:
-                pool.apply_async(
-                    _validate_gadget_worker,
-                    (job,),
-                    callback=lambda r: completion_queue.put(("ok", r)),
-                    error_callback=lambda e: completion_queue.put(("err", e)),
-                )
-
+            job_iter = iter(jobs)
+            in_flight = 0
+            submitted = 0
             completed = 0
-            while completed < pending:
-                if new_outputs >= budget_outputs:
-                    break
-                if self._interrupted:
-                    break
+            done = False
 
+            while not done:
+                # Submit next batch
+                while in_flight < batch_size and not done:
+                    item = next(job_iter, None)
+                    if item is None:
+                        break
+                    _cand_idx, job = item
+                    pool.apply_async(
+                        _validate_gadget_worker,
+                        (job,),
+                        callback=lambda r: completion_queue.put(("ok", r)),
+                        error_callback=lambda e: completion_queue.put(("err", e)),
+                    )
+                    in_flight += 1
+                    submitted += 1
+
+                if in_flight == 0:
+                    break  # Nothing left to process
+
+                # Drain one result
                 try:
                     status, payload = completion_queue.get(timeout=0.5)
                 except queue_mod.Empty:
+                    if self._interrupted:
+                        break
                     continue
+
+                in_flight -= 1
                 completed += 1
 
                 if status == "err":
@@ -375,6 +384,11 @@ class WaveEngine:
                 gadget_results, input_state, _metadata, _ct, _st = payload
                 success = 1 if gadget_results else 0
 
+                # Mark as attempted only after completion
+                cand_index = _metadata.get("candidate_index", -1)
+                tt.record_attempted_pair(stage_idx, input_state.as_tuple(), cand_index)
+                tt.record_attempt(stage_idx)
+
                 if progress is not None and progress_task_id is not None:
                     progress.update(progress_task_id, advance=1, success=success)
 
@@ -384,6 +398,14 @@ class WaveEngine:
                     tt.add_transition(stage_idx, input_state, output_state, gadget)
                     if is_new_output:
                         new_outputs += 1
+
+                if new_outputs >= budget_outputs or self._interrupted:
+                    done = True
+
+            # Update progress to show actual completed count
+            if progress is not None and progress_task_id is not None:
+                progress.update(progress_task_id, total=completed, completed=completed)
+
         finally:
             pool.terminate()
             pool.join()
