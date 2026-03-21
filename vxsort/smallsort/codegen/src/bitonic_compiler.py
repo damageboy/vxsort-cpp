@@ -730,8 +730,9 @@ def main():
         "--target-cpu",
         type=str,
         default="generic",
-        help="Target CPU for cost model (e.g. generic, TGL, SKX, ZEN4, "
-        "tigerlake, skylake-x, zen4). Use --list-cpus to see all options (default: generic)",
+        help="Target CPU(s) for cost model and LLVM-MCA scoring. "
+        "Comma-separated for multiple (e.g. ZEN4,ADL-P). "
+        "Use --list-cpus to see all options (default: generic)",
     )
     parser.add_argument(
         "--verify",
@@ -917,6 +918,9 @@ def main():
     vm = vector_machine[args.vector_machine]
     prim_type = primitive_type[args.datatype]
 
+    # Parse target CPUs: first one used for CostModel, all used for LLVM-MCA
+    primary_target_cpu = args.target_cpu.split(",")[0].strip()
+
     smt2_dump_dir = None
     if args.dump_smt2:
         smt2_dump_dir = tempfile.mkdtemp(prefix="vxsort_smt2_", dir="/tmp")
@@ -935,7 +939,9 @@ def main():
         wave_outputs=args.wave_outputs,
         propagation_divisor=10,
         max_paths_per_wave=50,
-        target_cpus=[args.target_cpu] if args.target_cpu != "generic" else [],
+        target_cpus=[
+            c.strip() for c in args.target_cpu.split(",") if c.strip() != "generic"
+        ],
         max_workers=args.max_workers,
         max_tasks_per_child=max_tasks_per_child,
         depth2_threshold=args.depth2_threshold,
@@ -975,7 +981,7 @@ def main():
                 f"Filtering to top {args.top_k} cheapest paths "
                 f"(out of {total_paths} total)..."
             )
-            cost_model = CostModel(args.target_cpu)
+            cost_model = CostModel(primary_target_cpu)
             path_selector = PathSelector(cost_model)
             solutions, selected_paths = path_selector.prune_to_top_k_paths(
                 solutions, args.top_k
@@ -1001,7 +1007,7 @@ def main():
     if args.verify:
         paths_to_verify = selected_paths
         if paths_to_verify is None:
-            cost_model = CostModel(args.target_cpu)
+            cost_model = CostModel(primary_target_cpu)
             path_selector = PathSelector(cost_model)
             paths_to_verify = path_selector.select_top_k_paths(
                 solutions, args.top_k or 10_000
@@ -1022,7 +1028,7 @@ def main():
 
         paths_to_estimate = selected_paths
         if paths_to_estimate is None:
-            cost_model = CostModel(args.target_cpu)
+            cost_model = CostModel(primary_target_cpu)
             path_selector = PathSelector(cost_model)
             paths_to_estimate = path_selector.select_top_k_paths(
                 solutions, args.top_k or 10_000
@@ -1034,7 +1040,7 @@ def main():
             prim_type,
             args.num_vecs,
             args.natural_order,
-            args.target_cpu,
+            primary_target_cpu,
             args.nasm_path,
             args.llvm_mca_path,
         )
