@@ -716,6 +716,7 @@ class WaveEngine:
         signal.signal(signal.SIGINT, _sigint_handler)
 
         progress = SuccessProgress.create()
+        progress.enable_memory_monitor()
 
         try:
             with progress:
