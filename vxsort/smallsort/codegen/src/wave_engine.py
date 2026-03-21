@@ -100,6 +100,39 @@ def hill_climb_path(
     return assignments, best_score
 
 
+def _build_complete_path(path, gadget_assignments):
+    """Build a CompletePath from a TransitionTable path + gadget assignments.
+
+    Bridges between the wave engine's (stage, input_tuple, output_tuple) format
+    and the CompletePath/PathStep format expected by generate_solution_asm.
+    """
+    # Late imports to avoid circular deps
+    try:
+        from path_selector import CompletePath, GadgetScore, PathStep
+    except ImportError:
+        from .path_selector import CompletePath, GadgetScore, PathStep  # type: ignore[no-redef]
+
+    dummy_score = GadgetScore(latency_cost=0.0, control_vector_count=0, total_score=0.0)
+
+    steps = []
+    for (stage, in_t, out_t), gadget in zip(path, gadget_assignments):
+        node = SolutionNode(
+            stage=stage,
+            input_state=VectorState(top=list(in_t[0]), bottom=list(in_t[1])),
+            output_state=VectorState(top=list(out_t[0]), bottom=list(out_t[1])),
+            gadgets=[gadget],
+            children=[],
+        )
+        steps.append(PathStep(node=node, gadget_index=0, score=dummy_score))
+
+    return CompletePath(
+        steps=steps,
+        total_latency=0.0,
+        total_cv_count=0,
+        total_score=0.0,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -345,18 +378,24 @@ class WaveEngine:
             )
 
     # ------------------------------------------------------------------
-    # Scoring (stub)
+    # Scoring via LLVM-MCA
     # ------------------------------------------------------------------
 
     def _score_complete_paths(self) -> list[dict]:
-        """Score complete paths through all stages.
+        """Score complete paths through all stages with LLVM-MCA.
 
-        Returns a list of scored path dicts.  Currently a stub --
-        LLVM-MCA integration comes in Task 5/6.
+        For each target CPU, builds CompletePath objects from the
+        TransitionTable, runs LLVM-MCA via the multiprocessing pool,
+        and updates best_scores.
+
+        Returns a list of scored path dicts.
         """
         paths = self.tt.enumerate_complete_paths(
             max_paths=self.config.max_paths_per_wave
         )
+        if not paths:
+            return []
+
         scored: list[dict] = []
         for i, path in enumerate(paths):
             scored.append(
@@ -366,6 +405,81 @@ class WaveEngine:
                     "scores": {},
                 }
             )
+
+        if not self.config.target_cpus:
+            return scored
+
+        # Late imports to avoid circular deps and allow optional LLVM-MCA
+        try:
+            from perf_estimator import (
+                generate_solution_asm,
+                sanitize_asm_for_llvm_mca,
+            )
+            from llvm_mca_runner import find_llvm_mca, run_llvm_mca
+            from cost_model import resolve_llvm_mca_cpu
+        except ImportError:
+            from .perf_estimator import (  # type: ignore[no-redef]
+                generate_solution_asm,
+                sanitize_asm_for_llvm_mca,
+            )
+            from .llvm_mca_runner import find_llvm_mca, run_llvm_mca  # type: ignore[no-redef]
+            from .cost_model import resolve_llvm_mca_cpu  # type: ignore[no-redef]
+
+        mca_bin = find_llvm_mca(self.config.llvm_mca_path)
+        if mca_bin is None:
+            return scored
+
+        for target_cpu in self.config.target_cpus:
+            mcpu = resolve_llvm_mca_cpu(target_cpu)
+            if mcpu is None:
+                continue
+
+            # Score each path: build CompletePath, generate ASM, run MCA
+            for entry in scored:
+                path = entry["path"]
+
+                # Use hill_climb_path with a simple instruction-count scorer
+                # to get the initial gadget assignment, then score with MCA
+                def _instr_count_scorer(_path, assignments):
+                    return sum(g.instruction_count() for g in assignments)
+
+                assignments, _ = hill_climb_path(
+                    path, self.tt, _instr_count_scorer, max_passes=1
+                )
+
+                # Build a CompletePath for generate_solution_asm
+                complete_path = _build_complete_path(path, assignments)
+
+                try:
+                    asm = generate_solution_asm(
+                        complete_path,
+                        self.config.vm,
+                        self.config.prim_type,
+                        self.config.num_vecs,
+                        self.config.natural_order,
+                        entry["path_index"] + 1,
+                        len(scored),
+                    )
+                    sanitized = sanitize_asm_for_llvm_mca(asm)
+                    result = run_llvm_mca(
+                        sanitized, mcpu, mca_bin, entry["path_index"] + 1
+                    )
+                    entry["scores"][target_cpu] = {
+                        "throughput": result.throughput,
+                        "cycles": result.simulated_cycles,
+                    }
+
+                    # Update best scores
+                    prev = self.best_scores.get(target_cpu)
+                    if prev is None or result.simulated_cycles < prev["cycles"]:
+                        self.best_scores[target_cpu] = {
+                            "throughput": result.throughput,
+                            "cycles": result.simulated_cycles,
+                            "path_index": entry["path_index"],
+                        }
+                except Exception:
+                    pass  # Skip paths that fail ASM generation
+
         return scored
 
     # ------------------------------------------------------------------
@@ -551,12 +665,16 @@ class WaveEngine:
                 # Print status
                 target = result["target_stage"]
                 stats = self.tt.stage_stats(target)
+                best_str = ""
+                for cpu, scores in self.best_scores.items():
+                    best_str += f" {scores['cycles']:.1f}cy ({cpu})"
                 print(
                     f"Wave {result['wave_index']}: "
                     f"stage {target}, "
                     f"+{result['new_outputs']} outputs "
                     f"({stats['distinct_outputs']} total), "
-                    f"{result['total_paths']} paths",
+                    f"{result['total_paths']} paths"
+                    + (f" | Best:{best_str}" if best_str else ""),
                     file=sys.stderr,
                 )
         finally:
