@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import os
 import signal
-import sys
 from dataclasses import dataclass, field
 from multiprocessing import Pool
 
@@ -25,6 +24,7 @@ try:
         GadgetSynthesizer,
         _validate_gadget_worker,
     )
+    from .success_progress import SuccessProgress
     from .transition_table import TransitionTable
     from .utils import primitive_type, vector_machine, width_dict
     from .wave_checkpoint import WaveCheckpoint, WaveMasterConfig
@@ -39,6 +39,7 @@ except ImportError:
         GadgetSynthesizer,
         _validate_gadget_worker,
     )
+    from success_progress import SuccessProgress  # type: ignore[no-redef]
     from transition_table import TransitionTable  # type: ignore[no-redef]
     from utils import primitive_type, vector_machine, width_dict  # type: ignore[no-redef]
     from wave_checkpoint import WaveCheckpoint, WaveMasterConfig  # type: ignore[no-redef]
@@ -292,11 +293,15 @@ class WaveEngine:
         input_states: list[VectorState],
         budget_attempts: int,
         budget_outputs: int,
+        progress: SuccessProgress | None = None,
+        progress_task_id: int | None = None,
     ) -> int:
         """Run synthesis jobs for a stage within the given budget.
 
         Returns the number of new distinct outputs discovered.
         """
+        import queue as queue_mod
+
         jobs = self._make_jobs(stage_idx, input_states)
 
         # Limit to budget
@@ -316,31 +321,55 @@ class WaveEngine:
 
         tt.record_attempt(stage_idx, count=len(raw_jobs))
 
-        # Run via multiprocessing Pool
+        # Update progress bar total
+        if progress is not None and progress_task_id is not None:
+            progress.update(progress_task_id, total=len(raw_jobs))
+
+        # Run via multiprocessing Pool with async callbacks for progress
+        completion_queue: queue_mod.Queue = queue_mod.Queue()
+
         pool = Pool(
             processes=self.config.max_workers,
             maxtasksperchild=self.config.max_tasks_per_child,
         )
         try:
-            results = pool.map(_validate_gadget_worker, raw_jobs)
+            pending = len(raw_jobs)
+            for job in raw_jobs:
+                pool.apply_async(
+                    _validate_gadget_worker,
+                    (job,),
+                    callback=lambda r: completion_queue.put(("ok", r)),
+                    error_callback=lambda e: completion_queue.put(("err", e)),
+                )
+
+            completed = 0
+            while completed < pending:
+                if new_outputs >= budget_outputs:
+                    break
+
+                status, payload = completion_queue.get()
+                completed += 1
+
+                if status == "err":
+                    if progress is not None and progress_task_id is not None:
+                        progress.update(progress_task_id, advance=1, success=0)
+                    continue
+
+                gadget_results, input_state, _metadata, _ct, _st = payload
+                success = 1 if gadget_results else 0
+
+                if progress is not None and progress_task_id is not None:
+                    progress.update(progress_task_id, advance=1, success=success)
+
+                for gadget, output_state in gadget_results:
+                    out_t = output_state.as_tuple()
+                    is_new_output = out_t not in tt.get_unique_outputs(stage_idx)
+                    tt.add_transition(stage_idx, input_state, output_state, gadget)
+                    if is_new_output:
+                        new_outputs += 1
         finally:
             pool.terminate()
             pool.join()
-
-        # Process results
-        for result in results:
-            gadget_results, input_state, _metadata, _ct, _st = result
-            for gadget, output_state in gadget_results:
-                out_t = output_state.as_tuple()
-                is_new_output = out_t not in tt.get_unique_outputs(stage_idx)
-                tt.add_transition(stage_idx, input_state, output_state, gadget)
-                if is_new_output:
-                    new_outputs += 1
-
-                if new_outputs >= budget_outputs:
-                    break
-            if new_outputs >= budget_outputs:
-                break
 
         return new_outputs
 
@@ -348,7 +377,12 @@ class WaveEngine:
     # Forward propagation
     # ------------------------------------------------------------------
 
-    def _forward_propagate(self, from_stage: int) -> None:
+    def _forward_propagate(
+        self,
+        from_stage: int,
+        progress: SuccessProgress | None = None,
+        stage_task_ids: dict[int, int] | None = None,
+    ) -> None:
         """Propagate new outputs from from_stage through subsequent stages.
 
         Uses reduced budget (main / propagation_divisor).
@@ -372,9 +406,18 @@ class WaveEngine:
             output_tuples = [tup for tup, _vs in unforwarded]
             self.tt.mark_forwarded(prev_stage, output_tuples)
 
+            task_id = stage_task_ids.get(stage_idx) if stage_task_ids else None
+            if progress is not None and task_id is not None:
+                progress.start_task(task_id)
+
             # Run with reduced budget
             self._run_stage_budget(
-                stage_idx, input_states, reduced_attempts, reduced_outputs
+                stage_idx,
+                input_states,
+                reduced_attempts,
+                reduced_outputs,
+                progress=progress,
+                progress_task_id=task_id,
             )
 
     # ------------------------------------------------------------------
@@ -547,7 +590,11 @@ class WaveEngine:
     # Single wave
     # ------------------------------------------------------------------
 
-    def run_wave(self) -> dict:
+    def run_wave(
+        self,
+        progress: SuccessProgress | None = None,
+        stage_task_ids: dict[int, int] | None = None,
+    ) -> dict:
         """Execute one wave: target -> budget -> propagate -> score -> checkpoint.
 
         Returns a dict with wave results:
@@ -576,12 +623,23 @@ class WaveEngine:
             else:
                 input_states = []
 
+        # Update progress description for targeted stage
+        task_id = stage_task_ids.get(target) if stage_task_ids else None
+        if progress is not None and task_id is not None:
+            progress.start_task(task_id)
+            progress.update(
+                task_id,
+                description=f"[bold]Stage {target}[/bold] (wave {self.wave_count})",
+            )
+
         # Run the budget
         new_outputs = self._run_stage_budget(
             target,
             input_states,
             self.config.wave_attempts,
             self.config.wave_outputs,
+            progress=progress,
+            progress_task_id=task_id,
         )
 
         # Track consecutive zero-output budgets
@@ -592,7 +650,9 @@ class WaveEngine:
             sd.consecutive_zero_budgets = 0
 
         # Forward propagate new outputs
-        self._forward_propagate(target)
+        self._forward_propagate(
+            target, progress=progress, stage_task_ids=stage_task_ids
+        )
 
         # Score paths
         scored = self._score_complete_paths()
@@ -639,44 +699,65 @@ class WaveEngine:
 
         signal.signal(signal.SIGINT, _sigint_handler)
 
+        progress = SuccessProgress.create()
+
         try:
-            while True:
-                if self._interrupted:
-                    self._save_checkpoint()
-                    break
+            with progress:
+                # Create a progress task for each stage
+                stage_task_ids: dict[int, int] = {}
+                for s in range(len(self.all_stages)):
+                    tid = progress.add_task(
+                        f"Stage {s}",
+                        total=None,
+                        start=False,
+                        successes=0,
+                    )
+                    stage_task_ids[s] = tid
 
-                if (
-                    self.config.max_waves is not None
-                    and self.wave_count >= self.config.max_waves
-                ):
-                    break
+                while True:
+                    if self._interrupted:
+                        self._save_checkpoint()
+                        progress.console.print(
+                            "[yellow]Interrupted — checkpoint saved.[/yellow]"
+                        )
+                        break
 
-                # Check if all stages exhausted
-                if len(self.exhausted_stages) >= len(self.all_stages):
-                    break
+                    if (
+                        self.config.max_waves is not None
+                        and self.wave_count >= self.config.max_waves
+                    ):
+                        break
 
-                result = self.run_wave()
-                waves.append(result)
+                    # Check if all stages exhausted
+                    if len(self.exhausted_stages) >= len(self.all_stages):
+                        progress.console.print(
+                            "[green]All stages exhausted — search complete.[/green]"
+                        )
+                        break
 
-                if result["target_stage"] is None:
-                    # No targetable stage
-                    break
+                    result = self.run_wave(
+                        progress=progress,
+                        stage_task_ids=stage_task_ids,
+                    )
+                    waves.append(result)
 
-                # Print status
-                target = result["target_stage"]
-                stats = self.tt.stage_stats(target)
-                best_str = ""
-                for cpu, scores in self.best_scores.items():
-                    best_str += f" {scores['cycles']:.1f}cy ({cpu})"
-                print(
-                    f"Wave {result['wave_index']}: "
-                    f"stage {target}, "
-                    f"+{result['new_outputs']} outputs "
-                    f"({stats['distinct_outputs']} total), "
-                    f"{result['total_paths']} paths"
-                    + (f" | Best:{best_str}" if best_str else ""),
-                    file=sys.stderr,
-                )
+                    if result["target_stage"] is None:
+                        break
+
+                    # Print wave summary
+                    target = result["target_stage"]
+                    stats = self.tt.stage_stats(target)
+                    best_str = ""
+                    for cpu, scores in self.best_scores.items():
+                        best_str += f" {scores['cycles']:.1f}cy ({cpu})"
+                    progress.console.print(
+                        f"Wave {result['wave_index']}: "
+                        f"stage {target}, "
+                        f"+{result['new_outputs']} outputs "
+                        f"({stats['distinct_outputs']} total), "
+                        f"{result['total_paths']} paths"
+                        + (f" | [bold green]Best:{best_str}[/]" if best_str else ""),
+                    )
         finally:
             signal.signal(signal.SIGINT, original_sigint)
 
