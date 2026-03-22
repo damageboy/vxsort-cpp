@@ -226,6 +226,10 @@ class WaveEngine:
         self.exhausted_stages: set[int] = set()
         self.best_scores: dict[str, dict] = {}
 
+        # Stages with no untried jobs right now, but not truly exhausted
+        # (predecessors still active). Cleared when upstream produces new outputs.
+        self._stalled_stages: set[int] = set()
+
         # Cumulative progress counters per stage (for progress bars)
         self._stage_attempts: list[int] = [0] * len(self.all_stages)
         self._stage_successes: list[int] = [0] * len(self.all_stages)
@@ -314,13 +318,13 @@ class WaveEngine:
 
         if not jobs:
             # No untried (input, candidate) pairs for the current inputs.
-            # Only truly exhausted if all predecessor stages are too —
-            # otherwise new upstream outputs could create new inputs later.
+            # Truly exhausted only if all predecessor stages are too.
             predecessors_exhausted = all(
                 s in self.exhausted_stages for s in range(stage_idx)
             )
             if predecessors_exhausted:
                 self.exhausted_stages.add(stage_idx)
+                self._stalled_stages.discard(stage_idx)
                 if progress is not None and progress_task_id is not None:
                     cum = self._stage_attempts[stage_idx] or 1
                     progress.update(
@@ -329,6 +333,8 @@ class WaveEngine:
                         total=cum,
                         completed=cum,
                     )
+            else:
+                self._stalled_stages.add(stage_idx)
             return 0
 
         # Limit to budget
@@ -604,24 +610,34 @@ class WaveEngine:
         if self.wave_count == 0:
             return 0
 
-        target = self.tt.weakest_stage(exclude_exhausted=self.exhausted_stages)
+        excluded = self.exhausted_stages | self._stalled_stages
+        target = self.tt.weakest_stage(exclude_exhausted=excluded)
         if target is None:
+            # All stages are exhausted or stalled — nothing to do
             return None
 
         # Bubble-up: if stage is stuck after 2 consecutive zero-output budgets,
         # try going upstream to produce different inputs. Keep bubbling up
-        # until we find a non-exhausted stage or reach stage 0.
+        # until we find a non-excluded stage or reach stage 0.
         sd = self.tt.stages[target]
         if sd.consecutive_zero_budgets >= 2:
             upstream = target - 1
             while upstream >= 0:
-                if upstream not in self.exhausted_stages:
+                if upstream not in excluded:
                     return upstream
                 upstream -= 1
-            # All upstream stages exhausted too — mark target as exhausted
-            self.exhausted_stages.add(target)
-            # Re-select without the newly exhausted stage
-            return self.tt.weakest_stage(exclude_exhausted=self.exhausted_stages)
+            # All upstream stages exhausted/stalled too — mark target exhausted
+            # if predecessors are truly exhausted, otherwise stall it
+            predecessors_exhausted = all(
+                s in self.exhausted_stages for s in range(target)
+            )
+            if predecessors_exhausted:
+                self.exhausted_stages.add(target)
+            else:
+                self._stalled_stages.add(target)
+            # Re-select
+            excluded = self.exhausted_stages | self._stalled_stages
+            return self.tt.weakest_stage(exclude_exhausted=excluded)
 
         return target
 
@@ -720,6 +736,10 @@ class WaveEngine:
             sd.consecutive_zero_budgets += 1
         else:
             sd.consecutive_zero_budgets = 0
+            # New outputs at this stage means downstream stages may have
+            # new inputs — unstall them so they can be targeted again
+            for s in range(target + 1, len(self.all_stages)):
+                self._stalled_stages.discard(s)
 
         # Forward propagate new outputs
         self._forward_propagate(
