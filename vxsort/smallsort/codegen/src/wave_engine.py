@@ -226,6 +226,10 @@ class WaveEngine:
         self.exhausted_stages: set[int] = set()
         self.best_scores: dict[str, dict] = {}
 
+        # Cumulative progress counters per stage (for progress bars)
+        self._stage_attempts: list[int] = [0] * len(self.all_stages)
+        self._stage_successes: list[int] = [0] * len(self.all_stages)
+
         # Ctrl-C handling
         self._interrupted = False
 
@@ -312,13 +316,12 @@ class WaveEngine:
             # All candidates exhausted for this stage
             self.exhausted_stages.add(stage_idx)
             if progress is not None and progress_task_id is not None:
-                task = progress._tasks.get(progress_task_id)
-                total = task.total if task and task.total else 1
+                cum = self._stage_attempts[stage_idx] or 1
                 progress.update(
                     progress_task_id,
                     description=f"Stage {stage_idx} (exhausted)",
-                    total=total,
-                    completed=total,
+                    total=cum,
+                    completed=cum,
                 )
             return 0
 
@@ -329,9 +332,12 @@ class WaveEngine:
         tt = self.tt
         num_workers = self.config.max_workers or os.cpu_count() or 4
 
-        # Update progress bar total (may grow if we don't hit output limit)
+        # Update progress bar total to include this wave's jobs (cumulative)
         if progress is not None and progress_task_id is not None:
-            progress.update(progress_task_id, total=len(jobs))
+            progress.update(
+                progress_task_id,
+                total=self._stage_attempts[stage_idx] + len(jobs),
+            )
 
         # Submit in batches to avoid wasting work when output budget is hit.
         # Batch size = 2x workers so the pool stays saturated while we
@@ -381,6 +387,7 @@ class WaveEngine:
                 completed += 1
 
                 if status == "err":
+                    self._stage_attempts[stage_idx] += 1
                     if progress is not None and progress_task_id is not None:
                         progress.update(progress_task_id, advance=1, success=0)
                     continue
@@ -392,6 +399,9 @@ class WaveEngine:
                 cand_index = _metadata.get("candidate_index", -1)
                 tt.record_attempted_pair(stage_idx, input_state.as_tuple(), cand_index)
                 tt.record_attempt(stage_idx)
+
+                self._stage_attempts[stage_idx] += 1
+                self._stage_successes[stage_idx] += success
 
                 if progress is not None and progress_task_id is not None:
                     progress.update(progress_task_id, advance=1, success=success)
@@ -406,9 +416,14 @@ class WaveEngine:
                 if new_outputs >= budget_outputs or self._interrupted:
                     done = True
 
-            # Update progress to show actual completed count
+            # Shrink total to match cumulative actual attempts (don't overcount
+            # jobs that were never submitted due to early budget exit)
             if progress is not None and progress_task_id is not None:
-                progress.update(progress_task_id, total=completed, completed=completed)
+                progress.update(
+                    progress_task_id,
+                    total=self._stage_attempts[stage_idx],
+                    completed=self._stage_attempts[stage_idx],
+                )
 
         finally:
             pool.terminate()
@@ -799,13 +814,12 @@ class WaveEngine:
                     for s in self.exhausted_stages - prev_exhausted:
                         tid = stage_task_ids.get(s)
                         if tid is not None:
-                            task = progress._tasks.get(tid)
-                            total = task.total if task and task.total else 1
+                            cum = self._stage_attempts[s] or 1
                             progress.update(
                                 tid,
                                 description=f"Stage {s} (exhausted)",
-                                total=total,
-                                completed=total,
+                                total=cum,
+                                completed=cum,
                             )
 
                     if result["target_stage"] is None:
