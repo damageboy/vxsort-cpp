@@ -156,6 +156,7 @@ class WaveConfig:
     target_cpus: list[str] = field(default_factory=list)
     max_workers: int | None = None
     max_tasks_per_child: int | None = None
+    max_unique_outputs: int = 3
     depth2_threshold: float = 0.1
     smt2_dump_dir: str | None = None
     checkpoint_dir: str | None = None
@@ -269,7 +270,7 @@ class WaveEngine:
                 metadata = {
                     "input_state": input_state,
                     "stage_idx": stage_idx,
-                    "max_unique_outputs": 3,
+                    "max_unique_outputs": self.config.max_unique_outputs,
                     "candidate_index": cand_idx,
                 }
                 # Final natural-order stage must enforce strict lane order

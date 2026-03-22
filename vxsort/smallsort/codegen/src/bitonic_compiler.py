@@ -944,6 +944,7 @@ def main():
         ],
         max_workers=args.max_workers,
         max_tasks_per_child=max_tasks_per_child,
+        max_unique_outputs=args.max_gadget_solutions,
         depth2_threshold=args.depth2_threshold,
         smt2_dump_dir=smt2_dump_dir,
         checkpoint_dir=args.checkpoint_dir,
