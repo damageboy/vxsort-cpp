@@ -313,16 +313,22 @@ class WaveEngine:
         jobs = self._make_jobs(stage_idx, input_states)
 
         if not jobs:
-            # All candidates exhausted for this stage
-            self.exhausted_stages.add(stage_idx)
-            if progress is not None and progress_task_id is not None:
-                cum = self._stage_attempts[stage_idx] or 1
-                progress.update(
-                    progress_task_id,
-                    description=f"Stage {stage_idx} (exhausted)",
-                    total=cum,
-                    completed=cum,
-                )
+            # No untried (input, candidate) pairs for the current inputs.
+            # Only truly exhausted if all predecessor stages are too —
+            # otherwise new upstream outputs could create new inputs later.
+            predecessors_exhausted = all(
+                s in self.exhausted_stages for s in range(stage_idx)
+            )
+            if predecessors_exhausted:
+                self.exhausted_stages.add(stage_idx)
+                if progress is not None and progress_task_id is not None:
+                    cum = self._stage_attempts[stage_idx] or 1
+                    progress.update(
+                        progress_task_id,
+                        description=f"Stage {stage_idx} (exhausted)",
+                        total=cum,
+                        completed=cum,
+                    )
             return 0
 
         # Limit to budget
