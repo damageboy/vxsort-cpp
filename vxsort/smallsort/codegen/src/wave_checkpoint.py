@@ -20,10 +20,10 @@ from dataclasses import asdict, dataclass
 import zstandard as zstd
 
 try:
-    from .bitonic_types import InstructionSpec, PermutationGadget
+    from .bitonic_types import InstructionSpec, PermutationGadget, VectorState
     from .transition_table import TransitionTable
 except ImportError:
-    from bitonic_types import InstructionSpec, PermutationGadget  # type: ignore[no-redef]
+    from bitonic_types import InstructionSpec, PermutationGadget, VectorState  # type: ignore[no-redef]
     from transition_table import TransitionTable  # type: ignore[no-redef]
 
 # ---------------------------------------------------------------------------
@@ -265,8 +265,6 @@ class WaveCheckpoint:
         sd = tt.stages[stage_idx]
 
         # Restore transitions via add_transition for proper bookkeeping
-        from bitonic_types import VectorState  # local import to avoid circular
-
         for key_str, gadget_dicts in stage_data["transitions"].items():
             inp_t, out_t = _decode_transition_key(key_str)
             input_state = VectorState(top=list(inp_t[0]), bottom=list(inp_t[1]))

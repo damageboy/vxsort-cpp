@@ -38,6 +38,7 @@ class StageData:
 
     consecutive_zero_budgets: int = 0
     attempts: int = 0
+    dirty: bool = False  # Set when data changes; cleared after checkpoint save
 
     # Internal: set of sort_keys already stored per transition, for fast dedup
     _gadget_keys: dict[TransitionKey, set[tuple]] = field(
@@ -89,6 +90,7 @@ class TransitionTable:
 
         # New gadget -- store it
         sd._gadget_keys[trans_key].add(gk)
+        sd.dirty = True
 
         if trans_key not in sd.transitions:
             sd.transitions[trans_key] = []
@@ -106,13 +108,17 @@ class TransitionTable:
 
     def record_attempt(self, stage: int, count: int = 1) -> None:
         """Increment the attempt counter for a stage."""
-        self.stages[stage].attempts += count
+        sd = self.stages[stage]
+        sd.attempts += count
+        sd.dirty = True
 
     def record_attempted_pair(
         self, stage: int, input_tuple: StateTuple, candidate_index: int
     ) -> None:
         """Record that (input_tuple, candidate_index) has been attempted."""
-        self.stages[stage].attempted_pairs.add((input_tuple, candidate_index))
+        sd = self.stages[stage]
+        sd.attempted_pairs.add((input_tuple, candidate_index))
+        sd.dirty = True
 
     def was_attempted(
         self, stage: int, input_tuple: StateTuple, candidate_index: int

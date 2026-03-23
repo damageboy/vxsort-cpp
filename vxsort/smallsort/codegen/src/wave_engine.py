@@ -230,9 +230,9 @@ class WaveEngine:
         # (predecessors still active). Cleared when upstream produces new outputs.
         self._stalled_stages: set[int] = set()
 
-        # Cumulative progress counters per stage (for progress bars)
+        # Cumulative progress counters per stage (for progress bars).
+        # Derived from TransitionTable on resume.
         self._stage_attempts: list[int] = [0] * len(self.all_stages)
-        self._stage_successes: list[int] = [0] * len(self.all_stages)
 
         # Ctrl-C handling
         self._interrupted = False
@@ -389,7 +389,7 @@ class WaveEngine:
 
                 # Drain one result
                 try:
-                    status, payload = completion_queue.get(timeout=0.5)
+                    status, payload = completion_queue.get(timeout=0.05)
                 except queue_mod.Empty:
                     if self._interrupted:
                         break
@@ -413,7 +413,6 @@ class WaveEngine:
                 tt.record_attempt(stage_idx)
 
                 self._stage_attempts[stage_idx] += 1
-                self._stage_successes[stage_idx] += success
 
                 if progress is not None and progress_task_id is not None:
                     progress.update(progress_task_id, advance=1, success=success)
@@ -547,14 +546,12 @@ class WaveEngine:
             if mcpu is None:
                 continue
 
+            def _instr_count_scorer(_path, assignments):
+                return sum(g.instruction_count() for g in assignments)
+
             # Score each path: build CompletePath, generate ASM, run MCA
             for entry in scored:
                 path = entry["path"]
-
-                # Use hill_climb_path with a simple instruction-count scorer
-                # to get the initial gadget assignment, then score with MCA
-                def _instr_count_scorer(_path, assignments):
-                    return sum(g.instruction_count() for g in assignments)
 
                 assignments, _ = hill_climb_path(
                     path, self.tt, _instr_count_scorer, max_passes=1
@@ -590,8 +587,14 @@ class WaveEngine:
                             "cycles": result.simulated_cycles,
                             "path_index": entry["path_index"],
                         }
-                except Exception:
-                    pass  # Skip paths that fail ASM generation
+                except Exception as exc:
+                    import sys
+
+                    print(
+                        f"Warning: scoring path {entry['path_index']} "
+                        f"on {target_cpu} failed: {exc}",
+                        file=sys.stderr,
+                    )
 
         return scored
 
@@ -672,7 +675,9 @@ class WaveEngine:
         self._checkpoint.save_master(config)
 
         for i in range(len(self.all_stages)):
-            self._checkpoint.save_stage(i, self.tt)
+            if self.tt.stages[i].dirty:
+                self._checkpoint.save_stage(i, self.tt)
+                self.tt.stages[i].dirty = False
 
     # ------------------------------------------------------------------
     # Single wave
@@ -900,6 +905,10 @@ class WaveEngine:
             stage_path = os.path.join(checkpoint_dir, f"stage_{i:02d}.json.zst")
             if os.path.exists(stage_path):
                 ckpt.load_stage(i, self.tt)
+
+        # Restore cumulative progress counters from TransitionTable
+        for i in range(len(self.all_stages)):
+            self._stage_attempts[i] = self.tt.stages[i].attempts
 
     # ------------------------------------------------------------------
     # Export to legacy SolutionNode tree
