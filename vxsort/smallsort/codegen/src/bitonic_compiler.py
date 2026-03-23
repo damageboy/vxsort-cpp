@@ -207,7 +207,6 @@ def _load_solutions_from_checkpoint(
         retroactive_input=master.retroactive_input,
         wave_attempts=1,
         wave_outputs=1,
-        propagation_divisor=10,
         max_paths_per_wave=1,
         target_cpus=[],
         max_workers=1,
@@ -937,7 +936,6 @@ def main():
         retroactive_input=args.retroactive_input,
         wave_attempts=args.wave_attempts,
         wave_outputs=args.wave_outputs,
-        propagation_divisor=10,
         max_paths_per_wave=50,
         target_cpus=[
             c.strip() for c in args.target_cpu.split(",") if c.strip() != "generic"

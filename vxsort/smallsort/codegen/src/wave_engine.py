@@ -151,7 +151,6 @@ class WaveConfig:
     retroactive_input: bool
     wave_attempts: int = 10000
     wave_outputs: int = 100
-    propagation_divisor: int = 10
     max_paths_per_wave: int = 1000
     target_cpus: list[str] = field(default_factory=list)
     max_workers: int | None = None
@@ -457,15 +456,10 @@ class WaveEngine:
     ) -> None:
         """Propagate new outputs from from_stage through subsequent stages.
 
-        Uses reduced budget (main / propagation_divisor).
+        Each downstream stage runs all candidates against the new inputs
+        (inputs × candidates jobs). The output limit is uncapped — we want
+        every reachable output from the new inputs.
         """
-        reduced_attempts = max(
-            1, self.config.wave_attempts // self.config.propagation_divisor
-        )
-        reduced_outputs = max(
-            1, self.config.wave_outputs // self.config.propagation_divisor
-        )
-
         for stage_idx in range(from_stage + 1, len(self.all_stages)):
             # Get unforwarded outputs from the previous stage
             prev_stage = stage_idx - 1
@@ -482,12 +476,15 @@ class WaveEngine:
             if progress is not None and task_id is not None:
                 progress.start_task(task_id)
 
-            # Run with reduced budget
+            # Try all candidates × new inputs, but cap attempts at
+            # wave_attempts to keep per-stage wall-clock predictable.
+            # No output cap — every reachable output from new inputs is wanted.
+            natural_attempts = len(input_states) * len(self._candidates_with_index)
             self._run_stage_budget(
                 stage_idx,
                 input_states,
-                reduced_attempts,
-                reduced_outputs,
+                min(natural_attempts, self.config.wave_attempts),
+                natural_attempts,  # no output cap
                 progress=progress,
                 progress_task_id=task_id,
             )
