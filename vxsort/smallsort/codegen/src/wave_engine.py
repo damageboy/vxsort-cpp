@@ -230,6 +230,9 @@ class WaveEngine:
         # (predecessors still active). Cleared when upstream produces new outputs.
         self._stalled_stages: set[int] = set()
 
+        # Already-scored path keys (avoid re-scoring unchanged paths across waves)
+        self._scored_path_keys: set[tuple] = set()
+
         # Cumulative progress counters per stage (for progress bars).
         # Derived from TransitionTable on resume.
         self._stage_attempts: list[int] = [0] * len(self.all_stages)
@@ -494,19 +497,23 @@ class WaveEngine:
     # ------------------------------------------------------------------
 
     def _score_complete_paths(self) -> list[dict]:
-        """Score complete paths through all stages with LLVM-MCA.
+        """Score NEW complete paths through all stages with LLVM-MCA.
 
-        For each target CPU, builds CompletePath objects from the
-        TransitionTable, runs LLVM-MCA via the multiprocessing pool,
-        and updates best_scores.
+        Only enumerates paths not already scored (via exclude_paths).
+        Scores are computed in parallel using ThreadPoolExecutor.
 
-        Returns a list of scored path dicts.
+        Returns a list of scored path dicts (newly scored only).
         """
         paths = self.tt.enumerate_complete_paths(
-            max_paths=self.config.max_paths_per_wave
+            max_paths=self.config.max_paths_per_wave,
+            exclude_paths=self._scored_path_keys,
         )
         if not paths:
             return []
+
+        # Register these paths as scored so future waves skip them
+        for path in paths:
+            self._scored_path_keys.add(tuple(path))
 
         scored: list[dict] = []
         for i, path in enumerate(paths):
@@ -541,58 +548,82 @@ class WaveEngine:
         if mca_bin is None:
             return scored
 
+        def _instr_count_scorer(_path, assignments):
+            return sum(g.instruction_count() for g in assignments)
+
+        # Pre-build ASM for each path (CPU-independent, only depends on gadgets)
+        path_asm: dict[int, str] = {}
+        for entry in scored:
+            path = entry["path"]
+            assignments, _ = hill_climb_path(
+                path, self.tt, _instr_count_scorer, max_passes=1
+            )
+            complete_path = _build_complete_path(path, assignments)
+            try:
+                asm = generate_solution_asm(
+                    complete_path,
+                    self.config.vm,
+                    self.config.prim_type,
+                    self.config.num_vecs,
+                    self.config.natural_order,
+                    entry["path_index"] + 1,
+                    len(scored),
+                )
+                path_asm[entry["path_index"]] = sanitize_asm_for_llvm_mca(asm)
+            except Exception as exc:
+                import sys
+
+                print(
+                    f"Warning: ASM generation for path {entry['path_index']} "
+                    f"failed: {exc}",
+                    file=sys.stderr,
+                )
+
+        if not path_asm:
+            return scored
+
+        # Build all (path_index, target_cpu, mcpu, sanitized_asm) jobs
+        mca_jobs: list[tuple[int, str, str, str]] = []
         for target_cpu in self.config.target_cpus:
             mcpu = resolve_llvm_mca_cpu(target_cpu)
             if mcpu is None:
                 continue
+            for path_idx, sanitized in path_asm.items():
+                mca_jobs.append((path_idx, target_cpu, mcpu, sanitized))
 
-            def _instr_count_scorer(_path, assignments):
-                return sum(g.instruction_count() for g in assignments)
+        # Run LLVM-MCA in parallel (subprocess-bound, threads work fine)
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-            # Score each path: build CompletePath, generate ASM, run MCA
-            for entry in scored:
-                path = entry["path"]
+        def _run_one(job):
+            path_idx, target_cpu, mcpu, sanitized = job
+            result = run_llvm_mca(sanitized, mcpu, mca_bin, path_idx + 1)
+            return path_idx, target_cpu, result.throughput, result.simulated_cycles
 
-                assignments, _ = hill_climb_path(
-                    path, self.tt, _instr_count_scorer, max_passes=1
-                )
-
-                # Build a CompletePath for generate_solution_asm
-                complete_path = _build_complete_path(path, assignments)
-
+        num_threads = min(len(mca_jobs), self.config.max_workers or os.cpu_count() or 4)
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            futures = {executor.submit(_run_one, job): job for job in mca_jobs}
+            for future in as_completed(futures):
                 try:
-                    asm = generate_solution_asm(
-                        complete_path,
-                        self.config.vm,
-                        self.config.prim_type,
-                        self.config.num_vecs,
-                        self.config.natural_order,
-                        entry["path_index"] + 1,
-                        len(scored),
-                    )
-                    sanitized = sanitize_asm_for_llvm_mca(asm)
-                    result = run_llvm_mca(
-                        sanitized, mcpu, mca_bin, entry["path_index"] + 1
-                    )
-                    entry["scores"][target_cpu] = {
-                        "throughput": result.throughput,
-                        "cycles": result.simulated_cycles,
+                    path_idx, target_cpu, throughput, cycles = future.result()
+                    scored[path_idx]["scores"][target_cpu] = {
+                        "throughput": throughput,
+                        "cycles": cycles,
                     }
-
                     # Update best scores
                     prev = self.best_scores.get(target_cpu)
-                    if prev is None or result.simulated_cycles < prev["cycles"]:
+                    if prev is None or cycles < prev["cycles"]:
                         self.best_scores[target_cpu] = {
-                            "throughput": result.throughput,
-                            "cycles": result.simulated_cycles,
-                            "path_index": entry["path_index"],
+                            "throughput": throughput,
+                            "cycles": cycles,
+                            "path_index": path_idx,
                         }
                 except Exception as exc:
                     import sys
 
+                    job = futures[future]
                     print(
-                        f"Warning: scoring path {entry['path_index']} "
-                        f"on {target_cpu} failed: {exc}",
+                        f"Warning: LLVM-MCA scoring path {job[0]} "
+                        f"on {job[1]} failed: {exc}",
                         file=sys.stderr,
                     )
 
