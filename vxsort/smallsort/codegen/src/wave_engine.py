@@ -416,15 +416,22 @@ class WaveEngine:
 
                 self._stage_attempts[stage_idx] += 1
 
-                if progress is not None and progress_task_id is not None:
-                    progress.update(progress_task_id, advance=1, success=success)
-
+                new_unique_this_job = 0
                 for gadget, output_state in gadget_results:
                     out_t = output_state.as_tuple()
                     is_new_output = out_t not in tt.get_unique_outputs(stage_idx)
                     tt.add_transition(stage_idx, input_state, output_state, gadget)
                     if is_new_output:
                         new_outputs += 1
+                        new_unique_this_job += 1
+
+                if progress is not None and progress_task_id is not None:
+                    progress.update(
+                        progress_task_id,
+                        advance=1,
+                        success=success,
+                        unique=new_unique_this_job,
+                    )
 
                 if new_outputs >= budget_outputs or self._interrupted:
                     done = True
@@ -846,6 +853,7 @@ class WaveEngine:
                         total=None,
                         start=False,
                         successes=0,
+                        unique=0,
                     )
                     stage_task_ids[s] = tid
 

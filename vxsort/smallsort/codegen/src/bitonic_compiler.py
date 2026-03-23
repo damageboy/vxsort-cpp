@@ -90,7 +90,9 @@ def _run_verification(
     )
     progress.enable_memory_monitor()
     progress.start()
-    task_id = progress.add_task("Verifying paths", total=total_chunks, successes=0)
+    task_id = progress.add_task(
+        "Verifying paths", total=total_chunks, successes=0, unique=0
+    )
 
     failures = []
     paths_done = 0

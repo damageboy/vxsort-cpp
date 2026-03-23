@@ -177,7 +177,8 @@ class SuccessProgress(Progress):
         width: int = 60,
         success_style: str = "green",
         attempt_style: str = "yellow",
-        success_label: str = "Good",
+        success_label: str = "Valid",
+        unique_label: str = "Unique",
     ) -> SuccessProgress:
         """Factory method to create a SuccessProgress with standard columns."""
         return SuccessProgress(
@@ -189,10 +190,10 @@ class SuccessProgress(Progress):
                 success_style=success_style,
             ),
             MofNCompleteColumn(),
-            # Use success_label for the "Good" count
             TextColumn(
                 f"[{success_style}]{success_label}: {{task.fields[successes]}}[/]"
             ),
+            TextColumn(f"[cyan]{unique_label}: {{task.fields[unique]}}[/]"),
             TqdmColumn(),
             console=console,
             refresh_per_second=1,
@@ -200,10 +201,12 @@ class SuccessProgress(Progress):
 
     def update(self, task_id, *args, **kwargs):
         success_inc = kwargs.pop("success", 0)
+        unique_inc = kwargs.pop("unique", 0)
         with self._lock:
             task = self._tasks.get(task_id)
             if task:
                 task.fields["successes"] = task.fields.get("successes", 0) + success_inc
+                task.fields["unique"] = task.fields.get("unique", 0) + unique_inc
         super().update(task_id, *args, **kwargs)
 
 

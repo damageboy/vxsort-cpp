@@ -99,7 +99,7 @@ class TestSuccessProgressMemoryMonitor:
 
     def test_get_renderables_without_memory(self):
         progress = SuccessProgress.create()
-        progress.add_task("test", total=10, successes=0)
+        progress.add_task("test", total=10, successes=0, unique=0)
         renderables = list(progress.get_renderables())
         # Should only have the tasks table
         assert len(renderables) == 1
@@ -116,7 +116,7 @@ class TestSuccessProgressMemoryMonitor:
 
         progress = SuccessProgress.create()
         progress.enable_memory_monitor()
-        progress.add_task("test", total=10, successes=0)
+        progress.add_task("test", total=10, successes=0, unique=0)
         renderables = list(progress.get_renderables())
         # Tasks table + Rule + Text
         assert len(renderables) == 3
@@ -130,7 +130,7 @@ class TestSuccessProgressMemoryMonitor:
 
         progress = SuccessProgress.create()
         progress.enable_memory_monitor()
-        progress.add_task("test", total=10, successes=0)
+        progress.add_task("test", total=10, successes=0, unique=0)
         renderables = list(progress.get_renderables())
         # Only tasks table when snapshot is None
         assert len(renderables) == 1

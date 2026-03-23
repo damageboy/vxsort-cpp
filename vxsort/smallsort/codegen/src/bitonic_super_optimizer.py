@@ -589,6 +589,7 @@ class BitonicSuperVectorizer:
                     total=1,
                     completed=1,
                     successes=1,
+                    unique=0,
                 )
             else:
                 tid = progress.add_task(
@@ -596,6 +597,7 @@ class BitonicSuperVectorizer:
                     total=None,
                     start=False,
                     successes=0,
+                    unique=0,
                 )
             stage_task_ids[s] = tid
 
