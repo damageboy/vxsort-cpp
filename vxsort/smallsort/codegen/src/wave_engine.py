@@ -453,13 +453,17 @@ class WaveEngine:
         from_stage: int,
         progress: SuccessProgress | None = None,
         stage_task_ids: dict[int, int] | None = None,
-    ) -> None:
+    ) -> dict[int, int]:
         """Propagate new outputs from from_stage through subsequent stages.
 
         Each downstream stage runs all candidates against the new inputs
         (inputs × candidates jobs). The output limit is uncapped — we want
         every reachable output from the new inputs.
+
+        Returns dict mapping stage_idx -> new_outputs discovered.
         """
+        propagation_results: dict[int, int] = {}
+
         for stage_idx in range(from_stage + 1, len(self.all_stages)):
             # Get unforwarded outputs from the previous stage
             prev_stage = stage_idx - 1
@@ -480,7 +484,7 @@ class WaveEngine:
             # wave_attempts to keep per-stage wall-clock predictable.
             # No output cap — every reachable output from new inputs is wanted.
             natural_attempts = len(input_states) * len(self._candidates_with_index)
-            self._run_stage_budget(
+            new_outputs = self._run_stage_budget(
                 stage_idx,
                 input_states,
                 min(natural_attempts, self.config.wave_attempts),
@@ -488,6 +492,10 @@ class WaveEngine:
                 progress=progress,
                 progress_task_id=task_id,
             )
+            if new_outputs > 0:
+                propagation_results[stage_idx] = new_outputs
+
+        return propagation_results
 
     # ------------------------------------------------------------------
     # Scoring via LLVM-MCA
@@ -775,7 +783,7 @@ class WaveEngine:
                 self._stalled_stages.discard(s)
 
         # Forward propagate new outputs
-        self._forward_propagate(
+        propagation = self._forward_propagate(
             target, progress=progress, stage_task_ids=stage_task_ids
         )
 
@@ -791,6 +799,7 @@ class WaveEngine:
             "wave_index": self.wave_count,
             "target_stage": target,
             "new_outputs": new_outputs,
+            "propagation": propagation,
             "total_paths": len(scored),
         }
 
@@ -887,12 +896,18 @@ class WaveEngine:
                     # Print wave summary
                     target = result["target_stage"]
                     stats = self.tt.stage_stats(target)
+                    prop = result.get("propagation", {})
+                    prop_str = ""
+                    if prop:
+                        prop_parts = [f"s{s}+{n}" for s, n in sorted(prop.items())]
+                        prop_str = f" | propagated: {', '.join(prop_parts)}"
                     progress.console.print(
                         f"Wave {result['wave_index']}: "
-                        f"stage {target}, "
+                        f"stage {target} targeted, "
                         f"+{result['new_outputs']} outputs "
-                        f"({stats['distinct_outputs']} total), "
-                        f"{result['total_paths']} paths scored",
+                        f"({stats['distinct_outputs']} total)"
+                        f"{prop_str}"
+                        f" | {result['total_paths']} new paths scored",
                     )
 
                     # Update persistent status line with best scores per CPU
