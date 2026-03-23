@@ -386,23 +386,23 @@ class TestWeakestStage:
         tt = TransitionTable(num_stages=3)
         assert tt.weakest_stage() == 0
 
-    def test_returns_lowest_success_rate(self):
+    def test_returns_fewest_outputs(self):
         tt = TransitionTable(num_stages=3)
         inp = _vs([0, 1, 2, 3], [4, 5, 6, 7])
 
-        # Stage 0: 2 outputs from 4 attempts => 50%
+        # Stage 0: 2 outputs from 4 attempts
         tt.record_attempt(0, count=4)
         out0a = _vs([0, 1, 2, 3], [4, 5, 6, 7])
         out0b = _vs([1, 0, 3, 2], [5, 4, 7, 6])
         tt.add_transition(0, inp, out0a, _make_gadget(top_args={"ctrl": 1}))
         tt.add_transition(0, inp, out0b, _make_gadget(top_args={"ctrl": 2}))
 
-        # Stage 1: 1 output from 4 attempts => 25%
+        # Stage 1: 1 output from 4 attempts — fewest outputs, selected
         tt.record_attempt(1, count=4)
         out1a = _vs([0, 1, 2, 3], [4, 5, 6, 7])
         tt.add_transition(1, inp, out1a, _make_gadget(top_args={"ctrl": 3}))
 
-        # Stage 2: 3 outputs from 4 attempts => 75%
+        # Stage 2: 3 outputs from 4 attempts
         tt.record_attempt(2, count=4)
         out2a = _vs([0, 1, 2, 3], [4, 5, 6, 7])
         out2b = _vs([1, 0, 3, 2], [5, 4, 7, 6])
@@ -412,6 +412,22 @@ class TestWeakestStage:
         tt.add_transition(2, inp, out2c, _make_gadget(top_args={"ctrl": 6}))
 
         assert tt.weakest_stage() == 1
+
+    def test_tiebreak_by_success_rate(self):
+        """When two stages have the same output count, pick the one struggling more."""
+        tt = TransitionTable(num_stages=2)
+        inp = _vs([0, 1, 2, 3], [4, 5, 6, 7])
+        out_a = _vs([1, 0, 3, 2], [5, 4, 7, 6])
+
+        # Stage 0: 1 output from 10 attempts (10% rate)
+        tt.record_attempt(0, count=10)
+        tt.add_transition(0, inp, out_a, _make_gadget(top_args={"ctrl": 1}))
+
+        # Stage 1: 1 output from 100 attempts (1% rate) — same outputs, worse rate
+        tt.record_attempt(1, count=100)
+        tt.add_transition(1, inp, out_a, _make_gadget(top_args={"ctrl": 2}))
+
+        assert tt.weakest_stage() == 1  # same outputs, lower success rate
 
     def test_tie_breaks_by_earliest_stage(self):
         tt = TransitionTable(num_stages=3)

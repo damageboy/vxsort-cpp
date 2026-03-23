@@ -203,32 +203,33 @@ class TransitionTable:
         }
 
     def weakest_stage(self, exclude_exhausted: set[int] | None = None) -> int | None:
-        """Return the index of the stage with the lowest success rate.
+        """Return the stage most in need of exploration.
+
+        Selection criteria (in priority order):
+        1. Fewest distinct outputs (the bottleneck stage)
+        2. Lowest success rate (distinct_outputs / attempts) as tiebreaker
+        3. Earliest stage index as final tiebreaker
 
         Parameters
         ----------
         exclude_exhausted :
             Stage indices to skip.  If all stages are excluded (or the
             table is empty), returns ``None``.
-
-        Ties are broken by earliest stage index.  Stages with zero attempts
-        are treated as having a success rate of 0.0.
         """
         excluded = exclude_exhausted or set()
         best_idx: int | None = None
-        best_rate = float("inf")
+        best_key = (float("inf"), float("inf"))
 
         for i, sd in enumerate(self.stages):
             if i in excluded:
                 continue
 
-            if sd.attempts > 0:
-                rate = len(sd.unique_outputs) / sd.attempts
-            else:
-                rate = 0.0
+            n_outputs = len(sd.unique_outputs)
+            rate = n_outputs / sd.attempts if sd.attempts > 0 else 0.0
+            key = (n_outputs, rate)
 
-            if rate < best_rate:
-                best_rate = rate
+            if key < best_key:
+                best_key = key
                 best_idx = i
 
         return best_idx

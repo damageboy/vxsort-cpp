@@ -837,6 +837,12 @@ class WaveEngine:
 
         def _sigint_handler(_signum, _frame):
             self._interrupted = True
+            import sys
+
+            print(
+                "\nCtrl-C detected — finishing current work and saving checkpoint...",
+                file=sys.stderr,
+            )
 
         signal.signal(signal.SIGINT, _sigint_handler)
 
