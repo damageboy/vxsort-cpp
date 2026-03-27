@@ -293,11 +293,11 @@ class WaveCheckpoint:
     def load_scored_paths(self) -> list[dict]:
         """Load scored paths from compressed JSON.
 
-        Raises FileNotFoundError if scored_paths.json.zst does not exist.
+        Returns an empty list if the file does not exist.
         """
         path = self._scored_paths_path()
         if not os.path.exists(path):
-            raise FileNotFoundError(f"Scored paths not found: {path}")
+            return []
         with open(path, "rb") as f:
             raw = f.read()
         dctx = zstd.ZstdDecompressor()

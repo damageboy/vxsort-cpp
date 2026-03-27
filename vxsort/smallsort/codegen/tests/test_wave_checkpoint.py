@@ -336,6 +336,13 @@ class TestScoredPaths:
             data = json.loads(dctx.decompress(raw))
             assert data == [{"x": 1}]
 
+    def test_load_missing_returns_empty(self):
+        """load_scored_paths returns [] when file doesn't exist."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ckpt = WaveCheckpoint(tmpdir)
+            loaded = ckpt.load_scored_paths()
+            assert loaded == []
+
 
 # ---------------------------------------------------------------------------
 # Atomic write safety
@@ -481,11 +488,10 @@ class TestCheckpointDirectory:
             with pytest.raises(FileNotFoundError):
                 ckpt.load_stage(0, tt)
 
-    def test_load_scored_paths_missing_raises(self):
+    def test_load_scored_paths_missing_returns_empty(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             ckpt = WaveCheckpoint(tmpdir)
-            with pytest.raises(FileNotFoundError):
-                ckpt.load_scored_paths()
+            assert ckpt.load_scored_paths() == []
 
 
 # ---------------------------------------------------------------------------
