@@ -801,7 +801,7 @@ class WaveEngine:
                 for s in range(len(self.all_stages)):
                     tid = progress.add_task(
                         f"Stage {s}",
-                        total=None,
+                        total=self._stage_attempts[s],
                         start=False,
                         successes=0,
                         unique=0,
@@ -840,9 +840,20 @@ class WaveEngine:
                     target_outputs_before = self.tt.unique_output_count(target)
                     self._generate_jobs_for_stage(target)
 
+                    # Update progress totals for all stages with new pending work
+                    for s in range(len(self.all_stages)):
+                        total = (
+                            self._stage_attempts[s]
+                            + len(self._pending_jobs[s])
+                            + self._in_flight[s]
+                        )
+                        if total > 0:
+                            tid = stage_task_ids[s]
+                            progress.start_task(tid)
+                            progress.update(tid, total=total)
+
                     task_id = stage_task_ids.get(target)
                     if task_id is not None:
-                        progress.start_task(task_id)
                         progress.update(
                             task_id,
                             description=(
@@ -864,6 +875,19 @@ class WaveEngine:
                         drained = self._drain_results(
                             completion_queue, progress, stage_task_ids
                         )
+
+                        # Update progress totals (drain may have enqueued downstream)
+                        if drained > 0:
+                            for s in range(len(self.all_stages)):
+                                total = (
+                                    self._stage_attempts[s]
+                                    + len(self._pending_jobs[s])
+                                    + self._in_flight[s]
+                                )
+                                tid = stage_task_ids[s]
+                                if total > 0:
+                                    progress.start_task(tid)
+                                    progress.update(tid, total=total)
 
                         # Track active stages
                         for s in range(len(self.all_stages)):

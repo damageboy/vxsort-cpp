@@ -1212,7 +1212,11 @@ class GadgetSynthesizer:
             for dual in self.dual_intrinsics:
                 result.append(dual)
                 if not dual.isomorphic_order:
-                    result.append(self._swap_register_operands(dual))
+                    reg_keys = [
+                        k for k, v in dual.operands.items() if isinstance(v, InputRef)
+                    ]
+                    if len(reg_keys) == 2:
+                        result.append(self._swap_register_operands(dual))
             return result
 
         if depth == 2:
