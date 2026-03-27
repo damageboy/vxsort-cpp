@@ -300,3 +300,70 @@ class TransitionTable:
 
         _dfs(0, [], start)
         return results
+
+    def trace_paths_ending_with(
+        self,
+        stage: int,
+        input_tuple: StateTuple,
+        output_tuple: StateTuple,
+    ) -> list[list[tuple[int, StateTuple, StateTuple]]]:
+        """Return all complete paths that end with a specific transition.
+
+        Performs a backwards DFS from the anchor transition
+        ``(stage, input_tuple, output_tuple)`` through stages ``stage-1``
+        down to ``0``, collecting every combination of predecessor transitions
+        that forms a complete prefix.
+
+        Parameters
+        ----------
+        stage :
+            The stage index of the anchor (terminal) transition.
+        input_tuple :
+            The input state of the anchor transition.
+        output_tuple :
+            The output state of the anchor transition.
+
+        Returns
+        -------
+        A list of complete paths.  Each path is a list of
+        ``(stage_index, input_tuple, output_tuple)`` triples ordered from
+        stage 0 through ``stage`` (inclusive).  Returns an empty list if the
+        anchor transition does not exist or if no predecessor chain reaches
+        stage 0.
+        """
+        # Verify the anchor exists
+        anchor_key: TransitionKey = (input_tuple, output_tuple)
+        if anchor_key not in self.stages[stage].transitions:
+            return []
+
+        # Base case: the anchor is already at stage 0
+        if stage == 0:
+            return [[(0, input_tuple, output_tuple)]]
+
+        results: list[list[tuple[int, StateTuple, StateTuple]]] = []
+
+        # partial_suffix grows in reverse order (newest step first) during the
+        # backwards DFS and is reversed at the point a complete path is found.
+        def _dfs_back(
+            current_stage: int,
+            required_output: StateTuple,
+            suffix: list[tuple[int, StateTuple, StateTuple]],
+        ) -> None:
+            if current_stage < 0:
+                # Assembled a complete chain — reverse to get chronological order
+                results.append(list(reversed(suffix)))
+                return
+
+            sd = self.stages[current_stage]
+            for in_t, out_t in sd.transitions:
+                if out_t != required_output:
+                    continue
+                suffix.append((current_stage, in_t, out_t))
+                _dfs_back(current_stage - 1, in_t, suffix)
+                suffix.pop()
+
+        # Seed the recursion with the anchor step already in the suffix, then
+        # ask for predecessors at stage-1 that produce input_tuple as output.
+        anchor_step = (stage, input_tuple, output_tuple)
+        _dfs_back(stage - 1, input_tuple, [anchor_step])
+        return results

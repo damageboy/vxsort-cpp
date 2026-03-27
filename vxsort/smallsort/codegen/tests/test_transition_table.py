@@ -728,3 +728,155 @@ class TestEnumerateCompletePaths:
         paths = tt.enumerate_complete_paths(start=inp1.as_tuple())
         assert len(paths) == 1
         assert paths[0][0][1] == inp1.as_tuple()
+
+
+# ---------------------------------------------------------------------------
+# trace_paths_ending_with
+# ---------------------------------------------------------------------------
+
+
+class TestTracePathsEndingWith:
+    """trace_paths_ending_with() backward DFS from a terminal transition."""
+
+    def test_single_stage_returns_one_path(self):
+        """Single-stage table: the only complete path is the anchor step itself."""
+        tt = TransitionTable(num_stages=1)
+        inp = _vs([3, 2, 1, 0], [7, 6, 5, 4])
+        out = _vs([0, 1, 2, 3], [4, 5, 6, 7])
+        tt.add_transition(0, inp, out, _make_gadget())
+
+        paths = tt.trace_paths_ending_with(0, inp.as_tuple(), out.as_tuple())
+        assert len(paths) == 1
+        assert len(paths[0]) == 1
+        assert paths[0][0] == (0, inp.as_tuple(), out.as_tuple())
+
+    def test_single_stage_unknown_transition_returns_empty(self):
+        """If the anchor transition doesn't exist, return empty list."""
+        tt = TransitionTable(num_stages=1)
+        inp = _vs([3, 2, 1, 0], [7, 6, 5, 4])
+        out = _vs([0, 1, 2, 3], [4, 5, 6, 7])
+        other = _vs([1, 0, 3, 2], [5, 4, 7, 6])
+
+        tt.add_transition(0, inp, out, _make_gadget())
+
+        # Query a non-existent transition
+        paths = tt.trace_paths_ending_with(0, inp.as_tuple(), other.as_tuple())
+        assert paths == []
+
+    def test_2stage_linear(self):
+        """Simple 2-stage linear chain returns one complete path."""
+        tt = TransitionTable(num_stages=2)
+        s0 = _vs([3, 2, 1, 0], [7, 6, 5, 4])
+        s1 = _vs([0, 2, 1, 3], [4, 6, 5, 7])
+        s2 = _vs([0, 1, 2, 3], [4, 5, 6, 7])
+
+        g1 = _make_gadget(top_args={"ctrl": 0x1B})
+        g2 = _make_gadget(top_args={"ctrl": 0xFF})
+
+        tt.add_transition(0, s0, s1, g1)
+        tt.add_transition(1, s1, s2, g2)
+
+        paths = tt.trace_paths_ending_with(1, s1.as_tuple(), s2.as_tuple())
+        assert len(paths) == 1
+        path = paths[0]
+        assert len(path) == 2
+        assert path[0] == (0, s0.as_tuple(), s1.as_tuple())
+        assert path[1] == (1, s1.as_tuple(), s2.as_tuple())
+
+    def test_2stage_two_predecessors(self):
+        """Two different stage-0 transitions feed the same stage-1 anchor."""
+        tt = TransitionTable(num_stages=2)
+        s0a = _vs([3, 2, 1, 0], [7, 6, 5, 4])
+        s0b = _vs([1, 0, 3, 2], [5, 4, 7, 6])
+        s1 = _vs([0, 2, 1, 3], [4, 6, 5, 7])
+        s2 = _vs([0, 1, 2, 3], [4, 5, 6, 7])
+
+        g1 = _make_gadget(top_args={"ctrl": 1})
+        g2 = _make_gadget(top_args={"ctrl": 2})
+        g3 = _make_gadget(top_args={"ctrl": 3})
+
+        tt.add_transition(0, s0a, s1, g1)
+        tt.add_transition(0, s0b, s1, g2)
+        tt.add_transition(1, s1, s2, g3)
+
+        paths = tt.trace_paths_ending_with(1, s1.as_tuple(), s2.as_tuple())
+        assert len(paths) == 2
+        last_steps = [p[-1] for p in paths]
+        assert all(step == (1, s1.as_tuple(), s2.as_tuple()) for step in last_steps)
+        first_inputs = {p[0][1] for p in paths}
+        assert first_inputs == {s0a.as_tuple(), s0b.as_tuple()}
+
+    def test_3stage_linear(self):
+        """3-stage linear chain returns one complete path of 3 steps."""
+        tt = TransitionTable(num_stages=3)
+        s0 = _vs([3, 2, 1, 0], [7, 6, 5, 4])
+        s1 = _vs([2, 3, 0, 1], [6, 7, 4, 5])
+        s2 = _vs([0, 1, 2, 3], [6, 7, 4, 5])
+        s3 = _vs([0, 1, 2, 3], [4, 5, 6, 7])
+
+        g1 = _make_gadget(top_args={"ctrl": 1})
+        g2 = _make_gadget(top_args={"ctrl": 2})
+        g3 = _make_gadget(top_args={"ctrl": 3})
+
+        tt.add_transition(0, s0, s1, g1)
+        tt.add_transition(1, s1, s2, g2)
+        tt.add_transition(2, s2, s3, g3)
+
+        paths = tt.trace_paths_ending_with(2, s2.as_tuple(), s3.as_tuple())
+        assert len(paths) == 1
+        path = paths[0]
+        assert len(path) == 3
+        assert path[0] == (0, s0.as_tuple(), s1.as_tuple())
+        assert path[1] == (1, s1.as_tuple(), s2.as_tuple())
+        assert path[2] == (2, s2.as_tuple(), s3.as_tuple())
+
+    def test_no_predecessor_at_previous_stage_returns_empty(self):
+        """If stage-1 has the anchor but no stage-0 feeds its input, return empty."""
+        tt = TransitionTable(num_stages=2)
+        s1 = _vs([0, 2, 1, 3], [4, 6, 5, 7])
+        s2 = _vs([0, 1, 2, 3], [4, 5, 6, 7])
+
+        g2 = _make_gadget(top_args={"ctrl": 0xFF})
+        # Only add the stage-1 transition — no stage-0 transition
+        tt.add_transition(1, s1, s2, g2)
+
+        paths = tt.trace_paths_ending_with(1, s1.as_tuple(), s2.as_tuple())
+        assert paths == []
+
+    def test_anchor_at_intermediate_stage_traces_partial(self):
+        """Anchor at stage 1 of a 3-stage table traces only stages 0-1."""
+        tt = TransitionTable(num_stages=3)
+        s0 = _vs([3, 2, 1, 0], [7, 6, 5, 4])
+        s1 = _vs([2, 3, 0, 1], [6, 7, 4, 5])
+        s2 = _vs([0, 1, 2, 3], [6, 7, 4, 5])
+        s3 = _vs([0, 1, 2, 3], [4, 5, 6, 7])
+
+        g1 = _make_gadget(top_args={"ctrl": 1})
+        g2 = _make_gadget(top_args={"ctrl": 2})
+        g3 = _make_gadget(top_args={"ctrl": 3})
+
+        tt.add_transition(0, s0, s1, g1)
+        tt.add_transition(1, s1, s2, g2)
+        tt.add_transition(2, s2, s3, g3)
+
+        # Anchor at stage 1 — result covers stages 0 and 1 only
+        paths = tt.trace_paths_ending_with(1, s1.as_tuple(), s2.as_tuple())
+        assert len(paths) == 1
+        assert len(paths[0]) == 2
+        assert paths[0][0] == (0, s0.as_tuple(), s1.as_tuple())
+        assert paths[0][1] == (1, s1.as_tuple(), s2.as_tuple())
+
+    def test_multiple_gadgets_same_transition_counts_as_one_path(self):
+        """Multiple gadgets for the same transition produce a single path."""
+        tt = TransitionTable(num_stages=1)
+        inp = _vs([3, 2, 1, 0], [7, 6, 5, 4])
+        out = _vs([0, 1, 2, 3], [4, 5, 6, 7])
+
+        g1 = _make_gadget(top_args={"ctrl": 0x1B})
+        g2 = _make_gadget(top_args={"ctrl": 0xFF})
+
+        tt.add_transition(0, inp, out, g1)
+        tt.add_transition(0, inp, out, g2)
+
+        paths = tt.trace_paths_ending_with(0, inp.as_tuple(), out.as_tuple())
+        assert len(paths) == 1
