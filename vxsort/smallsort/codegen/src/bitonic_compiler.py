@@ -779,12 +779,19 @@ def main():
         help="Path to nasm binary for assembly verification (used with --estimate)",
     )
     parser.add_argument(
+        "--llvm-mca-cmd",
+        type=str,
+        default=None,
+        metavar="CMD",
+        help="Command to run llvm-mca (e.g. 'docker run -i silkeh/clang /usr/bin/llvm-mca'). "
+        "If not specified, searches Homebrew locations and PATH.",
+    )
+    parser.add_argument(
         "--llvm-mca-path",
         type=str,
         default=None,
-        metavar="PATH",
-        help="Explicit path to the llvm-mca binary. "
-        "If not specified, searches Homebrew locations and PATH.",
+        dest="llvm_mca_path_deprecated",
+        help="Deprecated: use --llvm-mca-cmd instead.",
     )
     parser.add_argument(
         "--estimate-only",
@@ -852,6 +859,11 @@ def main():
 
     # Convert 0 → None (Pool interprets None as "no limit")
     max_tasks_per_child = args.max_tasks_per_child or None
+
+    # Resolve --llvm-mca-cmd / --llvm-mca-path (deprecated)
+    args.llvm_mca_path = getattr(args, "llvm_mca_cmd", None) or getattr(
+        args, "llvm_mca_path_deprecated", None
+    )
 
     # --list-cpus mode: print supported architectures and exit
     if args.list_cpus:
@@ -948,7 +960,7 @@ def main():
         depth2_threshold=args.depth2_threshold,
         smt2_dump_dir=smt2_dump_dir,
         checkpoint_dir=args.checkpoint_dir,
-        llvm_mca_path=getattr(args, "llvm_mca_path", None),
+        llvm_mca_path=args.llvm_mca_path,
         max_waves=args.max_waves,
         top_k=args.top_k or 10,
     )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -22,13 +23,15 @@ class McaResult:
     warnings: list[str] = field(default_factory=list)
 
 
-def find_llvm_mca(explicit_path: str | None) -> str | None:
-    """Locate the llvm-mca binary.
+def find_llvm_mca(explicit_cmd: str | None) -> str | None:
+    """Locate the llvm-mca binary or command.
 
-    Checks explicit_path first, then common Homebrew locations, then PATH.
+    If *explicit_cmd* is provided, returns it directly (may be a full
+    command like ``"docker run -i silkeh/clang /usr/bin/llvm-mca"``).
+    Otherwise searches common locations and PATH.
     """
-    if explicit_path:
-        return explicit_path
+    if explicit_cmd:
+        return explicit_cmd
 
     # Common Homebrew locations on macOS (Apple Silicon and Intel)
     for homebrew_path in [
@@ -79,7 +82,7 @@ def _parse_mca_json(
 def run_llvm_mca(
     asm_text: str,
     mcpu: str,
-    llvm_mca_path: str,
+    llvm_mca_cmd: str,
     solution_index: int,
     output_dir: str | None = None,
 ) -> McaResult:
@@ -88,39 +91,38 @@ def run_llvm_mca(
     Args:
         asm_text: Intel-syntax assembly text (with LLVM-MCA markers).
         mcpu: CPU model for -mcpu= flag.
-        llvm_mca_path: Path to the llvm-mca binary.
+        llvm_mca_cmd: Command to run llvm-mca.  Can be a plain path or a
+            full command string like
+            ``"docker run -i silkeh/clang /usr/bin/llvm-mca"``.
+            Split via :func:`shlex.split`.
         solution_index: 1-based solution index for reporting.
         output_dir: Optional directory for saving .s input files.
 
     Returns:
         McaResult with throughput and simulated cycle estimates.
     """
-    # Write asm to temp file
+    base_parts = shlex.split(llvm_mca_cmd)
+
+    # Save asm to file for debugging if output_dir specified
+    asm_path = ""
     if output_dir:
         asm_path = str(Path(output_dir) / f"solution_{solution_index:03d}.s")
         Path(asm_path).write_text(asm_text)
-    else:
-        tmp = tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".s",
-            prefix=f"vxsort_mca_{solution_index:03d}_",
-            delete=False,
-        )
-        tmp.write(asm_text)
-        tmp.close()
-        asm_path = tmp.name
 
     base_cmd = [
-        llvm_mca_path,
+        *base_parts,
         "-march=x86-64",
         f"-mcpu={mcpu}",
         "-x86-asm-syntax=intel",
     ]
-    json_cmd = [*base_cmd, "--json", asm_path]
+
+    # Pipe via stdin (works with docker, local binary, etc.)
+    json_cmd = [*base_cmd, "--json"]
 
     try:
         result = subprocess.run(
             json_cmd,
+            input=asm_text,
             capture_output=True,
             text=True,
             timeout=30,
@@ -132,7 +134,8 @@ def run_llvm_mca(
                 throughput=-1.0,
                 simulated_cycles=-1.0,
                 warnings=[
-                    f"llvm-mca failed (rc={result.returncode}): {result.stderr.strip()}"
+                    f"llvm-mca failed (rc={result.returncode}): "
+                    f"{result.stderr.strip()}"
                 ],
             )
 
@@ -142,7 +145,7 @@ def run_llvm_mca(
         # Run again without --json for full text analysis
         mca_result.analysis_path = _run_full_analysis(
             base_cmd,
-            asm_path,
+            asm_text,
             output_dir,
             solution_index,
             mca_result.warnings,
@@ -156,7 +159,7 @@ def run_llvm_mca(
             asm_path=asm_path,
             throughput=-1.0,
             simulated_cycles=-1.0,
-            warnings=[f"llvm-mca not found at '{llvm_mca_path}'"],
+            warnings=[f"llvm-mca command not found: '{base_parts[0]}'"],
         )
     except json.JSONDecodeError as e:
         return McaResult(
@@ -178,16 +181,17 @@ def run_llvm_mca(
 
 def _run_full_analysis(
     base_cmd: list[str],
-    asm_path: str,
+    asm_text: str,
     output_dir: str | None,
     solution_index: int,
     warnings: list[str],
 ) -> str:
     """Run llvm-mca without --json and save the full text analysis."""
-    text_cmd = [*base_cmd, "-timeline", asm_path]
+    text_cmd = [*base_cmd, "-timeline"]
     try:
         result = subprocess.run(
             text_cmd,
+            input=asm_text,
             capture_output=True,
             text=True,
             timeout=30,
@@ -204,9 +208,17 @@ def _run_full_analysis(
             analysis_path = str(
                 Path(output_dir) / f"solution_{solution_index:03d}_analysis.txt"
             )
+            Path(analysis_path).write_text(analysis_text)
         else:
-            analysis_path = str(Path(asm_path).with_suffix(".analysis.txt"))
-        Path(analysis_path).write_text(analysis_text)
+            tmp = tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".analysis.txt",
+                prefix=f"vxsort_mca_{solution_index:03d}_",
+                delete=False,
+            )
+            tmp.write(analysis_text)
+            tmp.close()
+            analysis_path = tmp.name
         return analysis_path
 
     except (subprocess.TimeoutExpired, OSError) as e:
