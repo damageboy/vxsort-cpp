@@ -465,12 +465,20 @@ class WaveEngine:
 
                     # On-the-fly scoring: new last-stage transition
                     if stage_idx == last_stage:
-                        self._score_new_paths_for_transition(
-                            stage_idx,
-                            input_state.as_tuple(),
-                            out_t,
-                            progress,
-                        )
+                        try:
+                            self._score_new_paths_for_transition(
+                                stage_idx,
+                                input_state.as_tuple(),
+                                out_t,
+                                progress,
+                            )
+                        except Exception as score_exc:
+                            import sys
+
+                            print(
+                                f"Warning: on-the-fly scoring failed: {score_exc}",
+                                file=sys.stderr,
+                            )
 
             if progress and stage_task_ids:
                 tid = stage_task_ids.get(stage_idx)
