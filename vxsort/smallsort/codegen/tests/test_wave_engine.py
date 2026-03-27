@@ -80,20 +80,14 @@ class TestFirstWaveDiscoveries:
     """First wave should discover transitions at stage 0."""
 
     def test_first_wave_discovers_transitions(self):
-        config = _fast_config(wave_attempts=500, wave_outputs=50)
+        config = _fast_config(wave_attempts=500, wave_outputs=50, max_waves=1)
         engine = WaveEngine(config)
+        engine.run()
 
-        result = engine.run_wave()
-
-        assert result["wave_index"] == 0
-        assert result["target_stage"] == 0
-
-        # Stage 0 should have at least one discovered output
         stage0_outputs = engine.tt.unique_output_count(0)
         assert (
             stage0_outputs > 0
         ), f"Expected stage 0 to have discoveries, got {stage0_outputs}"
-        assert result["new_outputs"] > 0
 
 
 class TestMultiWaveProgress:
@@ -107,7 +101,6 @@ class TestMultiWaveProgress:
 
         assert summary["wave_count"] == 3
         assert not summary["interrupted"]
-        assert len(summary["waves"]) == 3
 
         # Stage 0 should have outputs after 3 waves
         stage0_outputs = engine.tt.unique_output_count(0)

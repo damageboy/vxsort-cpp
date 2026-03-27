@@ -1,15 +1,18 @@
 """WaveEngine: iterative wave-based synthesis orchestrator.
 
-Replaces the pipelined BFS in ``bitonic_super_optimizer.py`` with a
-budget-controlled, wave-oriented approach.  Each wave targets the
-weakest stage, runs a fixed budget of synthesis jobs, forward-propagates
-new outputs to downstream stages, and optionally checkpoints.
+Each wave targets the weakest stage, runs a fixed budget of synthesis
+jobs via a long-lived shared process pool, forward-propagates new
+outputs to downstream stages as they appear, and checkpoints on each
+stage completion within the wave.  Scoring happens on the fly as
+last-stage transitions form complete paths.
 """
 
 from __future__ import annotations
 
 import os
 import signal
+import time
+from collections import deque
 from dataclasses import dataclass, field
 from multiprocessing import Pool
 
@@ -170,11 +173,14 @@ class WaveConfig:
 
 
 class WaveEngine:
-    """Iterative wave-based synthesis engine.
+    """Iterative wave-based synthesis engine with continuous pool feeding.
 
-    Each wave targets the weakest stage (by success rate), runs a fixed
-    budget of synthesis jobs, forward-propagates new outputs through
-    subsequent stages, and optionally checkpoints state.
+    A single long-lived process pool is shared across the entire run.
+    Waves drive stage targeting and budgeting.  Within a wave, per-stage
+    pending deques feed the pool in stage-priority order so downstream
+    stages fill idle capacity during straggler Z3 jobs.  Checkpoints fire
+    when a stage completes.  Scoring fires immediately when a new
+    last-stage transition forms a complete path.
     """
 
     def __init__(self, config: WaveConfig) -> None:
@@ -226,14 +232,12 @@ class WaveEngine:
         self.best_scores: dict[str, dict] = {}
 
         # Stages with no untried jobs right now, but not truly exhausted
-        # (predecessors still active). Cleared when upstream produces new outputs.
         self._stalled_stages: set[int] = set()
 
-        # Already-scored path keys (avoid re-scoring unchanged paths across waves)
+        # Already-scored path keys (avoid re-scoring)
         self._scored_path_keys: set[tuple] = set()
 
-        # Cumulative progress counters per stage (for progress bars).
-        # Derived from TransitionTable on resume.
+        # Cumulative progress counters per stage (for progress bars)
         self._stage_attempts: list[int] = [0] * len(self.all_stages)
 
         # Ctrl-C handling
@@ -243,6 +247,15 @@ class WaveEngine:
         self._checkpoint: WaveCheckpoint | None = None
         if config.checkpoint_dir is not None:
             self._checkpoint = WaveCheckpoint(config.checkpoint_dir)
+
+        # Per-stage pending job deques (fed to the shared pool)
+        self._pending_jobs: list[deque] = [deque() for _ in range(len(self.all_stages))]
+
+        # Per-stage in-flight job counters
+        self._in_flight: list[int] = [0] * len(self.all_stages)
+
+        # Accumulated scored paths across entire run
+        self._all_scored_paths: list[dict] = []
 
     def _create_initial_state(self) -> VectorState:
         """Create initial vector state from first stage comparison pairs."""
@@ -255,7 +268,7 @@ class WaveEngine:
         return VectorState(top=top, bottom=bottom)
 
     # ------------------------------------------------------------------
-    # Job creation and execution
+    # Job creation
     # ------------------------------------------------------------------
 
     def _make_jobs(
@@ -301,241 +314,264 @@ class WaveEngine:
 
         return jobs
 
-    def _run_stage_budget(
-        self,
-        stage_idx: int,
-        input_states: list[VectorState],
-        budget_attempts: int,
-        budget_outputs: int,
-        progress: SuccessProgress | None = None,
-        progress_task_id: int | None = None,
-    ) -> int:
-        """Run synthesis jobs for a stage within the given budget.
+    # ------------------------------------------------------------------
+    # Job generation and enqueueing
+    # ------------------------------------------------------------------
 
-        Returns the number of new distinct outputs discovered.
+    def _generate_jobs_for_stage(self, target_stage: int | None) -> None:
+        """Generate up to wave_attempts jobs for a stage and enqueue them."""
+        if target_stage is None:
+            return
+
+        if target_stage == 0:
+            input_states = [self.initial_state]
+        else:
+            prev_outputs = self.tt.get_unique_outputs(target_stage - 1)
+            input_states = list(prev_outputs.values()) if prev_outputs else []
+
+        if not input_states:
+            predecessors_exhausted = all(
+                s in self.exhausted_stages for s in range(target_stage)
+            )
+            if predecessors_exhausted:
+                self.exhausted_stages.add(target_stage)
+            else:
+                self._stalled_stages.add(target_stage)
+            return
+
+        new_jobs = self._make_jobs(target_stage, input_states)
+
+        if not new_jobs:
+            predecessors_exhausted = all(
+                s in self.exhausted_stages for s in range(target_stage)
+            )
+            if predecessors_exhausted:
+                self.exhausted_stages.add(target_stage)
+                self._stalled_stages.discard(target_stage)
+            else:
+                self._stalled_stages.add(target_stage)
+            return
+
+        new_jobs = new_jobs[: self.config.wave_attempts]
+        self._pending_jobs[target_stage].extend(new_jobs)
+
+    def _enqueue_downstream(
+        self, stage_idx: int, new_output_state: VectorState
+    ) -> None:
+        """Generate jobs for stage_idx+1 using new_output_state as input."""
+        next_stage = stage_idx + 1
+        if next_stage >= len(self.all_stages):
+            return
+
+        out_t = new_output_state.as_tuple()
+        self.tt.mark_forwarded(stage_idx, [out_t])
+
+        new_jobs = self._make_jobs(next_stage, [new_output_state])
+        self._pending_jobs[next_stage].extend(new_jobs)
+
+        self._stalled_stages.discard(next_stage)
+        for s in range(next_stage + 1, len(self.all_stages)):
+            self._stalled_stages.discard(s)
+
+    def _enqueue_from_unforwarded(self, stage_idx: int) -> None:
+        """Seed jobs for stage_idx from unforwarded outputs of stage_idx-1."""
+        prev = stage_idx - 1
+        if prev < 0:
+            return
+        unforwarded = self.tt.get_unforwarded_outputs(prev)
+        if not unforwarded:
+            return
+
+        input_states = [vs for _tup, vs in unforwarded]
+        output_tuples = [tup for tup, _vs in unforwarded]
+        self.tt.mark_forwarded(prev, output_tuples)
+
+        new_jobs = self._make_jobs(stage_idx, input_states)
+        self._pending_jobs[stage_idx].extend(new_jobs)
+
+    # ------------------------------------------------------------------
+    # Pool feeding and result draining
+    # ------------------------------------------------------------------
+
+    def _submit_jobs(
+        self,
+        pool: Pool,
+        completion_queue,
+        pool_target: int,
+    ) -> int:
+        """Submit jobs to the pool until pool_target in-flight reached.
+
+        Prioritizes lower stage indices. Returns number of jobs submitted.
+        """
+        total_in_flight = sum(self._in_flight)
+        submitted = 0
+
+        for stage_idx in range(len(self.all_stages)):
+            pending = self._pending_jobs[stage_idx]
+            while pending and total_in_flight < pool_target:
+                _cand_idx, job = pending.popleft()
+
+                pool.apply_async(
+                    _validate_gadget_worker,
+                    (job,),
+                    callback=lambda r, s=stage_idx: completion_queue.put(("ok", s, r)),
+                    error_callback=lambda e, s=stage_idx: completion_queue.put(
+                        ("err", s, e)
+                    ),
+                )
+
+                self._in_flight[stage_idx] += 1
+                total_in_flight += 1
+                submitted += 1
+
+        return submitted
+
+    def _drain_results(
+        self,
+        completion_queue,
+        progress: SuccessProgress | None = None,
+        stage_task_ids: dict[int, int] | None = None,
+    ) -> int:
+        """Process all available results from the completion queue.
+
+        Records transitions, enqueues downstream jobs, triggers on-the-fly
+        scoring for last-stage transitions. Returns count of results processed.
         """
         import queue as queue_mod
 
-        jobs = self._make_jobs(stage_idx, input_states)
+        count = 0
+        last_stage = len(self.all_stages) - 1
 
-        if not jobs:
-            # No untried (input, candidate) pairs for the current inputs.
-            # Truly exhausted only if all predecessor stages are too.
-            predecessors_exhausted = all(
-                s in self.exhausted_stages for s in range(stage_idx)
-            )
-            if predecessors_exhausted:
-                self.exhausted_stages.add(stage_idx)
-                self._stalled_stages.discard(stage_idx)
-                if progress is not None and progress_task_id is not None:
-                    cum = self._stage_attempts[stage_idx] or 1
-                    progress.update(
-                        progress_task_id,
-                        description=f"Stage {stage_idx} (exhausted)",
-                        total=cum,
-                        completed=cum,
-                    )
-            else:
-                self._stalled_stages.add(stage_idx)
-            return 0
+        while True:
+            try:
+                item = completion_queue.get_nowait()
+            except queue_mod.Empty:
+                break
 
-        # Limit to budget
-        jobs = jobs[:budget_attempts]
+            count += 1
 
-        new_outputs = 0
-        tt = self.tt
-        num_workers = self.config.max_workers or os.cpu_count() or 4
-
-        # Update progress bar total to include this wave's jobs (cumulative)
-        if progress is not None and progress_task_id is not None:
-            progress.update(
-                progress_task_id,
-                total=self._stage_attempts[stage_idx] + len(jobs),
-            )
-
-        # Submit in batches to avoid wasting work when output budget is hit.
-        # Batch size = 2x workers so the pool stays saturated while we
-        # process results, but we don't commit thousands of jobs upfront.
-        batch_size = num_workers * 2
-        completion_queue: queue_mod.Queue = queue_mod.Queue()
-
-        pool = Pool(
-            processes=self.config.max_workers,
-            maxtasksperchild=self.config.max_tasks_per_child,
-        )
-        try:
-            job_iter = iter(jobs)
-            in_flight = 0
-            submitted = 0
-            completed = 0
-            done = False
-
-            while not done:
-                # Submit next batch
-                while in_flight < batch_size and not done:
-                    item = next(job_iter, None)
-                    if item is None:
-                        break
-                    _cand_idx, job = item
-                    pool.apply_async(
-                        _validate_gadget_worker,
-                        (job,),
-                        callback=lambda r: completion_queue.put(("ok", r)),
-                        error_callback=lambda e: completion_queue.put(("err", e)),
-                    )
-                    in_flight += 1
-                    submitted += 1
-
-                if in_flight == 0:
-                    break  # Nothing left to process
-
-                # Drain one result
-                try:
-                    status, payload = completion_queue.get(timeout=0.05)
-                except queue_mod.Empty:
-                    if self._interrupted:
-                        break
-                    continue
-
-                in_flight -= 1
-                completed += 1
-
-                if status == "err":
-                    self._stage_attempts[stage_idx] += 1
-                    if progress is not None and progress_task_id is not None:
-                        progress.update(progress_task_id, advance=1, success=0)
-                    continue
-
-                gadget_results, input_state, _metadata, _ct, _st = payload
-                success = 1 if gadget_results else 0
-
-                # Mark as attempted only after completion
-                cand_index = _metadata.get("candidate_index", -1)
-                tt.record_attempted_pair(stage_idx, input_state.as_tuple(), cand_index)
-                tt.record_attempt(stage_idx)
-
+            if item[0] == "err":
+                _, stage_idx, _exc = item
+                self._in_flight[stage_idx] -= 1
                 self._stage_attempts[stage_idx] += 1
-
-                new_unique_this_job = 0
-                for gadget, output_state in gadget_results:
-                    out_t = output_state.as_tuple()
-                    is_new_output = out_t not in tt.get_unique_outputs(stage_idx)
-                    tt.add_transition(stage_idx, input_state, output_state, gadget)
-                    if is_new_output:
-                        new_outputs += 1
-                        new_unique_this_job += 1
-
-                if progress is not None and progress_task_id is not None:
-                    progress.update(
-                        progress_task_id,
-                        advance=1,
-                        success=success,
-                        unique=new_unique_this_job,
-                    )
-
-                if new_outputs >= budget_outputs or self._interrupted:
-                    done = True
-
-            # Shrink total to match cumulative actual attempts (don't overcount
-            # jobs that were never submitted due to early budget exit)
-            if progress is not None and progress_task_id is not None:
-                progress.update(
-                    progress_task_id,
-                    total=self._stage_attempts[stage_idx],
-                    completed=self._stage_attempts[stage_idx],
-                )
-
-        finally:
-            pool.terminate()
-            pool.join()
-
-        return new_outputs
-
-    # ------------------------------------------------------------------
-    # Forward propagation
-    # ------------------------------------------------------------------
-
-    def _forward_propagate(
-        self,
-        from_stage: int,
-        progress: SuccessProgress | None = None,
-        stage_task_ids: dict[int, int] | None = None,
-    ) -> dict[int, int]:
-        """Propagate new outputs from from_stage through subsequent stages.
-
-        Each downstream stage runs all candidates against the new inputs
-        (inputs × candidates jobs). The output limit is uncapped — we want
-        every reachable output from the new inputs.
-
-        Returns dict mapping stage_idx -> new_outputs discovered.
-        """
-        propagation_results: dict[int, int] = {}
-
-        for stage_idx in range(from_stage + 1, len(self.all_stages)):
-            # Get unforwarded outputs from the previous stage
-            prev_stage = stage_idx - 1
-            unforwarded = self.tt.get_unforwarded_outputs(prev_stage)
-            if not unforwarded:
+                self.tt.record_attempt(stage_idx)
+                if progress and stage_task_ids:
+                    tid = stage_task_ids.get(stage_idx)
+                    if tid is not None:
+                        progress.update(tid, advance=1, success=0)
                 continue
 
-            # Convert to VectorState list and mark as forwarded
-            input_states = [vs for _tup, vs in unforwarded]
-            output_tuples = [tup for tup, _vs in unforwarded]
-            self.tt.mark_forwarded(prev_stage, output_tuples)
+            _, stage_idx, payload = item
+            self._in_flight[stage_idx] -= 1
 
-            task_id = stage_task_ids.get(stage_idx) if stage_task_ids else None
-            if progress is not None and task_id is not None:
-                progress.start_task(task_id)
+            gadget_results, input_state, _metadata, _ct, _st = payload
+            success = 1 if gadget_results else 0
 
-            # Try all candidates × new inputs, but cap attempts at
-            # wave_attempts to keep per-stage wall-clock predictable.
-            # No output cap — every reachable output from new inputs is wanted.
-            natural_attempts = len(input_states) * len(self._candidates_with_index)
-            new_outputs = self._run_stage_budget(
-                stage_idx,
-                input_states,
-                min(natural_attempts, self.config.wave_attempts),
-                natural_attempts,  # no output cap
-                progress=progress,
-                progress_task_id=task_id,
-            )
-            if new_outputs > 0:
-                propagation_results[stage_idx] = new_outputs
+            cand_index = _metadata.get("candidate_index", -1)
+            self.tt.record_attempted_pair(stage_idx, input_state.as_tuple(), cand_index)
+            self.tt.record_attempt(stage_idx)
+            self._stage_attempts[stage_idx] += 1
 
-        return propagation_results
+            new_unique = 0
+            for gadget, output_state in gadget_results:
+                out_t = output_state.as_tuple()
+                is_new = out_t not in self.tt.get_unique_outputs(stage_idx)
+                self.tt.add_transition(stage_idx, input_state, output_state, gadget)
+
+                if is_new:
+                    new_unique += 1
+                    self._enqueue_downstream(stage_idx, output_state)
+
+                    # On-the-fly scoring: new last-stage transition
+                    if stage_idx == last_stage:
+                        self._score_new_paths_for_transition(
+                            stage_idx,
+                            input_state.as_tuple(),
+                            out_t,
+                            progress,
+                        )
+
+            if progress and stage_task_ids:
+                tid = stage_task_ids.get(stage_idx)
+                if tid is not None:
+                    progress.update(tid, advance=1, success=success, unique=new_unique)
+
+        return count
 
     # ------------------------------------------------------------------
     # Scoring via LLVM-MCA
     # ------------------------------------------------------------------
 
-    def _score_complete_paths(self) -> list[dict]:
-        """Score NEW complete paths through all stages with LLVM-MCA.
+    def _score_new_paths_for_transition(
+        self,
+        stage_idx: int,
+        input_tuple: tuple,
+        output_tuple: tuple,
+        progress: SuccessProgress | None = None,
+    ) -> None:
+        """Score complete paths formed by a new transition at the last stage.
 
-        Only enumerates paths not already scored (via exclude_paths).
-        Scores are computed in parallel using ThreadPoolExecutor.
+        Traces backwards to find all complete paths ending with this
+        transition, filters already-scored, scores the rest.
+        """
+        paths = self.tt.trace_paths_ending_with(stage_idx, input_tuple, output_tuple)
+        if not paths:
+            return
+
+        # Filter already-scored
+        new_paths = []
+        for path in paths:
+            key = tuple(tuple(step) for step in path)
+            if key not in self._scored_path_keys:
+                new_paths.append(path)
+
+        if not new_paths:
+            return
+
+        scored = self._score_complete_paths(paths=new_paths)
+        if scored:
+            self._all_scored_paths.extend(scored)
+
+            if progress and self.best_scores:
+                parts = [
+                    f"{cpu}: {s['cycles']:.1f}cy (throughput {s['throughput']:.2f})"
+                    for cpu, s in sorted(self.best_scores.items())
+                ]
+                progress.set_status("Best: " + "  |  ".join(parts))
+
+    def _score_complete_paths(
+        self, paths: list[list[tuple]] | None = None
+    ) -> list[dict]:
+        """Score complete paths with LLVM-MCA.
+
+        If *paths* is ``None``, enumerates all new complete paths via the
+        TransitionTable. If *paths* is provided, scores exactly those paths.
 
         Returns a list of scored path dicts (newly scored only).
         """
-        paths = self.tt.enumerate_complete_paths(
-            max_paths=self.config.max_paths_per_wave,
-            exclude_paths=self._scored_path_keys,
-        )
+        if paths is None:
+            paths = self.tt.enumerate_complete_paths(
+                max_paths=self.config.max_paths_per_wave,
+                exclude_paths=self._scored_path_keys,
+            )
         if not paths:
             return []
 
-        # Register these paths as scored so future waves skip them
+        # Register as scored
         for path in paths:
-            self._scored_path_keys.add(tuple(path))
+            self._scored_path_keys.add(tuple(tuple(step) for step in path))
 
         scored: list[dict] = []
-        for i, path in enumerate(paths):
-            scored.append(
-                {
-                    "path_index": i,
-                    "path": path,
-                    "scores": {},
-                }
-            )
+        for path in paths:
+            path_key = [
+                [
+                    stage,
+                    [list(in_t[0]), list(in_t[1])],
+                    [list(out_t[0]), list(out_t[1])],
+                ]
+                for stage, in_t, out_t in path
+            ]
+            scored.append({"path_key": path_key, "path": path, "scores": {}})
 
         if not self.config.target_cpus:
             return scored
@@ -563,9 +599,9 @@ class WaveEngine:
         def _instr_count_scorer(_path, assignments):
             return sum(g.instruction_count() for g in assignments)
 
-        # Pre-build ASM for each path (CPU-independent, only depends on gadgets)
+        # Pre-build ASM for each path
         path_asm: dict[int, str] = {}
-        for entry in scored:
+        for i, entry in enumerate(scored):
             path = entry["path"]
             assignments, _ = hill_climb_path(
                 path, self.tt, _instr_count_scorer, max_passes=1
@@ -578,56 +614,52 @@ class WaveEngine:
                     self.config.prim_type,
                     self.config.num_vecs,
                     self.config.natural_order,
-                    entry["path_index"] + 1,
+                    i + 1,
                     len(scored),
                 )
-                path_asm[entry["path_index"]] = sanitize_asm_for_llvm_mca(asm)
+                path_asm[i] = sanitize_asm_for_llvm_mca(asm)
             except Exception as exc:
                 import sys
 
                 print(
-                    f"Warning: ASM generation for path {entry['path_index']} "
-                    f"failed: {exc}",
+                    f"Warning: ASM generation for path {i} failed: {exc}",
                     file=sys.stderr,
                 )
 
         if not path_asm:
             return scored
 
-        # Build all (path_index, target_cpu, mcpu, sanitized_asm) jobs
         mca_jobs: list[tuple[int, str, str, str]] = []
         for target_cpu in self.config.target_cpus:
             mcpu = resolve_llvm_mca_cpu(target_cpu)
             if mcpu is None:
                 continue
-            for path_idx, sanitized in path_asm.items():
-                mca_jobs.append((path_idx, target_cpu, mcpu, sanitized))
+            for idx, sanitized in path_asm.items():
+                mca_jobs.append((idx, target_cpu, mcpu, sanitized))
 
-        # Run LLVM-MCA in parallel (subprocess-bound, threads work fine)
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         def _run_one(job):
-            path_idx, target_cpu, mcpu, sanitized = job
-            result = run_llvm_mca(sanitized, mcpu, mca_bin, path_idx + 1)
-            return path_idx, target_cpu, result.throughput, result.simulated_cycles
+            idx, target_cpu, mcpu, sanitized = job
+            result = run_llvm_mca(sanitized, mcpu, mca_bin, idx + 1)
+            return idx, target_cpu, result.throughput, result.simulated_cycles
 
         num_threads = min(len(mca_jobs), self.config.max_workers or os.cpu_count() or 4)
         with ThreadPoolExecutor(max_workers=num_threads) as executor:
             futures = {executor.submit(_run_one, job): job for job in mca_jobs}
             for future in as_completed(futures):
                 try:
-                    path_idx, target_cpu, throughput, cycles = future.result()
-                    scored[path_idx]["scores"][target_cpu] = {
+                    idx, target_cpu, throughput, cycles = future.result()
+                    scored[idx]["scores"][target_cpu] = {
                         "throughput": throughput,
                         "cycles": cycles,
                     }
-                    # Update best scores
                     prev = self.best_scores.get(target_cpu)
                     if prev is None or cycles < prev["cycles"]:
                         self.best_scores[target_cpu] = {
                             "throughput": throughput,
                             "cycles": cycles,
-                            "path_index": path_idx,
+                            "path_key": scored[idx]["path_key"],
                         }
                 except Exception as exc:
                     import sys
@@ -659,12 +691,8 @@ class WaveEngine:
         excluded = self.exhausted_stages | self._stalled_stages
         target = self.tt.weakest_stage(exclude_exhausted=excluded)
         if target is None:
-            # All stages are exhausted or stalled — nothing to do
             return None
 
-        # Bubble-up: if stage is stuck after 2 consecutive zero-output budgets,
-        # try going upstream to produce different inputs. Keep bubbling up
-        # until we find a non-excluded stage or reach stage 0.
         sd = self.tt.stages[target]
         if sd.consecutive_zero_budgets >= 2:
             upstream = target - 1
@@ -672,8 +700,6 @@ class WaveEngine:
                 if upstream not in excluded:
                     return upstream
                 upstream -= 1
-            # All upstream stages exhausted/stalled too — mark target exhausted
-            # if predecessors are truly exhausted, otherwise stall it
             predecessors_exhausted = all(
                 s in self.exhausted_stages for s in range(target)
             )
@@ -681,7 +707,6 @@ class WaveEngine:
                 self.exhausted_stages.add(target)
             else:
                 self._stalled_stages.add(target)
-            # Re-select
             excluded = self.exhausted_stages | self._stalled_stages
             return self.tt.weakest_stage(exclude_exhausted=excluded)
 
@@ -692,11 +717,13 @@ class WaveEngine:
     # ------------------------------------------------------------------
 
     def _save_checkpoint(self) -> None:
-        """Save current state to checkpoint directory."""
+        """Save current state to checkpoint directory.
+
+        Saves dirty stages, master config, and accumulated scored paths.
+        """
         if self._checkpoint is None:
             return
 
-        # Build stage stats
         stage_stats = {}
         for i in range(len(self.all_stages)):
             stage_stats[i] = self.tt.stage_stats(i)
@@ -722,117 +749,27 @@ class WaveEngine:
                 self._checkpoint.save_stage(i, self.tt)
                 self.tt.stages[i].dirty = False
 
-    # ------------------------------------------------------------------
-    # Single wave
-    # ------------------------------------------------------------------
-
-    def run_wave(
-        self,
-        progress: SuccessProgress | None = None,
-        stage_task_ids: dict[int, int] | None = None,
-    ) -> dict:
-        """Execute one wave: target -> budget -> propagate -> score -> checkpoint.
-
-        Returns a dict with wave results:
-          - wave_index: int
-          - target_stage: int
-          - new_outputs: int
-          - total_paths: int
-        """
-        target = self._select_target_stage()
-        if target is None:
-            return {
-                "wave_index": self.wave_count,
-                "target_stage": None,
-                "new_outputs": 0,
-                "total_paths": 0,
-            }
-
-        # Gather input states for the target stage
-        if target == 0:
-            input_states = [self.initial_state]
-        else:
-            # Use outputs from the previous stage
-            prev_outputs = self.tt.get_unique_outputs(target - 1)
-            if prev_outputs:
-                input_states = list(prev_outputs.values())
-            else:
-                input_states = []
-
-        # Update progress description for targeted stage
-        task_id = stage_task_ids.get(target) if stage_task_ids else None
-        if progress is not None and task_id is not None:
-            progress.start_task(task_id)
-            progress.update(
-                task_id,
-                description=f"[bold]Stage {target}[/bold] (wave {self.wave_count})",
-            )
-
-        # Run the budget
-        new_outputs = self._run_stage_budget(
-            target,
-            input_states,
-            self.config.wave_attempts,
-            self.config.wave_outputs,
-            progress=progress,
-            progress_task_id=task_id,
-        )
-
-        # Track consecutive zero-output budgets
-        sd = self.tt.stages[target]
-        if new_outputs == 0:
-            sd.consecutive_zero_budgets += 1
-        else:
-            sd.consecutive_zero_budgets = 0
-            # New outputs at this stage means downstream stages may have
-            # new inputs — unstall them so they can be targeted again
-            for s in range(target + 1, len(self.all_stages)):
-                self._stalled_stages.discard(s)
-
-        # Forward propagate new outputs
-        propagation = self._forward_propagate(
-            target, progress=progress, stage_task_ids=stage_task_ids
-        )
-
-        # Score paths
-        scored = self._score_complete_paths()
-
-        # Checkpoint
-        self._save_checkpoint()
-        if self._checkpoint is not None and scored:
-            self._checkpoint.save_scored_paths(scored)
-
-        result = {
-            "wave_index": self.wave_count,
-            "target_stage": target,
-            "new_outputs": new_outputs,
-            "propagation": propagation,
-            "total_paths": len(scored),
-        }
-
-        self.wave_count += 1
-        return result
+        if self._all_scored_paths:
+            self._checkpoint.save_scored_paths(self._all_scored_paths)
 
     # ------------------------------------------------------------------
     # Main loop
     # ------------------------------------------------------------------
 
     def run(self) -> dict:
-        """Main loop: run waves until termination condition.
+        """Main loop: long-lived pool, wave-based targeting, continuous feeding.
 
-        Termination:
-          - Ctrl-C (checkpoint and exit)
-          - max_waves reached
-          - All stages exhausted
+        Each wave:
+        1. Selects target stage
+        2. Generates jobs and enqueues them
+        3. Drains the pool, feeding downstream stages as outputs appear
+        4. Checkpoints when a stage completes (pending=0, in_flight=0)
+        5. Scores on the fly as last-stage transitions form complete paths
 
-        Returns a summary dict with:
-          - wave_count: int
-          - interrupted: bool
-          - waves: list[dict]
+        Termination: Ctrl-C, max_waves reached, or all stages exhausted.
         """
-        waves: list[dict] = []
+        import queue as queue_mod
 
-        # Install Ctrl-C handler
         original_sigint = signal.getsignal(signal.SIGINT)
 
         def _sigint_handler(_signum, _frame):
@@ -846,12 +783,20 @@ class WaveEngine:
 
         signal.signal(signal.SIGINT, _sigint_handler)
 
+        num_workers = self.config.max_workers or os.cpu_count() or 4
+        pool_target = num_workers * 2
+        completion_queue: queue_mod.Queue = queue_mod.Queue()
+
+        pool = Pool(
+            processes=num_workers,
+            maxtasksperchild=self.config.max_tasks_per_child,
+        )
+
         progress = SuccessProgress.create()
         progress.enable_memory_monitor()
 
         try:
             with progress:
-                # Create a progress task for each stage
                 stage_task_ids: dict[int, int] = {}
                 for s in range(len(self.all_stages)):
                     tid = progress.add_task(
@@ -862,6 +807,10 @@ class WaveEngine:
                         unique=0,
                     )
                     stage_task_ids[s] = tid
+
+                # Seed pending queues from unforwarded outputs (resume case)
+                for s in range(1, len(self.all_stages)):
+                    self._enqueue_from_unforwarded(s)
 
                 while True:
                     if self._interrupted:
@@ -877,67 +826,119 @@ class WaveEngine:
                     ):
                         break
 
-                    # Check if all stages exhausted
                     if len(self.exhausted_stages) >= len(self.all_stages):
                         progress.console.print(
                             "[green]All stages exhausted — search complete.[/green]"
                         )
                         break
 
-                    prev_exhausted = set(self.exhausted_stages)
-
-                    result = self.run_wave(
-                        progress=progress,
-                        stage_task_ids=stage_task_ids,
-                    )
-                    waves.append(result)
-
-                    # Update progress for any newly exhausted stages
-                    for s in self.exhausted_stages - prev_exhausted:
-                        tid = stage_task_ids.get(s)
-                        if tid is not None:
-                            cum = self._stage_attempts[s] or 1
-                            progress.update(
-                                tid,
-                                description=f"Stage {s} (exhausted)",
-                                total=cum,
-                                completed=cum,
-                            )
-
-                    if result["target_stage"] is None:
+                    # --- Start a new wave ---
+                    target = self._select_target_stage()
+                    if target is None:
                         break
 
-                    # Print wave summary
-                    target = result["target_stage"]
+                    target_outputs_before = self.tt.unique_output_count(target)
+                    self._generate_jobs_for_stage(target)
+
+                    task_id = stage_task_ids.get(target)
+                    if task_id is not None:
+                        progress.start_task(task_id)
+                        progress.update(
+                            task_id,
+                            description=(
+                                f"[bold]Stage {target}[/bold] "
+                                f"(wave {self.wave_count})"
+                            ),
+                        )
+
+                    # Track which stages are active this wave
+                    stages_active_this_wave: set[int] = {target}
+
+                    # --- Drain the wave ---
+                    while True:
+                        if self._interrupted:
+                            break
+
+                        self._submit_jobs(pool, completion_queue, pool_target)
+
+                        drained = self._drain_results(
+                            completion_queue, progress, stage_task_ids
+                        )
+
+                        # Track active stages
+                        for s in range(len(self.all_stages)):
+                            if self._pending_jobs[s] or self._in_flight[s] > 0:
+                                stages_active_this_wave.add(s)
+
+                        # Check for stage completions -> checkpoint
+                        for s in list(stages_active_this_wave):
+                            if not self._pending_jobs[s] and self._in_flight[s] == 0:
+                                stages_active_this_wave.discard(s)
+                                self._save_checkpoint()
+
+                        # Wave done when nothing pending and nothing in-flight
+                        total_pending = sum(len(q) for q in self._pending_jobs)
+                        total_in_flight = sum(self._in_flight)
+                        if total_pending == 0 and total_in_flight == 0:
+                            break
+
+                        if drained == 0:
+                            time.sleep(0.05)
+
+                    # --- Wave complete ---
+                    target_outputs_now = self.tt.unique_output_count(target)
+                    sd = self.tt.stages[target]
+                    if target_outputs_now == target_outputs_before:
+                        sd.consecutive_zero_budgets += 1
+                    else:
+                        sd.consecutive_zero_budgets = 0
+                        for s in range(target + 1, len(self.all_stages)):
+                            self._stalled_stages.discard(s)
+
+                    # Final checkpoint for the wave
+                    self._save_checkpoint()
+
+                    # Update progress for exhausted stages
+                    for s in range(len(self.all_stages)):
+                        if s in self.exhausted_stages:
+                            tid = stage_task_ids.get(s)
+                            if tid is not None:
+                                cum = self._stage_attempts[s] or 1
+                                progress.update(
+                                    tid,
+                                    description=f"Stage {s} (exhausted)",
+                                    total=cum,
+                                    completed=cum,
+                                )
+
+                    # Wave summary
                     stats = self.tt.stage_stats(target)
-                    prop = result.get("propagation", {})
-                    prop_str = ""
-                    if prop:
-                        prop_parts = [f"s{s}+{n}" for s, n in sorted(prop.items())]
-                        prop_str = f" | propagated: {', '.join(prop_parts)}"
+                    scored_total = len(self._all_scored_paths)
                     progress.console.print(
-                        f"Wave {result['wave_index']}: "
+                        f"Wave {self.wave_count}: "
                         f"stage {target} targeted, "
-                        f"+{result['new_outputs']} outputs "
-                        f"({stats['distinct_outputs']} total)"
-                        f"{prop_str}"
-                        f" | {result['total_paths']} new paths scored",
+                        f"{stats['distinct_outputs']} outputs"
+                        f" | {scored_total} paths scored total",
                     )
 
-                    # Update persistent status line with best scores per CPU
                     if self.best_scores:
                         parts = [
-                            f"{cpu}: {s['cycles']:.1f}cy (throughput {s['throughput']:.2f})"
+                            f"{cpu}: {s['cycles']:.1f}cy "
+                            f"(throughput {s['throughput']:.2f})"
                             for cpu, s in sorted(self.best_scores.items())
                         ]
                         progress.set_status("Best: " + "  |  ".join(parts))
+
+                    self.wave_count += 1
+
         finally:
+            pool.terminate()
+            pool.join()
             signal.signal(signal.SIGINT, original_sigint)
 
         return {
             "wave_count": self.wave_count,
             "interrupted": self._interrupted,
-            "waves": waves,
         }
 
     # ------------------------------------------------------------------
@@ -947,7 +948,7 @@ class WaveEngine:
     def resume(self, checkpoint_dir: str) -> None:
         """Load state from a checkpoint directory.
 
-        Restores the TransitionTable and wave_count from the checkpoint.
+        Restores TransitionTable, wave_count, scores, and scored path keys.
         """
         ckpt = WaveCheckpoint(checkpoint_dir)
         if not ckpt.exists():
@@ -955,7 +956,6 @@ class WaveEngine:
 
         master = ckpt.load_master()
         self.wave_count = master.wave_count
-        self.best_scores = master.best_scores
         self.exhausted_stages = set(master.exhausted_stages)
 
         for i in range(len(self.all_stages)):
@@ -966,6 +966,39 @@ class WaveEngine:
         # Restore cumulative progress counters from TransitionTable
         for i in range(len(self.all_stages)):
             self._stage_attempts[i] = self.tt.stages[i].attempts
+
+        # Restore scored paths and rebuild derived state
+        self._all_scored_paths = ckpt.load_scored_paths()
+        for entry in self._all_scored_paths:
+            path_key = entry.get("path_key")
+            if path_key:
+                # path_key is JSON-safe: [[stage, [in_top, in_bot], [out_top, out_bot]], ...]
+                # Convert to hashable nested tuples for _scored_path_keys
+                key = tuple(
+                    (
+                        step[0],
+                        (tuple(step[1][0]), tuple(step[1][1])),
+                        (tuple(step[2][0]), tuple(step[2][1])),
+                    )
+                    for step in path_key
+                )
+                self._scored_path_keys.add(key)
+
+        self._rebuild_best_scores_from_accumulated()
+
+    def _rebuild_best_scores_from_accumulated(self) -> None:
+        """Rebuild best_scores from all accumulated scored paths."""
+        self.best_scores = {}
+        for entry in self._all_scored_paths:
+            for cpu, scores in entry.get("scores", {}).items():
+                cycles = scores.get("cycles", float("inf"))
+                prev = self.best_scores.get(cpu)
+                if prev is None or cycles < prev["cycles"]:
+                    self.best_scores[cpu] = {
+                        "throughput": scores["throughput"],
+                        "cycles": cycles,
+                        "path_key": entry.get("path_key"),
+                    }
 
     # ------------------------------------------------------------------
     # Export to legacy SolutionNode tree
