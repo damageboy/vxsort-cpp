@@ -756,15 +756,92 @@ class WaveEngine:
     # Main loop
     # ------------------------------------------------------------------
 
+    def _run_stage_in_wave(
+        self,
+        stage_idx: int,
+        pool: Pool,
+        completion_queue,
+        pool_target: int,
+        progress: SuccessProgress | None,
+        stage_task_ids: dict[int, int] | None,
+    ) -> int:
+        """Run one stage within a wave, respecting budget limits.
+
+        Submits jobs for *stage_idx* and drains results until the stage's
+        budget is exhausted (wave_attempts attempts or wave_outputs new
+        outputs) or all jobs are done.  The pool is shared so stragglers
+        at this stage don't block — downstream jobs from earlier stages
+        still get processed.
+
+        Returns the number of new unique outputs discovered at this stage.
+        """
+        budget_attempts = self.config.wave_attempts
+        budget_outputs = self.config.wave_outputs
+        stage_attempts_start = self._stage_attempts[stage_idx]
+        outputs_before = self.tt.unique_output_count(stage_idx)
+
+        while True:
+            if self._interrupted:
+                break
+
+            self._submit_jobs(pool, completion_queue, pool_target)
+            drained = self._drain_results(completion_queue, progress, stage_task_ids)
+
+            # Update progress totals
+            if drained > 0:
+                self._sync_progress_totals(progress, stage_task_ids)
+
+            # Check budget limits for this stage
+            attempts_this_wave = self._stage_attempts[stage_idx] - stage_attempts_start
+            new_outputs = self.tt.unique_output_count(stage_idx) - outputs_before
+
+            if attempts_this_wave >= budget_attempts:
+                break
+            if new_outputs >= budget_outputs:
+                break
+
+            # Stage done if no pending work and nothing in-flight for it
+            if not self._pending_jobs[stage_idx] and self._in_flight[stage_idx] == 0:
+                break
+
+            if drained == 0:
+                time.sleep(0.05)
+
+        # Checkpoint this stage
+        self._save_checkpoint()
+
+        return self.tt.unique_output_count(stage_idx) - outputs_before
+
+    def _sync_progress_totals(
+        self,
+        progress: SuccessProgress | None,
+        stage_task_ids: dict[int, int] | None,
+    ) -> None:
+        """Update progress bar totals from actual counts."""
+        if not progress or not stage_task_ids:
+            return
+        for s in range(len(self.all_stages)):
+            total = (
+                self._stage_attempts[s]
+                + len(self._pending_jobs[s])
+                + self._in_flight[s]
+            )
+            tid = stage_task_ids[s]
+            if total > 0:
+                progress.start_task(tid)
+                progress.update(tid, total=total)
+
     def run(self) -> dict:
-        """Main loop: long-lived pool, wave-based targeting, continuous feeding.
+        """Main loop: long-lived pool, depth-first waves with per-stage budgets.
 
         Each wave:
         1. Selects target stage
-        2. Generates jobs and enqueues them
-        3. Drains the pool, feeding downstream stages as outputs appear
-        4. Checkpoints when a stage completes (pending=0, in_flight=0)
+        2. Runs target stage with budget (wave_attempts / wave_outputs)
+        3. Propagates outputs depth-first: each downstream stage gets its
+           own budget, continuing until the last stage or a dead end
+        4. Checkpoints after each stage completes
         5. Scores on the fly as last-stage transitions form complete paths
+        6. Logs wave summary, then selects the next wave target
 
         Termination: Ctrl-C, max_waves reached, or all stages exhausted.
         """
@@ -837,20 +914,9 @@ class WaveEngine:
                     if target is None:
                         break
 
-                    target_outputs_before = self.tt.unique_output_count(target)
+                    # Generate jobs for the target stage
                     self._generate_jobs_for_stage(target)
-
-                    # Update progress totals for all stages with new pending work
-                    for s in range(len(self.all_stages)):
-                        total = (
-                            self._stage_attempts[s]
-                            + len(self._pending_jobs[s])
-                            + self._in_flight[s]
-                        )
-                        if total > 0:
-                            tid = stage_task_ids[s]
-                            progress.start_task(tid)
-                            progress.update(tid, total=total)
+                    self._sync_progress_totals(progress, stage_task_ids)
 
                     task_id = stage_task_ids.get(target)
                     if task_id is not None:
@@ -862,64 +928,73 @@ class WaveEngine:
                             ),
                         )
 
-                    # Track which stages are active this wave
-                    stages_active_this_wave: set[int] = {target}
+                    # Run target stage with budget
+                    new_outputs = self._run_stage_in_wave(
+                        target,
+                        pool,
+                        completion_queue,
+                        pool_target,
+                        progress,
+                        stage_task_ids,
+                    )
 
-                    # --- Drain the wave ---
-                    while True:
-                        if self._interrupted:
-                            break
-
-                        self._submit_jobs(pool, completion_queue, pool_target)
-
-                        drained = self._drain_results(
-                            completion_queue, progress, stage_task_ids
-                        )
-
-                        # Update progress totals (drain may have enqueued downstream)
-                        if drained > 0:
-                            for s in range(len(self.all_stages)):
-                                total = (
-                                    self._stage_attempts[s]
-                                    + len(self._pending_jobs[s])
-                                    + self._in_flight[s]
-                                )
-                                tid = stage_task_ids[s]
-                                if total > 0:
-                                    progress.start_task(tid)
-                                    progress.update(tid, total=total)
-
-                        # Track active stages
-                        for s in range(len(self.all_stages)):
-                            if self._pending_jobs[s] or self._in_flight[s] > 0:
-                                stages_active_this_wave.add(s)
-
-                        # Check for stage completions -> checkpoint
-                        for s in list(stages_active_this_wave):
-                            if not self._pending_jobs[s] and self._in_flight[s] == 0:
-                                stages_active_this_wave.discard(s)
-                                self._save_checkpoint()
-
-                        # Wave done when nothing pending and nothing in-flight
-                        total_pending = sum(len(q) for q in self._pending_jobs)
-                        total_in_flight = sum(self._in_flight)
-                        if total_pending == 0 and total_in_flight == 0:
-                            break
-
-                        if drained == 0:
-                            time.sleep(0.05)
-
-                    # --- Wave complete ---
-                    target_outputs_now = self.tt.unique_output_count(target)
+                    # Track consecutive zero-output budgets
                     sd = self.tt.stages[target]
-                    if target_outputs_now == target_outputs_before:
+                    if new_outputs == 0:
                         sd.consecutive_zero_budgets += 1
                     else:
                         sd.consecutive_zero_budgets = 0
                         for s in range(target + 1, len(self.all_stages)):
                             self._stalled_stages.discard(s)
 
-                    # Final checkpoint for the wave
+                    # Depth-first propagation: run each downstream stage
+                    # with its own budget
+                    propagation: dict[int, int] = {}
+                    for stage_idx in range(target + 1, len(self.all_stages)):
+                        if self._interrupted:
+                            break
+
+                        # Get unforwarded outputs from predecessor
+                        unforwarded = self.tt.get_unforwarded_outputs(stage_idx - 1)
+                        if not unforwarded:
+                            continue
+
+                        # Generate jobs for this downstream stage
+                        input_states = [vs for _tup, vs in unforwarded]
+                        output_tuples = [tup for tup, _vs in unforwarded]
+                        self.tt.mark_forwarded(stage_idx - 1, output_tuples)
+
+                        downstream_jobs = self._make_jobs(stage_idx, input_states)
+                        downstream_jobs = downstream_jobs[: self.config.wave_attempts]
+                        self._pending_jobs[stage_idx].extend(downstream_jobs)
+
+                        if not downstream_jobs:
+                            continue
+
+                        self._sync_progress_totals(progress, stage_task_ids)
+                        tid = stage_task_ids.get(stage_idx)
+                        if tid is not None:
+                            progress.update(
+                                tid,
+                                description=(
+                                    f"[bold]Stage {stage_idx}[/bold] "
+                                    f"(wave {self.wave_count})"
+                                ),
+                            )
+
+                        stage_new = self._run_stage_in_wave(
+                            stage_idx,
+                            pool,
+                            completion_queue,
+                            pool_target,
+                            progress,
+                            stage_task_ids,
+                        )
+
+                        if stage_new > 0:
+                            propagation[stage_idx] = stage_new
+
+                    # --- Wave complete ---
                     self._save_checkpoint()
 
                     # Update progress for exhausted stages
@@ -937,11 +1012,19 @@ class WaveEngine:
 
                     # Wave summary
                     stats = self.tt.stage_stats(target)
+                    prop_str = ""
+                    if propagation:
+                        prop_parts = [
+                            f"s{s}+{n}" for s, n in sorted(propagation.items())
+                        ]
+                        prop_str = f" | propagated: {', '.join(prop_parts)}"
                     scored_total = len(self._all_scored_paths)
                     progress.console.print(
                         f"Wave {self.wave_count}: "
                         f"stage {target} targeted, "
-                        f"{stats['distinct_outputs']} outputs"
+                        f"+{new_outputs} outputs "
+                        f"({stats['distinct_outputs']} total)"
+                        f"{prop_str}"
                         f" | {scored_total} paths scored total",
                     )
 
