@@ -975,6 +975,21 @@ class WaveEngine:
                         if stage_new > 0:
                             propagation[stage_idx] = stage_new
 
+                    # --- Drain all remaining in-flight jobs ---
+                    # Before selecting the next wave target, all in-flight
+                    # work must complete so the TransitionTable is in a
+                    # consistent state for target selection.
+                    while sum(self._in_flight) > 0:
+                        if self._interrupted:
+                            break
+                        drained = self._drain_results(
+                            completion_queue, progress, stage_task_ids
+                        )
+                        if drained > 0:
+                            self._sync_progress_totals(progress, stage_task_ids)
+                        else:
+                            time.sleep(0.05)
+
                     # --- Wave complete ---
                     self._save_checkpoint()
 
