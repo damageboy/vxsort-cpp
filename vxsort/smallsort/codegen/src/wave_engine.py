@@ -960,27 +960,33 @@ class WaveEngine:
                             self._stalled_stages.discard(s)
 
                     # Depth-first propagation: run each downstream stage
-                    # with its own budget
+                    # with its own budget.  Overflow work from _enqueue_downstream
+                    # may have already enqueued jobs and marked outputs as forwarded,
+                    # so we check both unforwarded outputs AND pending/in-flight work.
                     propagation: dict[int, int] = {}
                     for stage_idx in range(target + 1, len(self.all_stages)):
                         if self._interrupted:
                             break
 
-                        # Get unforwarded outputs from predecessor
+                        # Generate jobs from any new unforwarded outputs
                         unforwarded = self.tt.get_unforwarded_outputs(stage_idx - 1)
-                        if not unforwarded:
-                            continue
+                        if unforwarded:
+                            input_states = [vs for _tup, vs in unforwarded]
+                            output_tuples = [tup for tup, _vs in unforwarded]
+                            self.tt.mark_forwarded(stage_idx - 1, output_tuples)
 
-                        # Generate jobs for this downstream stage
-                        input_states = [vs for _tup, vs in unforwarded]
-                        output_tuples = [tup for tup, _vs in unforwarded]
-                        self.tt.mark_forwarded(stage_idx - 1, output_tuples)
+                            downstream_jobs = self._make_jobs(stage_idx, input_states)
+                            downstream_jobs = downstream_jobs[
+                                : self.config.wave_attempts
+                            ]
+                            self._pending_jobs[stage_idx].extend(downstream_jobs)
 
-                        downstream_jobs = self._make_jobs(stage_idx, input_states)
-                        downstream_jobs = downstream_jobs[: self.config.wave_attempts]
-                        self._pending_jobs[stage_idx].extend(downstream_jobs)
-
-                        if not downstream_jobs:
+                        # Skip if no work at all (neither from overflow nor new)
+                        has_work = (
+                            self._pending_jobs[stage_idx]
+                            or self._in_flight[stage_idx] > 0
+                        )
+                        if not has_work:
                             continue
 
                         self._sync_progress_totals(progress, stage_task_ids)
