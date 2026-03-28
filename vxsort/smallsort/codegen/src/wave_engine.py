@@ -355,6 +355,27 @@ class WaveEngine:
         new_jobs = new_jobs[: self.config.wave_attempts]
         self._pending_jobs[target_stage].extend(new_jobs)
 
+    def _enqueue_downstream(
+        self, stage_idx: int, new_output_state: VectorState
+    ) -> None:
+        """Generate jobs for stage_idx+1 using new_output_state as input.
+
+        Used during result draining to keep the pool fed while stragglers
+        from the current stage are still in-flight.  The depth-first
+        propagation loop in ``run()`` later runs each downstream stage
+        with its own budget; ``_make_jobs`` skips already-attempted pairs
+        so overflow work is naturally accounted for.
+        """
+        next_stage = stage_idx + 1
+        if next_stage >= len(self.all_stages):
+            return
+
+        out_t = new_output_state.as_tuple()
+        self.tt.mark_forwarded(stage_idx, [out_t])
+
+        new_jobs = self._make_jobs(next_stage, [new_output_state])
+        self._pending_jobs[next_stage].extend(new_jobs)
+
     def _enqueue_from_unforwarded(self, stage_idx: int) -> None:
         """Seed jobs for stage_idx from unforwarded outputs of stage_idx-1."""
         prev = stage_idx - 1
@@ -462,6 +483,8 @@ class WaveEngine:
 
                 if is_new:
                     new_unique += 1
+                    # Feed downstream stage to keep pool busy during stragglers
+                    self._enqueue_downstream(stage_idx, output_state)
 
                     # On-the-fly scoring: new last-stage transition
                     if stage_idx == last_stage:
