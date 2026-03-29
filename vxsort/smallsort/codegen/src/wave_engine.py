@@ -257,6 +257,10 @@ class WaveEngine:
         # Accumulated scored paths across entire run
         self._all_scored_paths: list[dict] = []
 
+        # Per-stage attempt snapshot at wave start.  Used by _submit_jobs
+        # to enforce per-stage budgets within a wave.  None outside a wave.
+        self._wave_start_attempts: list[int] | None = None
+
     def _create_initial_state(self) -> VectorState:
         """Create initial vector state from first stage comparison pairs."""
         first_stage_pairs = self.all_stages[0]
@@ -352,7 +356,17 @@ class WaveEngine:
                 self._stalled_stages.add(target_stage)
             return
 
-        new_jobs = new_jobs[: self.config.wave_attempts]
+        # Cap new jobs considering work already queued/in-flight/done this wave
+        already_committed = (
+            len(self._pending_jobs[target_stage]) + self._in_flight[target_stage]
+        )
+        if self._wave_start_attempts is not None:
+            already_committed += (
+                self._stage_attempts[target_stage]
+                - self._wave_start_attempts[target_stage]
+            )
+        budget_remaining = max(0, self.config.wave_attempts - already_committed)
+        new_jobs = new_jobs[:budget_remaining]
         self._pending_jobs[target_stage].extend(new_jobs)
 
     def _enqueue_downstream(
@@ -404,14 +418,43 @@ class WaveEngine:
     ) -> int:
         """Submit jobs to the pool until pool_target in-flight reached.
 
-        Prioritizes lower stage indices. Returns number of jobs submitted.
+        Prioritizes lower stage indices.  Enforces per-stage wave budgets:
+        a stage that has already consumed ``wave_attempts`` (attempts +
+        in-flight) this wave will not have more jobs submitted — they stay
+        in the pending deque for the next wave.
+
+        Returns number of jobs submitted.
         """
         total_in_flight = sum(self._in_flight)
         submitted = 0
+        budget = self.config.wave_attempts
 
         for stage_idx in range(len(self.all_stages)):
             pending = self._pending_jobs[stage_idx]
+            if not pending:
+                continue
+
+            # Per-stage budget check: attempts done + in-flight this wave
+            if self._wave_start_attempts is not None:
+                used = (
+                    self._stage_attempts[stage_idx]
+                    + self._in_flight[stage_idx]
+                    - self._wave_start_attempts[stage_idx]
+                )
+                if used >= budget:
+                    continue
+
             while pending and total_in_flight < pool_target:
+                # Re-check budget before each submission
+                if self._wave_start_attempts is not None:
+                    used = (
+                        self._stage_attempts[stage_idx]
+                        + self._in_flight[stage_idx]
+                        - self._wave_start_attempts[stage_idx]
+                    )
+                    if used >= budget:
+                        break
+
                 _cand_idx, job = pending.popleft()
 
                 pool.apply_async(
@@ -812,9 +855,20 @@ class WaveEngine:
             if new_outputs >= budget_outputs:
                 break
 
-            # Stage done if no pending work and nothing in-flight for it
-            if not self._pending_jobs[stage_idx] and self._in_flight[stage_idx] == 0:
-                break
+            # Stage done if nothing in-flight and either no pending work
+            # or budget prevents further submission
+            if self._in_flight[stage_idx] == 0:
+                if not self._pending_jobs[stage_idx]:
+                    break
+                # Budget exhausted — leftover pending jobs stay for next wave
+                if self._wave_start_attempts is not None:
+                    used = (
+                        self._stage_attempts[stage_idx]
+                        + self._in_flight[stage_idx]
+                        - self._wave_start_attempts[stage_idx]
+                    )
+                    if used >= budget_attempts:
+                        break
 
             if drained == 0:
                 time.sleep(0.05)
@@ -926,6 +980,10 @@ class WaveEngine:
                     if target is None:
                         break
 
+                    # Snapshot per-stage attempts so budget checks know
+                    # how many attempts each stage has consumed this wave
+                    self._wave_start_attempts = list(self._stage_attempts)
+
                     # Generate jobs for the target stage
                     self._generate_jobs_for_stage(target)
                     self._sync_progress_totals(progress, stage_task_ids)
@@ -976,9 +1034,6 @@ class WaveEngine:
                             self.tt.mark_forwarded(stage_idx - 1, output_tuples)
 
                             downstream_jobs = self._make_jobs(stage_idx, input_states)
-                            downstream_jobs = downstream_jobs[
-                                : self.config.wave_attempts
-                            ]
                             self._pending_jobs[stage_idx].extend(downstream_jobs)
 
                         # Skip if no work at all (neither from overflow nor new)
@@ -1028,6 +1083,7 @@ class WaveEngine:
                             time.sleep(0.05)
 
                     # --- Wave complete ---
+                    self._wave_start_attempts = None
                     self._save_checkpoint()
 
                     # Update progress for exhausted stages
