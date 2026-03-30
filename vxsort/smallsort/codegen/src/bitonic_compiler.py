@@ -12,7 +12,7 @@ from json_exporter import export_solutions_to_json
 # Handle both relative and absolute imports
 try:
     from .cost_model import CostModel, get_supported_cpus
-    from .bitonic_super_optimizer import BitonicSuperVectorizer, apply_retroactive_input
+    from .bitonic_super_optimizer import BitonicSuperVectorizer
     from .utils import vector_machine, primitive_type, width_dict
     from .asm_exporter import export_solutions_to_asm
     from .path_selector import PathSelector
@@ -32,7 +32,7 @@ try:
 
 except ImportError:
     from cost_model import CostModel, get_supported_cpus
-    from bitonic_super_optimizer import BitonicSuperVectorizer, apply_retroactive_input
+    from bitonic_super_optimizer import BitonicSuperVectorizer
     from utils import vector_machine, primitive_type, width_dict
     from asm_exporter import export_solutions_to_asm
     from path_selector import PathSelector
@@ -218,9 +218,6 @@ def _load_solutions_from_checkpoint(
     engine = WaveEngine(config)
     engine.resume(checkpoint_dir)
     solutions = engine.export_to_solution_nodes()
-
-    if master.retroactive_input:
-        solutions = apply_retroactive_input(solutions)
 
     print(
         f"Loaded {len(solutions)} roots from checkpoint {checkpoint_dir} "
@@ -544,14 +541,6 @@ def generate_bitonic_sorter(
     )
 
     print(f"Found {len(solutions)} root solutions")
-
-    if retroactive_input:
-        before = len(solutions)
-        solutions = apply_retroactive_input(solutions)
-        print(
-            f"Retroactive input: {before} roots → {len(solutions)} "
-            f"(deduped {before - len(solutions)})"
-        )
 
     if not all_stages_complete:
         print(
@@ -976,14 +965,6 @@ def main():
     solutions = engine.export_to_solution_nodes()
 
     print(f"Found {len(solutions)} root solutions")
-
-    if args.retroactive_input:
-        before = len(solutions)
-        solutions = apply_retroactive_input(solutions)
-        print(
-            f"Retroactive input: {before} roots -> {len(solutions)} "
-            f"(deduped {before - len(solutions)})"
-        )
 
     # Filter to top K cheapest root-to-leaf paths if requested
     selected_paths = None

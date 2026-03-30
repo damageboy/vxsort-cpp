@@ -1,5 +1,7 @@
 """Tests for WaveEngine: wave-based iterative synthesis orchestrator."""
 
+import math
+
 from utils import primitive_type, vector_machine
 from wave_engine import WaveConfig, WaveEngine
 
@@ -222,6 +224,55 @@ class TestExportToSolutionNodes:
         # Children should link to stage 1
         assert len(nodes[0].children) == 1
         assert nodes[0].children[0].stage == 1
+
+
+class TestRetroactiveInput:
+    """Tests for --retroactive-input pre-population of stage 0."""
+
+    def test_prepopulates_stage0_with_n_factorial_permutations(self):
+        config = _fast_config(retroactive_input=True)
+        engine = WaveEngine(config)
+
+        # AVX2 i64: 4 pairs -> 4! = 24 permutations
+        n_pairs = engine.elements_per_vector  # 4
+        expected_count = math.factorial(n_pairs)  # 24
+
+        stage0_outputs = engine.tt.get_unique_outputs(0)
+        assert len(stage0_outputs) == expected_count
+
+    def test_stage0_gadgets_are_identity(self):
+        config = _fast_config(retroactive_input=True)
+        engine = WaveEngine(config)
+
+        all_trans = engine.tt.get_all_transitions(0)
+        for (_inp_t, _out_t), gadgets in all_trans.items():
+            assert len(gadgets) == 1
+            g = gadgets[0]
+            assert g.top_instructions == []
+            assert g.bottom_instructions == []
+            assert g.validated is True
+
+    def test_stage0_input_equals_output(self):
+        config = _fast_config(retroactive_input=True)
+        engine = WaveEngine(config)
+
+        all_trans = engine.tt.get_all_transitions(0)
+        for (inp_t, out_t), _gadgets in all_trans.items():
+            assert inp_t == out_t
+
+    def test_stage0_marked_exhausted(self):
+        config = _fast_config(retroactive_input=True)
+        engine = WaveEngine(config)
+
+        assert 0 in engine.exhausted_stages
+
+    def test_no_prepopulation_without_flag(self):
+        config = _fast_config(retroactive_input=False)
+        engine = WaveEngine(config)
+
+        stage0_outputs = engine.tt.get_unique_outputs(0)
+        assert len(stage0_outputs) == 0
+        assert 0 not in engine.exhausted_stages
 
 
 class TestEndToEnd:

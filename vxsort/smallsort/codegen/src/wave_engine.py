@@ -14,6 +14,7 @@ import signal
 import time
 from collections import deque
 from dataclasses import dataclass, field
+from itertools import permutations
 from multiprocessing import Pool
 
 try:
@@ -261,6 +262,9 @@ class WaveEngine:
         # to enforce per-stage budgets within a wave.  None outside a wave.
         self._wave_start_attempts: list[int] | None = None
 
+        if config.retroactive_input:
+            self._prepopulate_retroactive_stage0()
+
     def _create_initial_state(self) -> VectorState:
         """Create initial vector state from first stage comparison pairs."""
         first_stage_pairs = self.all_stages[0]
@@ -270,6 +274,35 @@ class WaveEngine:
             top.append(pair[0])
             bottom.append(pair[1])
         return VectorState(top=top, bottom=bottom)
+
+    def _prepopulate_retroactive_stage0(self) -> None:
+        """Pre-populate stage 0 with all N! lane permutations of the comparison pairs.
+
+        Each permutation is a valid initial state with a zero-cost identity gadget.
+        The input and output states are identical (identity transition).
+        """
+        first_stage_pairs = self.all_stages[0]
+        identity_gadget = PermutationGadget(
+            top_instructions=[], bottom_instructions=[], validated=True
+        )
+
+        for perm in permutations(first_stage_pairs):
+            top = [p[0] for p in perm]
+            bottom = [p[1] for p in perm]
+            state = VectorState(top=top, bottom=bottom)
+            self.tt.add_transition(
+                stage=0,
+                input_state=state,
+                output_state=state,
+                gadget=identity_gadget,
+            )
+
+        # Mark all stage-0 outputs as forwarded so downstream stages can consume them
+        unforwarded = self.tt.get_unforwarded_outputs(0)
+        self.tt.mark_forwarded(0, [t for t, _vs in unforwarded])
+
+        # Stage 0 is fully solved — mark exhausted
+        self.exhausted_stages.add(0)
 
     # ------------------------------------------------------------------
     # Job creation
