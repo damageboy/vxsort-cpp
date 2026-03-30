@@ -37,6 +37,9 @@ class StageData:
     forwarded_outputs: set[StateTuple] = field(default_factory=set)
 
     consecutive_zero_budgets: int = 0
+    unproductive_waves: int = (
+        0  # waves targeting this stage with no new last-stage solutions
+    )
     attempts: int = 0
     dirty: bool = False  # Set when data changes; cleared after checkpoint save
 

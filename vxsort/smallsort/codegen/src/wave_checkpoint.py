@@ -240,6 +240,7 @@ class WaveCheckpoint:
             "attempted_pairs": _serialize_attempted_pairs(sd.attempted_pairs),
             "forwarded_outputs": _serialize_forwarded_outputs(sd.forwarded_outputs),
             "consecutive_zero_budgets": sd.consecutive_zero_budgets,
+            "unproductive_waves": sd.unproductive_waves,
         }
 
         raw_json = json.dumps(stage_data).encode("utf-8")
@@ -280,6 +281,7 @@ class WaveCheckpoint:
             stage_data["forwarded_outputs"]
         )
         sd.consecutive_zero_budgets = stage_data["consecutive_zero_budgets"]
+        sd.unproductive_waves = stage_data.get("unproductive_waves", 0)
 
     # -- scored paths ------------------------------------------------------
 

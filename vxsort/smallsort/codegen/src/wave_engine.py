@@ -726,25 +726,30 @@ class WaveEngine:
         """Select the stage to target for the next wave.
 
         - First wave always targets Stage 0.
-        - Subsequent waves: weakest stage (by success rate).
-        - Bubble-up: if a stage has consecutive_zero_budgets >= 2
-          and is not stage 0, go upstream.
+        - Subsequent waves: weakest stage (by success rate), but penalized
+          by ``unproductive_waves`` to avoid hammering stages that produce
+          local outputs without downstream progress.
+        - Bubble-up: if a stage has consecutive_zero_budgets >= 2 or
+          unproductive_waves >= 3, go upstream to create input diversity.
         """
         if self.wave_count == 0:
             return 0
 
         excluded = self.exhausted_stages | self._stalled_stages
-        target = self.tt.weakest_stage(exclude_exhausted=excluded)
+        target = self._pick_target(excluded)
         if target is None:
             return None
 
         sd = self.tt.stages[target]
-        if sd.consecutive_zero_budgets >= 2:
+        needs_bubble_up = sd.consecutive_zero_budgets >= 2 or sd.unproductive_waves >= 3
+
+        if needs_bubble_up:
             upstream = target - 1
             while upstream >= 0:
                 if upstream not in excluded:
                     return upstream
                 upstream -= 1
+            # All upstream exhausted/stalled — mark appropriately
             predecessors_exhausted = all(
                 s in self.exhausted_stages for s in range(target)
             )
@@ -753,9 +758,39 @@ class WaveEngine:
             else:
                 self._stalled_stages.add(target)
             excluded = self.exhausted_stages | self._stalled_stages
-            return self.tt.weakest_stage(exclude_exhausted=excluded)
+            return self._pick_target(excluded)
 
         return target
+
+    def _pick_target(self, excluded: set[int]) -> int | None:
+        """Pick the weakest stage, penalizing unproductive ones.
+
+        Stages with high ``unproductive_waves`` are deprioritized:
+        their output count is inflated so other stages look weaker
+        and get targeted instead.
+        """
+        best_idx: int | None = None
+        best_key = (float("inf"), float("inf"))
+
+        for i, sd in enumerate(self.tt.stages):
+            if i in excluded:
+                continue
+
+            n_outputs = len(sd.unique_outputs)
+            rate = n_outputs / sd.attempts if sd.attempts > 0 else 0.0
+
+            # Penalize unproductive stages: pretend they have more outputs
+            # so they look less "weak" and other stages get priority.
+            # Each unproductive wave adds a virtual output count penalty.
+            penalty = sd.unproductive_waves * 10
+            effective_outputs = n_outputs + penalty
+
+            key = (effective_outputs, rate)
+            if key < best_key:
+                best_key = key
+                best_idx = i
+
+        return best_idx
 
     # ------------------------------------------------------------------
     # Checkpointing
@@ -975,6 +1010,11 @@ class WaveEngine:
                     # Snapshot per-stage attempts so budget checks know
                     # how many attempts each stage has consumed this wave
                     self._wave_start_attempts = list(self._stage_attempts)
+                    last_stage_idx = len(self.all_stages) - 1
+                    last_stage_outputs_before = self.tt.unique_output_count(
+                        last_stage_idx
+                    )
+                    scored_before = len(self._all_scored_paths)
 
                     # Generate jobs for the target stage
                     self._generate_jobs_for_stage(target)
@@ -1076,6 +1116,23 @@ class WaveEngine:
 
                     # --- Wave complete ---
                     self._wave_start_attempts = None
+
+                    # Track downstream productivity: did this wave produce
+                    # new last-stage outputs or new scored paths?
+                    last_stage_outputs_after = self.tt.unique_output_count(
+                        last_stage_idx
+                    )
+                    scored_after = len(self._all_scored_paths)
+                    downstream_progress = (
+                        last_stage_outputs_after > last_stage_outputs_before
+                        or scored_after > scored_before
+                    )
+                    sd = self.tt.stages[target]
+                    if downstream_progress:
+                        sd.unproductive_waves = 0
+                    else:
+                        sd.unproductive_waves += 1
+
                     self._save_checkpoint()
 
                     # Update progress for exhausted stages
@@ -1100,13 +1157,20 @@ class WaveEngine:
                         ]
                         prop_str = f" | propagated: {', '.join(prop_parts)}"
                     scored_total = len(self._all_scored_paths)
+                    unprod = self.tt.stages[target].unproductive_waves
+                    unprod_str = (
+                        f" [yellow](unproductive x{unprod})[/yellow]"
+                        if unprod > 0
+                        else ""
+                    )
                     progress.console.print(
                         f"Wave {self.wave_count}: "
                         f"stage {target} targeted, "
                         f"+{new_outputs} outputs "
                         f"({stats['distinct_outputs']} total)"
                         f"{prop_str}"
-                        f" | {scored_total} paths scored total",
+                        f" | {scored_total} paths scored total"
+                        f"{unprod_str}",
                     )
 
                     if self.best_scores:
