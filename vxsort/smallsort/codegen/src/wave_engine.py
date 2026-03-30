@@ -376,6 +376,28 @@ class WaveEngine:
                 self._stalled_stages.add(target_stage)
             return
 
+        # Compute how many jobs we can still accept this wave
+        already_committed = (
+            len(self._pending_jobs[target_stage]) + self._in_flight[target_stage]
+        )
+        if self._wave_start_attempts is not None:
+            already_committed += (
+                self._stage_attempts[target_stage]
+                - self._wave_start_attempts[target_stage]
+            )
+        budget_remaining = max(0, self.config.wave_attempts - already_committed)
+
+        if budget_remaining == 0:
+            return
+
+        # Cap input states to avoid building millions of job tuples when
+        # only budget_remaining will be used (e.g. N! retroactive inputs).
+        num_candidates = len(self._candidates_with_index)
+        if num_candidates > 0:
+            max_inputs_needed = -(-budget_remaining // num_candidates)  # ceil div
+            if len(input_states) > max_inputs_needed:
+                input_states = input_states[:max_inputs_needed]
+
         new_jobs = self._make_jobs(target_stage, input_states)
 
         if not new_jobs:
@@ -389,16 +411,6 @@ class WaveEngine:
                 self._stalled_stages.add(target_stage)
             return
 
-        # Cap new jobs considering work already queued/in-flight/done this wave
-        already_committed = (
-            len(self._pending_jobs[target_stage]) + self._in_flight[target_stage]
-        )
-        if self._wave_start_attempts is not None:
-            already_committed += (
-                self._stage_attempts[target_stage]
-                - self._wave_start_attempts[target_stage]
-            )
-        budget_remaining = max(0, self.config.wave_attempts - already_committed)
         new_jobs = new_jobs[:budget_remaining]
         self._pending_jobs[target_stage].extend(new_jobs)
 
@@ -765,7 +777,7 @@ class WaveEngine:
         - Bubble-up: if a stage has consecutive_zero_budgets >= 2 or
           unproductive_waves >= 3, go upstream to create input diversity.
         """
-        if self.wave_count == 0:
+        if self.wave_count == 0 and 0 not in self.exhausted_stages:
             return 0
 
         excluded = self.exhausted_stages | self._stalled_stages
@@ -1002,12 +1014,13 @@ class WaveEngine:
             with progress:
                 stage_task_ids: dict[int, int] = {}
                 for s in range(len(self.all_stages)):
+                    n_unique = self.tt.unique_output_count(s)
                     tid = progress.add_task(
                         f"Stage {s}",
-                        total=self._stage_attempts[s],
+                        total=max(self._stage_attempts[s], n_unique),
                         start=False,
-                        successes=0,
-                        unique=0,
+                        successes=n_unique,
+                        unique=n_unique,
                     )
                     stage_task_ids[s] = tid
 
@@ -1173,7 +1186,8 @@ class WaveEngine:
                         if s in self.exhausted_stages:
                             tid = stage_task_ids.get(s)
                             if tid is not None:
-                                cum = self._stage_attempts[s] or 1
+                                n_unique = self.tt.unique_output_count(s)
+                                cum = max(self._stage_attempts[s], n_unique) or 1
                                 progress.update(
                                     tid,
                                     description=f"Stage {s} (exhausted)",
