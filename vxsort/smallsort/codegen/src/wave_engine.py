@@ -594,21 +594,11 @@ class WaveEngine:
                 ]
                 progress.set_status("Best: " + "  |  ".join(parts))
 
-    def _score_complete_paths(
-        self, paths: list[list[tuple]] | None = None
-    ) -> list[dict]:
-        """Score complete paths with LLVM-MCA.
-
-        If *paths* is ``None``, enumerates all new complete paths via the
-        TransitionTable. If *paths* is provided, scores exactly those paths.
+    def _score_complete_paths(self, paths: list[list[tuple]]) -> list[dict]:
+        """Score the given complete paths with LLVM-MCA.
 
         Returns a list of scored path dicts (newly scored only).
         """
-        if paths is None:
-            paths = self.tt.enumerate_complete_paths(
-                max_paths=self.config.max_paths_per_wave,
-                exclude_paths=self._scored_path_keys,
-            )
         if not paths:
             return []
 
@@ -710,7 +700,7 @@ class WaveEngine:
                         "cycles": cycles,
                     }
                     prev = self.best_scores.get(target_cpu)
-                    if prev is None or cycles < prev["cycles"]:
+                    if cycles > 0 and (prev is None or cycles < prev["cycles"]):
                         self.best_scores[target_cpu] = {
                             "throughput": throughput,
                             "cycles": cycles,
@@ -832,8 +822,15 @@ class WaveEngine:
         """
         budget_attempts = self.config.wave_attempts
         budget_outputs = self.config.wave_outputs
-        stage_attempts_start = self._stage_attempts[stage_idx]
-        outputs_before = self.tt.unique_output_count(stage_idx)
+
+        # Use wave-start snapshot for consistent budget tracking.
+        # This ensures overflow work from _enqueue_downstream is counted.
+        wave_start = (
+            self._wave_start_attempts[stage_idx]
+            if self._wave_start_attempts is not None
+            else self._stage_attempts[stage_idx]
+        )
+        outputs_at_wave_start = self.tt.unique_output_count(stage_idx)
 
         while True:
             if self._interrupted:
@@ -846,9 +843,9 @@ class WaveEngine:
             if drained > 0:
                 self._sync_progress_totals(progress, stage_task_ids)
 
-            # Check budget limits for this stage
-            attempts_this_wave = self._stage_attempts[stage_idx] - stage_attempts_start
-            new_outputs = self.tt.unique_output_count(stage_idx) - outputs_before
+            # Check budget limits for this stage (since wave start, not call start)
+            attempts_this_wave = self._stage_attempts[stage_idx] - wave_start
+            new_outputs = self.tt.unique_output_count(stage_idx) - outputs_at_wave_start
 
             if attempts_this_wave >= budget_attempts:
                 break
@@ -861,14 +858,9 @@ class WaveEngine:
                 if not self._pending_jobs[stage_idx]:
                     break
                 # Budget exhausted — leftover pending jobs stay for next wave
-                if self._wave_start_attempts is not None:
-                    used = (
-                        self._stage_attempts[stage_idx]
-                        + self._in_flight[stage_idx]
-                        - self._wave_start_attempts[stage_idx]
-                    )
-                    if used >= budget_attempts:
-                        break
+                used = attempts_this_wave + self._in_flight[stage_idx]
+                if used >= budget_attempts:
+                    break
 
             if drained == 0:
                 time.sleep(0.05)
@@ -876,7 +868,7 @@ class WaveEngine:
         # Checkpoint this stage
         self._save_checkpoint()
 
-        return self.tt.unique_output_count(stage_idx) - outputs_before
+        return self.tt.unique_output_count(stage_idx) - outputs_at_wave_start
 
     def _sync_progress_totals(
         self,
@@ -1188,6 +1180,8 @@ class WaveEngine:
         for entry in self._all_scored_paths:
             for cpu, scores in entry.get("scores", {}).items():
                 cycles = scores.get("cycles", float("inf"))
+                if cycles <= 0:
+                    continue  # skip LLVM-MCA failure sentinels
                 prev = self.best_scores.get(cpu)
                 if prev is None or cycles < prev["cycles"]:
                     self.best_scores[cpu] = {
