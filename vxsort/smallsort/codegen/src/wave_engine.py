@@ -312,11 +312,14 @@ class WaveEngine:
         self,
         stage_idx: int,
         input_states: list[VectorState],
+        limit: int | None = None,
     ) -> list[tuple[int, tuple]]:
         """Create (candidate_index, job_tuple) pairs, skipping already-attempted.
 
         Returns list of (candidate_index, job) where job is the tuple
         expected by ``_validate_gadget_worker``.
+
+        If *limit* is set, stop collecting once that many jobs are gathered.
         """
         stage_pairs = self.all_stages[stage_idx]
         jobs: list[tuple[int, tuple]] = []
@@ -348,6 +351,8 @@ class WaveEngine:
                     metadata,
                 )
                 jobs.append((cand_idx, job))
+                if limit is not None and len(jobs) >= limit:
+                    return jobs
 
         return jobs
 
@@ -376,7 +381,8 @@ class WaveEngine:
                 self._stalled_stages.add(target_stage)
             return
 
-        # Compute how many jobs we can still accept this wave
+        # Compute budget before _make_jobs so it can stop early
+        # (avoids building millions of tuples with N! retroactive inputs)
         already_committed = (
             len(self._pending_jobs[target_stage]) + self._in_flight[target_stage]
         )
@@ -387,18 +393,7 @@ class WaveEngine:
             )
         budget_remaining = max(0, self.config.wave_attempts - already_committed)
 
-        if budget_remaining == 0:
-            return
-
-        # Cap input states to avoid building millions of job tuples when
-        # only budget_remaining will be used (e.g. N! retroactive inputs).
-        num_candidates = len(self._candidates_with_index)
-        if num_candidates > 0:
-            max_inputs_needed = -(-budget_remaining // num_candidates)  # ceil div
-            if len(input_states) > max_inputs_needed:
-                input_states = input_states[:max_inputs_needed]
-
-        new_jobs = self._make_jobs(target_stage, input_states)
+        new_jobs = self._make_jobs(target_stage, input_states, limit=budget_remaining)
 
         if not new_jobs:
             predecessors_exhausted = all(
@@ -411,7 +406,6 @@ class WaveEngine:
                 self._stalled_stages.add(target_stage)
             return
 
-        new_jobs = new_jobs[:budget_remaining]
         self._pending_jobs[target_stage].extend(new_jobs)
 
     def _enqueue_downstream(
