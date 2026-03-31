@@ -1093,40 +1093,38 @@ class WaveEngine:
                     # from target+1 to the last stage.  A wave is not
                     # complete until every stage has had its turn.
                     #
-                    # _enqueue_downstream may have already created and
-                    # processed some jobs eagerly during result draining,
-                    # so we use get_unique_outputs (not get_unforwarded)
-                    # and rely on _make_jobs to skip already-attempted pairs.
+                    # Each downstream stage gets a fresh budget.  We reset
+                    # _wave_start_attempts for the stage so that eagerly-
+                    # processed work from _enqueue_downstream doesn't
+                    # consume the propagation budget.
                     propagation: dict[int, int] = {}
                     for stage_idx in range(target + 1, len(self.all_stages)):
                         if self._interrupted:
                             break
 
-                        # Generate jobs from ALL outputs of the previous stage
-                        prev_outputs = self.tt.get_unique_outputs(stage_idx - 1)
-                        if prev_outputs:
-                            input_states = list(prev_outputs.values())
+                        # Fresh budget: reset wave-start snapshot for this
+                        # stage so _run_stage_in_wave sees a full budget
+                        self._wave_start_attempts[stage_idx] = self._stage_attempts[
+                            stage_idx
+                        ]
+
+                        # Generate jobs from unforwarded outputs
+                        unforwarded = self.tt.get_unforwarded_outputs(stage_idx - 1)
+                        if unforwarded:
+                            input_states = [vs for _tup, vs in unforwarded]
+                            output_tuples = [tup for tup, _vs in unforwarded]
+                            self.tt.mark_forwarded(stage_idx - 1, output_tuples)
+
                             downstream_jobs = self._make_jobs(
                                 stage_idx, input_states, limit=self.config.wave_attempts
                             )
                             self._pending_jobs[stage_idx].extend(downstream_jobs)
 
-                        # Mark any unforwarded outputs as forwarded
-                        unforwarded = self.tt.get_unforwarded_outputs(stage_idx - 1)
-                        if unforwarded:
-                            self.tt.mark_forwarded(
-                                stage_idx - 1, [t for t, _vs in unforwarded]
-                            )
-
-                        # Always run the stage — even with no new jobs,
-                        # eagerly-processed results need to be accounted for
                         has_work = (
                             self._pending_jobs[stage_idx]
                             or self._in_flight[stage_idx] > 0
                         )
                         if not has_work:
-                            # No work at all for this stage — still continue
-                            # to the next stage (don't break the chain)
                             continue
 
                         self._sync_progress_totals(progress, stage_task_ids)
