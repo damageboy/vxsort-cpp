@@ -1120,13 +1120,6 @@ class WaveEngine:
                             )
                             self._pending_jobs[stage_idx].extend(downstream_jobs)
 
-                        has_work = (
-                            self._pending_jobs[stage_idx]
-                            or self._in_flight[stage_idx] > 0
-                        )
-                        if not has_work:
-                            continue
-
                         self._sync_progress_totals(progress, stage_task_ids)
                         tid = stage_task_ids.get(stage_idx)
                         if tid is not None:
