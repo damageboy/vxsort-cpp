@@ -407,6 +407,7 @@ def _generic_permutexvar(
     op_idx: BitVecRef,
     total_width: int,
     element_width: int,
+    solver: Solver,
     src: BitVecRef | None = None,
     mask: BitVecRef | None = None,
 ):
@@ -488,47 +489,58 @@ def _generic_permutexvar(
         else:
             elems[j] = permuted_elem
 
+    # Pin don't-care bits to zero to speed up Z3 constraint solving
+    # and avoid duplicate solutions.
+    for j in range(num_elements):
+        i = j * element_width
+        high_bits = Extract(i + element_width - 1, i + idx_bits_needed, op_idx)
+        solver.add(high_bits == 0)
+
     return simplify(Concat(elems[::-1]))
 
 
-def _mm256_permutexvar_epi32(a: BitVecRef, op_idx: BitVecRef):
+def _mm256_permutexvar_epi32(a: BitVecRef, op_idx: BitVecRef, solver: Solver):
     """
     Shuffle 32-bit integers across lanes in a 256-bit vector.
     Implements __m256i _mm256_permutevar8x32_epi32 (__m256i a, __m256i idx)
     See _generic_permutexvar for operation details.
     """
-    return _generic_permutexvar(a, op_idx, 256, 32)
+    return _generic_permutexvar(a, op_idx, 256, 32, solver=solver)
 
 
-def _mm512_permutexvar_epi32(a: BitVecRef, op_idx: BitVecRef):
+def _mm512_permutexvar_epi32(a: BitVecRef, op_idx: BitVecRef, solver: Solver):
     """
     Shuffle 32-bit integers across lanes in a 512-bit vector.
     Implements __m512i _mm512_permutexvar_epi32 (__m512i idx, __m512i a)
     See _generic_permutexvar for operation details.
     """
-    return _generic_permutexvar(a, op_idx, 512, 32)
+    return _generic_permutexvar(a, op_idx, 512, 32, solver=solver)
 
 
-def _mm256_permutexvar_epi64(a: BitVecRef, op_idx: BitVecRef):
+def _mm256_permutexvar_epi64(a: BitVecRef, op_idx: BitVecRef, solver: Solver):
     """
     Shuffle 64-bit integers across lanes in a 256-bit vector.
     Implements __m256i _mm256_permutexvar_epi64 (__m256i idx, __m256i a)
     See _generic_permutexvar for operation details.
     """
-    return _generic_permutexvar(a, op_idx, 256, 64)
+    return _generic_permutexvar(a, op_idx, 256, 64, solver=solver)
 
 
-def _mm512_permutexvar_epi64(a: BitVecRef, op_idx: BitVecRef):
+def _mm512_permutexvar_epi64(a: BitVecRef, op_idx: BitVecRef, solver: Solver):
     """
     Shuffle 64-bit integers across lanes in a 512-bit vector.
     Implements __m512i _mm512_permutexvar_epi64 (__m512i idx, __m512i a)
     See _generic_permutexvar for operation details.
     """
-    return _generic_permutexvar(a, op_idx, 512, 64)
+    return _generic_permutexvar(a, op_idx, 512, 64, solver=solver)
 
 
 def _mm512_mask_permutexvar_epi32(
-    src: BitVecRef, mask: BitVecRef, op_idx: BitVecRef, a: BitVecRef
+    src: BitVecRef,
+    mask: BitVecRef,
+    op_idx: BitVecRef,
+    a: BitVecRef,
+    solver: Solver,
 ):
     """
     Shuffle 32-bit integers across lanes in a 512-bit vector using writemask.
@@ -536,11 +548,15 @@ def _mm512_mask_permutexvar_epi32(
     Elements are copied from src when the corresponding mask bit is not set.
     See _generic_permutexvar for operation details.
     """
-    return _generic_permutexvar(a, op_idx, 512, 32, src=src, mask=mask)
+    return _generic_permutexvar(a, op_idx, 512, 32, src=src, mask=mask, solver=solver)
 
 
 def _mm512_mask_permutexvar_epi64(
-    src: BitVecRef, mask: BitVecRef, op_idx: BitVecRef, a: BitVecRef
+    src: BitVecRef,
+    mask: BitVecRef,
+    op_idx: BitVecRef,
+    a: BitVecRef,
+    solver: Solver,
 ):
     """
     Shuffle 64-bit integers across lanes in a 512-bit vector using writemask.
@@ -548,7 +564,7 @@ def _mm512_mask_permutexvar_epi64(
     Elements are copied from src when the corresponding mask bit is not set.
     See _generic_permutexvar for operation details.
     """
-    return _generic_permutexvar(a, op_idx, 512, 64, src=src, mask=mask)
+    return _generic_permutexvar(a, op_idx, 512, 64, src=src, mask=mask, solver=solver)
 
 
 ##
@@ -594,6 +610,7 @@ def _generic_permutex2var(
     op_idx: BitVecRef,
     b: BitVecRef,
     element_width: int,
+    solver: Solver,
     src: BitVecRef | None = None,
     mask: BitVecRef | None = None,
 ):
@@ -690,29 +707,44 @@ def _generic_permutex2var(
         else:
             elems[j] = permuted_elem
 
+    # Pin don't-care bits to zero to speed up Z3 constraint solving
+    # and avoid duplicate solutions.
+    for j in range(num_elements):
+        i = j * element_width
+        high_bits = Extract(i + element_width - 1, i + source_selector_bit + 1, op_idx)
+        solver.add(high_bits == 0)
+
     return simplify(Concat(elems[::-1]))
 
 
-def _mm512_permutex2var_epi32(a: BitVecRef, op_idx: BitVecRef, b: BitVecRef):
+def _mm512_permutex2var_epi32(
+    a: BitVecRef, op_idx: BitVecRef, b: BitVecRef, solver: Solver
+):
     """
     Shuffle 32-bit integers in a and b across lanes using two-source permutation.
     Implements __m512i _mm512_permutex2var_epi32 (__m512i a, __m512i idx, __m512i b)
     See _generic_permutex2var for operation details.
     """
-    return _generic_permutex2var(a, op_idx, b, 32)
+    return _generic_permutex2var(a, op_idx, b, 32, solver=solver)
 
 
-def _mm512_permutex2var_epi64(a: BitVecRef, op_idx: BitVecRef, b: BitVecRef):
+def _mm512_permutex2var_epi64(
+    a: BitVecRef, op_idx: BitVecRef, b: BitVecRef, solver: Solver
+):
     """
     Shuffle 64-bit integers in a and b across lanes using two-source permutation.
     Implements __m512i _mm512_permutex2var_epi64 (__m512i a, __m512i idx, __m512i b)
     See _generic_permutex2var for operation details.
     """
-    return _generic_permutex2var(a, op_idx, b, 64)
+    return _generic_permutex2var(a, op_idx, b, 64, solver=solver)
 
 
 def _mm512_mask_permutex2var_epi32(
-    a: BitVecRef, k: BitVecRef, op_idx: BitVecRef, b: BitVecRef
+    a: BitVecRef,
+    k: BitVecRef,
+    op_idx: BitVecRef,
+    b: BitVecRef,
+    solver: Solver,
 ):
     """
     Shuffle 32-bit integer elements in a and b across lanes using writemask.
@@ -720,11 +752,15 @@ def _mm512_mask_permutex2var_epi32(
     Elements are copied from a when the corresponding mask bit is not set.
     See _generic_permutex2var for operation details.
     """
-    return _generic_permutex2var(a, op_idx, b, 32, src=a, mask=k)
+    return _generic_permutex2var(a, op_idx, b, 32, src=a, mask=k, solver=solver)
 
 
 def _mm512_mask_permutex2var_epi64(
-    a: BitVecRef, k: BitVecRef, op_idx: BitVecRef, b: BitVecRef
+    a: BitVecRef,
+    k: BitVecRef,
+    op_idx: BitVecRef,
+    b: BitVecRef,
+    solver: Solver,
 ):
     """
     Shuffle 64-bit integer elements in a and b across lanes using writemask.
@@ -732,7 +768,7 @@ def _mm512_mask_permutex2var_epi64(
     Elements are copied from a when the corresponding mask bit is not set.
     See _generic_permutex2var for operation details.
     """
-    return _generic_permutex2var(a, op_idx, b, 64, src=a, mask=k)
+    return _generic_permutex2var(a, op_idx, b, 64, src=a, mask=k, solver=solver)
 
 
 def _select4_ps(src_128: BitVecRef, select: BitVecRef | BitVecNumRef) -> BitVecRef:
@@ -920,6 +956,7 @@ def _permute_pd_generic(
     a: BitVecRef,
     imm8: BitVecRef | int,
     num_lanes: int,
+    solver: Solver,
     k: BitVecRef | None = None,
     src: BitVecRef | None = None,
 ):
@@ -965,28 +1002,37 @@ def _permute_pd_generic(
             elements[j] = simplify(If(mask_bit == 1, tmp_elem, src_elem))
         result = simplify(Concat(elements[::-1]))
 
+    # Pin don't-care bits to zero to speed up Z3 constraint solving
+    # and avoid duplicate solutions.
+    if isinstance(imm, BitVecRef):
+        solver.add(Extract(7, 2, imm) == 0)
+
     return result
 
 
-def _mm256_permute_pd(a: BitVecRef, imm8: BitVecRef | int):
+def _mm256_permute_pd(a: BitVecRef, imm8: BitVecRef | int, solver: Solver):
     """Permutes 64-bit elements within 128-bit lanes. Operates on YMM registers (2 lanes)."""
-    return _permute_pd_generic(a, imm8, 2)
+    return _permute_pd_generic(a, imm8, 2, solver=solver)
 
 
-def _mm512_permute_pd(a: BitVecRef, imm8: BitVecRef | int):
+def _mm512_permute_pd(a: BitVecRef, imm8: BitVecRef | int, solver: Solver):
     """Permutes 64-bit elements within 128-bit lanes. Operates on ZMM registers (4 lanes)."""
-    return _permute_pd_generic(a, imm8, 4)
+    return _permute_pd_generic(a, imm8, 4, solver=solver)
 
 
 def _mm512_mask_permute_pd(
-    src: BitVecRef, k: BitVecRef, a: BitVecRef, imm8: BitVecRef | int
+    src: BitVecRef,
+    k: BitVecRef,
+    a: BitVecRef,
+    imm8: BitVecRef | int,
+    solver: Solver,
 ):
     """
     Shuffle double-precision (64-bit) floating-point elements in a within 128-bit lanes using the control in imm8,
     and store the results in dst using writemask k (elements are copied from src when the corresponding mask bit is not set).
     Implements __m512d _mm512_mask_permute_pd (__m512d src, __mmask8 k, __m512d a, const int imm8)
     """
-    return _permute_pd_generic(a, imm8, 4, k=k, src=src)
+    return _permute_pd_generic(a, imm8, 4, k=k, src=src, solver=solver)
 
 
 ##
@@ -1161,6 +1207,7 @@ def _shuffle_pd_generic(
     b: BitVecRef,
     imm8: BitVecRef | int,
     num_lanes: int,
+    solver: Solver,
     k: BitVecRef | None = None,
     src: BitVecRef | None = None,
 ):
@@ -1195,28 +1242,42 @@ def _shuffle_pd_generic(
             elements[j] = simplify(If(mask_bit == 1, tmp_elem, src_elem))
         result = simplify(Concat(elements[::-1]))
 
+    # Pin don't-care bits to zero to speed up Z3 constraint solving
+    # and avoid duplicate solutions.
+    if isinstance(imm, BitVecRef) and num_lanes * 2 < 8:
+        solver.add(Extract(7, num_lanes * 2, imm) == 0)
+
     return result
 
 
-def _mm256_shuffle_pd(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
+def _mm256_shuffle_pd(
+    a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int, solver: Solver
+):
     """Shuffles 64-bit elements within 128-bit lanes. Operates on YMM registers (2 lanes)."""
-    return _shuffle_pd_generic(a, b, imm8, 2)
+    return _shuffle_pd_generic(a, b, imm8, 2, solver=solver)
 
 
-def _mm512_shuffle_pd(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
+def _mm512_shuffle_pd(
+    a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int, solver: Solver
+):
     """Shuffles 64-bit elements within 128-bit lanes. Operates on ZMM registers (4 lanes)."""
-    return _shuffle_pd_generic(a, b, imm8, 4)
+    return _shuffle_pd_generic(a, b, imm8, 4, solver=solver)
 
 
 def _mm512_mask_shuffle_pd(
-    src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int
+    src: BitVecRef,
+    k: BitVecRef,
+    a: BitVecRef,
+    b: BitVecRef,
+    imm8: BitVecRef | int,
+    solver: Solver,
 ):
     """
     Shuffle double-precision (64-bit) floating-point elements within 128-bit lanes using the control in imm8,
     and store the results in dst using writemask k (elements are copied from src when the corresponding mask bit is not set).
     Implements __m512d _mm512_mask_shuffle_pd (__m512d src, __mmask8 k, __m512d a, __m512d b, const int imm8)
     """
-    return _shuffle_pd_generic(a, b, imm8, 4, k=k, src=src)
+    return _shuffle_pd_generic(a, b, imm8, 4, k=k, src=src, solver=solver)
 
 
 ##
@@ -1231,6 +1292,7 @@ def _generic_permutevar(
     b: BitVecRef,
     total_width: int,
     element_width: int,
+    solver: Solver,
     k: BitVecRef | None = None,
     src: BitVecRef | None = None,
 ):
@@ -1334,57 +1396,85 @@ def _generic_permutevar(
         else:
             elements[j] = selected
 
+    # Pin don't-care bits to zero to speed up Z3 constraint solving
+    # and avoid duplicate solutions.
+    used_bits_end = 2
+    for j in range(num_elements):
+        i = j * element_width
+        high_bits = Extract(i + element_width - 1, i + used_bits_end, b)
+        solver.add(high_bits == 0)
+    if element_width == 64:
+        for j in range(num_elements):
+            i = j * element_width
+            solver.add(Extract(i, i, b) == 0)
+
     return simplify(Concat(elements[::-1]))
 
 
-def _mm256_permutevar_ps(a: BitVecRef, b: BitVecRef):
+def _mm256_permutevar_ps(a: BitVecRef, b: BitVecRef, solver: Solver):
     """
     Shuffle single-precision (32-bit) floating-point elements in a within 128-bit lanes using the control in b.
     Implements __m256 _mm256_permutevar_ps (__m256 a, __m256i b)
     """
-    return _generic_permutevar(a, b, total_width=256, element_width=32)
+    return _generic_permutevar(a, b, total_width=256, element_width=32, solver=solver)
 
 
-def _mm512_permutevar_ps(a: BitVecRef, b: BitVecRef):
+def _mm512_permutevar_ps(a: BitVecRef, b: BitVecRef, solver: Solver):
     """
     Shuffle single-precision (32-bit) floating-point elements in a within 128-bit lanes using the control in b.
     Implements __m512 _mm512_permutevar_ps (__m512 a, __m512i b)
     """
-    return _generic_permutevar(a, b, total_width=512, element_width=32)
+    return _generic_permutevar(a, b, total_width=512, element_width=32, solver=solver)
 
 
-def _mm512_mask_permutevar_ps(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef):
+def _mm512_mask_permutevar_ps(
+    src: BitVecRef,
+    k: BitVecRef,
+    a: BitVecRef,
+    b: BitVecRef,
+    solver: Solver,
+):
     """
     Shuffle single-precision (32-bit) floating-point elements in a within 128-bit lanes using the control in b,
     and store the results in dst using writemask k (elements are copied from src when the corresponding mask bit is not set).
     Implements __m512 _mm512_mask_permutevar_ps (__m512 src, __mmask16 k, __m512 a, __m512i b)
     """
-    return _generic_permutevar(a, b, total_width=512, element_width=32, k=k, src=src)
+    return _generic_permutevar(
+        a, b, total_width=512, element_width=32, k=k, src=src, solver=solver
+    )
 
 
-def _mm256_permutevar_pd(a: BitVecRef, b: BitVecRef):
+def _mm256_permutevar_pd(a: BitVecRef, b: BitVecRef, solver: Solver):
     """
     Shuffle double-precision (64-bit) floating-point elements in a within 128-bit lanes using the control in b.
     Implements __m256d _mm256_permutevar_pd (__m256d a, __m256i b)
     """
-    return _generic_permutevar(a, b, total_width=256, element_width=64)
+    return _generic_permutevar(a, b, total_width=256, element_width=64, solver=solver)
 
 
-def _mm512_permutevar_pd(a: BitVecRef, b: BitVecRef):
+def _mm512_permutevar_pd(a: BitVecRef, b: BitVecRef, solver: Solver):
     """
     Shuffle double-precision (64-bit) floating-point elements in a within 128-bit lanes using the control in b.
     Implements __m512d _mm512_permutevar_pd (__m512d a, __m512i b)
     """
-    return _generic_permutevar(a, b, total_width=512, element_width=64)
+    return _generic_permutevar(a, b, total_width=512, element_width=64, solver=solver)
 
 
-def _mm512_mask_permutevar_pd(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef):
+def _mm512_mask_permutevar_pd(
+    src: BitVecRef,
+    k: BitVecRef,
+    a: BitVecRef,
+    b: BitVecRef,
+    solver: Solver,
+):
     """
     Shuffle double-precision (64-bit) floating-point elements in a within 128-bit lanes using the control in b,
     and store the results in dst using writemask k (elements are copied from src when the corresponding mask bit is not set).
     Implements __m512d _mm512_mask_permutevar_pd (__m512d src, __mmask8 k, __m512d a, __m512i b)
     """
-    return _generic_permutevar(a, b, total_width=512, element_width=64, k=k, src=src)
+    return _generic_permutevar(
+        a, b, total_width=512, element_width=64, k=k, src=src, solver=solver
+    )
 
 
 ##
@@ -1399,7 +1489,10 @@ def _mm512_mask_permutevar_pd(src: BitVecRef, k: BitVecRef, a: BitVecRef, b: Bit
 
 
 def _select4_128b(
-    src1: BitVecRef, src2: BitVecRef, control: BitVecRef | BitVecNumRef
+    src1: BitVecRef,
+    src2: BitVecRef,
+    control: BitVecRef | BitVecNumRef,
+    solver: Solver,
 ) -> BitVecRef:
     """
     Selects a 128-bit lane based on 4-bit control according to vperm2i128 semantics.
@@ -1439,10 +1532,19 @@ def _select4_128b(
     )
 
     # Apply zero flag if set
-    return simplify(If(zero_flag == 1, BitVecVal(0, 128), selected_lane))
+    result = simplify(If(zero_flag == 1, BitVecVal(0, 128), selected_lane))
+
+    # Pin don't-care bits to zero to speed up Z3 constraint solving
+    # and avoid duplicate solutions.
+    if isinstance(control, BitVecRef):
+        solver.add(Extract(2, 2, control) == 0)
+
+    return result
 
 
-def _mm256_permute2x128_si256(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
+def _mm256_permute2x128_si256(
+    a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int, solver: Solver
+):
     """
     Shuffle 128-bits (composed of integer data) selected by imm8 from a and b, and store the results in dst.
 
@@ -1476,7 +1578,7 @@ def _mm256_permute2x128_si256(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int)
     for i in range(2):
         # Extract control bits for this lane: imm8[3+i*4:i*4]
         control_bits = Extract(3 + i * 4, i * 4, imm)
-        lanes[i] = _select4_128b(a, b, control_bits)
+        lanes[i] = _select4_128b(a, b, control_bits, solver=solver)
 
     # Concatenate the lanes (reverse order since Concat puts first arg in MSB)
     return simplify(Concat(lanes[::-1]))
@@ -1879,6 +1981,7 @@ def _generic_blend(
     imm8: BitVecRef | int,
     total_width: int,
     element_width: int,
+    solver: Solver,
 ):
     """
     Generic implementation for immediate blend instructions that select elements from two source vectors.
@@ -1928,11 +2031,21 @@ def _generic_blend(
         # Blend: if mask bit is 1, use b; otherwise use a
         elements[j] = simplify(If(mask_bit == 1, b_elem, a_elem))
 
+    # Pin don't-care bits to zero to speed up Z3 constraint solving
+    # and avoid duplicate solutions.
+    if isinstance(imm8, BitVecRef) and num_elements < 8:
+        solver.add(Extract(7, num_elements, imm) == 0)
+
     return simplify(Concat(elements[::-1]))
 
 
 def _generic_blendv(
-    a: BitVecRef, b: BitVecRef, mask: BitVecRef, total_width: int, element_width: int
+    a: BitVecRef,
+    b: BitVecRef,
+    mask: BitVecRef,
+    total_width: int,
+    element_width: int,
+    solver: Solver,
 ):
     """
     Generic implementation for variable blend instructions that select elements from two source vectors.
@@ -1981,43 +2094,50 @@ def _generic_blendv(
         # Blend: if sign bit is 1, use b; otherwise use a
         elements[j] = simplify(If(sign_bit == 1, b_elem, a_elem))
 
+    # Pin don't-care bits to zero to speed up Z3 constraint solving
+    # and avoid duplicate solutions.
+    for j in range(num_elements):
+        i = j * element_width
+        low_bits = Extract(i + element_width - 2, i, mask)
+        solver.add(low_bits == 0)
+
     return simplify(Concat(elements[::-1]))
 
 
-def _mm256_blend_pd(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
+def _mm256_blend_pd(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int, solver: Solver):
     """
     Blend packed double-precision (64-bit) floating-point elements from "a" and "b" using control mask "imm8",
     and store the results in "dst".
     Implements __m256d _mm256_blend_pd (__m256d a, __m256d b, const int imm8)
     """
-    return _generic_blend(a, b, imm8, 256, 64)
+    return _generic_blend(a, b, imm8, 256, 64, solver=solver)
 
 
-def _mm256_blend_ps(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
+def _mm256_blend_ps(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int, solver: Solver):
     """
     Blend packed single-precision (32-bit) floating-point elements from "a" and "b" using control mask "imm8",
     and store the results in "dst".
     Implements __m256 _mm256_blend_ps (__m256 a, __m256 b, const int imm8)
     """
-    return _generic_blend(a, b, imm8, 256, 32)
+    return _generic_blend(a, b, imm8, 256, 32, solver=solver)
 
 
-def _mm256_blendv_pd(a: BitVecRef, b: BitVecRef, mask: BitVecRef):
+def _mm256_blendv_pd(a: BitVecRef, b: BitVecRef, mask: BitVecRef, solver: Solver):
     """
     Blend packed double-precision (64-bit) floating-point elements from "a" and "b" using "mask",
     and store the results in "dst".
     Implements __m256d _mm256_blendv_pd (__m256d a, __m256d b, __m256d mask)
     """
-    return _generic_blendv(a, b, mask, 256, 64)
+    return _generic_blendv(a, b, mask, 256, 64, solver=solver)
 
 
-def _mm256_blendv_ps(a: BitVecRef, b: BitVecRef, mask: BitVecRef):
+def _mm256_blendv_ps(a: BitVecRef, b: BitVecRef, mask: BitVecRef, solver: Solver):
     """
     Blend packed single-precision (32-bit) floating-point elements from "a" and "b" using "mask",
     and store the results in "dst".
     Implements __m256 _mm256_blendv_ps (__m256 a, __m256 b, __m256 mask)
     """
-    return _generic_blendv(a, b, mask, 256, 32)
+    return _generic_blendv(a, b, mask, 256, 32, solver=solver)
 
 
 ##
@@ -2038,6 +2158,7 @@ def _generic_alignr(
     imm8: BitVecRef | int,
     total_width: int,
     element_width: int,
+    solver: Solver,
     src: BitVecRef | None = None,
     k: BitVecRef | None = None,
 ):
@@ -2149,31 +2270,45 @@ def _generic_alignr(
             )
         result_elements = masked_elements
 
+    # Pin don't-care bits to zero to speed up Z3 constraint solving
+    # and avoid duplicate solutions.
+    if isinstance(imm, BitVecRef) and shift_bits_needed < 8:
+        solver.add(Extract(7, shift_bits_needed, imm) == 0)
+
     return simplify(Concat(result_elements[::-1]))
 
 
-def _mm256_alignr_epi32(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
+def _mm256_alignr_epi32(
+    a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int, solver: Solver
+):
     """
     Concatenate a and b into a 64-byte result, shift right by imm8 32-bit elements,
     and store the low 32 bytes (8 elements) in dst.
     Implements __m256i _mm256_alignr_epi32(__m256i a, __m256i b, const int imm8)
     See _generic_alignr for operation details.
     """
-    return _generic_alignr(a, b, imm8, 256, 32)
+    return _generic_alignr(a, b, imm8, 256, 32, solver=solver)
 
 
-def _mm512_alignr_epi32(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
+def _mm512_alignr_epi32(
+    a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int, solver: Solver
+):
     """
     Concatenate a and b into a 128-byte result, shift right by imm8 32-bit elements,
     and store the low 64 bytes (16 elements) in dst.
     Implements __m512i _mm512_alignr_epi32(__m512i a, __m512i b, const int imm8)
     See _generic_alignr for operation details.
     """
-    return _generic_alignr(a, b, imm8, 512, 32)
+    return _generic_alignr(a, b, imm8, 512, 32, solver=solver)
 
 
 def _mm512_mask_alignr_epi32(
-    src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int
+    src: BitVecRef,
+    k: BitVecRef,
+    a: BitVecRef,
+    b: BitVecRef,
+    imm8: BitVecRef | int,
+    solver: Solver,
 ):
     """
     Concatenate a and b into a 128-byte result, shift right by imm8 32-bit elements,
@@ -2182,31 +2317,40 @@ def _mm512_mask_alignr_epi32(
     Implements __m512i _mm512_mask_alignr_epi32(__m512i src, __mmask16 k, __m512i a, __m512i b, const int imm8)
     See _generic_alignr for operation details.
     """
-    return _generic_alignr(a, b, imm8, 512, 32, src=src, k=k)
+    return _generic_alignr(a, b, imm8, 512, 32, src=src, k=k, solver=solver)
 
 
-def _mm256_alignr_epi64(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
+def _mm256_alignr_epi64(
+    a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int, solver: Solver
+):
     """
     Concatenate a and b into a 64-byte result, shift right by imm8 64-bit elements,
     and store the low 32 bytes (4 elements) in dst.
     Implements __m256i _mm256_alignr_epi64(__m256i a, __m256i b, const int imm8)
     See _generic_alignr for operation details.
     """
-    return _generic_alignr(a, b, imm8, 256, 64)
+    return _generic_alignr(a, b, imm8, 256, 64, solver=solver)
 
 
-def _mm512_alignr_epi64(a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int):
+def _mm512_alignr_epi64(
+    a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int, solver: Solver
+):
     """
     Concatenate a and b into a 128-byte result, shift right by imm8 64-bit elements,
     and store the low 64 bytes (8 elements) in dst.
     Implements __m512i _mm512_alignr_epi64(__m512i a, __m512i b, const int imm8)
     See _generic_alignr for operation details.
     """
-    return _generic_alignr(a, b, imm8, 512, 64)
+    return _generic_alignr(a, b, imm8, 512, 64, solver=solver)
 
 
 def _mm512_mask_alignr_epi64(
-    src: BitVecRef, k: BitVecRef, a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int
+    src: BitVecRef,
+    k: BitVecRef,
+    a: BitVecRef,
+    b: BitVecRef,
+    imm8: BitVecRef | int,
+    solver: Solver,
 ):
     """
     Concatenate a and b into a 128-byte result, shift right by imm8 64-bit elements,
@@ -2215,7 +2359,7 @@ def _mm512_mask_alignr_epi64(
     Implements __m512i _mm512_mask_alignr_epi64(__m512i src, __mmask8 k, __m512i a, __m512i b, const int imm8)
     See _generic_alignr for operation details.
     """
-    return _generic_alignr(a, b, imm8, 512, 64, src=src, k=k)
+    return _generic_alignr(a, b, imm8, 512, 64, src=src, k=k, solver=solver)
 
 
 # ── Min / Max ────────────────────────────────────────────────────────────────

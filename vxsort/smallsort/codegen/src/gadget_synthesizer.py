@@ -6,6 +6,8 @@ available intrinsics registry, and the parallel validation worker.
 
 from __future__ import annotations
 
+import functools
+import inspect
 import io
 import os
 import tarfile
@@ -237,20 +239,33 @@ def _match_dispatch_rule(arg_keys: frozenset[str]) -> _IntrinsicDispatchRule | N
     return None
 
 
-def _dispatch_intrinsic_fallback(intrinsic, args: dict):
+@functools.lru_cache(maxsize=256)
+def _accepts_solver(intrinsic) -> bool:
+    """Return True if *intrinsic* has a ``solver`` keyword parameter."""
+    try:
+        return "solver" in inspect.signature(intrinsic).parameters
+    except (ValueError, TypeError):
+        return False
+
+
+def _dispatch_intrinsic_fallback(intrinsic, args: dict, solver: Solver):
     """Fallback positional dispatch that preserves incoming argument order."""
     arg_order = tuple(args.keys())
+    if _accepts_solver(intrinsic):
+        return intrinsic(*(args[key] for key in arg_order), solver=solver)
     return intrinsic(*(args[key] for key in arg_order))
 
 
-def _dispatch_intrinsic_by_signature(intrinsic, args: dict):
+def _dispatch_intrinsic_by_signature(intrinsic, args: dict, solver: Solver):
     """Call an intrinsic using the first matching dispatch rule.
 
     Falls back to legacy positional call order when no rule matches.
     """
     rule = _match_dispatch_rule(frozenset(args.keys()))
     if rule is None:
-        return _dispatch_intrinsic_fallback(intrinsic, args)
+        return _dispatch_intrinsic_fallback(intrinsic, args, solver=solver)
+    if _accepts_solver(intrinsic):
+        return intrinsic(*(args[key] for key in rule.call_order), solver=solver)
     return intrinsic(*(args[key] for key in rule.call_order))
 
 
@@ -539,10 +554,22 @@ class GadgetSynthesizer:
         eval_cache = {}
 
         top_output = self._evaluate(
-            graph.top, registers, ctx, symbolic_vars, mux_constraints, eval_cache
+            graph.top,
+            registers,
+            ctx,
+            symbolic_vars,
+            mux_constraints,
+            eval_cache,
+            solver=solver,
         )
         bottom_output = self._evaluate(
-            graph.bottom, registers, ctx, symbolic_vars, mux_constraints, eval_cache
+            graph.bottom,
+            registers,
+            ctx,
+            symbolic_vars,
+            mux_constraints,
+            eval_cache,
+            solver=solver,
         )
 
         # Identity side: pass through the input register
@@ -720,6 +747,7 @@ class GadgetSynthesizer:
         symbolic_vars: dict,
         mux_constraints: list,
         cache: dict,
+        solver: Solver,
     ):
         """Recursively evaluate a graph node to a Z3 expression.
 
@@ -751,10 +779,24 @@ class GadgetSynthesizer:
 
         elif isinstance(node, Mux):
             sel = self._evaluate(
-                node.select, registers, ctx, symbolic_vars, mux_constraints, cache
+                node.select,
+                registers,
+                ctx,
+                symbolic_vars,
+                mux_constraints,
+                cache,
+                solver=solver,
             )
             sources = [
-                self._evaluate(s, registers, ctx, symbolic_vars, mux_constraints, cache)
+                self._evaluate(
+                    s,
+                    registers,
+                    ctx,
+                    symbolic_vars,
+                    mux_constraints,
+                    cache,
+                    solver=solver,
+                )
                 for s in node.sources
             ]
             # Range constraint
@@ -776,9 +818,15 @@ class GadgetSynthesizer:
             args = {}
             for key, operand in node.operands.items():
                 args[key] = self._evaluate(
-                    operand, registers, ctx, symbolic_vars, mux_constraints, cache
+                    operand,
+                    registers,
+                    ctx,
+                    symbolic_vars,
+                    mux_constraints,
+                    cache,
+                    solver=solver,
                 )
-            result = _dispatch_intrinsic_by_signature(intrinsic_fn, args)
+            result = _dispatch_intrinsic_by_signature(intrinsic_fn, args, solver=solver)
             # Apply combined mux pruning for any Mux children
             self._apply_mux_pruning(node, symbolic_vars, mux_constraints)
         else:
@@ -1092,7 +1140,9 @@ class GadgetSynthesizer:
                 else:
                     args[key] = value
 
-            current_reg = _dispatch_intrinsic_by_signature(intrinsic, args)
+            current_reg = _dispatch_intrinsic_by_signature(
+                intrinsic, args, solver=Solver()
+            )
             results.append(current_reg)
 
         return current_reg, []
