@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from time import sleep
 
 from rich.console import Console, RenderableType
@@ -13,6 +13,7 @@ from rich.progress import (
     TextColumn,
 )
 from rich.rule import Rule
+from rich.table import Column
 from rich.text import Text
 
 from memory_monitor import collect_memory_snapshot
@@ -28,8 +29,13 @@ class DualBarColumn(BarColumn):
         bar_width: int = 40,
         attempt_style: str = "yellow",
         success_style: str = "green",
+        table_column: Column | None = None,
     ):
-        super().__init__(bar_width=bar_width, complete_style=attempt_style)
+        super().__init__(
+            bar_width=bar_width,
+            complete_style=attempt_style,
+            table_column=table_column,
+        )
         self.attempt_style = attempt_style
         self.success_style = success_style
 
@@ -144,12 +150,31 @@ class TqdmColumn(ProgressColumn):
         return f"  {minutes:02d}:{seconds:02d}"
 
 
+class AttemptsColumn(ProgressColumn):
+    """Render the attempt count (completed units)."""
+
+    def render(self, task):
+        return Text(str(int(task.completed)), style="yellow")
+
+
+class RateColumn(ProgressColumn):
+    """Render per-task throughput as items per second."""
+
+    def render(self, task):
+        speed = task.speed or 0.0
+        return Text(f"{speed:7.2f}/s", style="progress.data.speed")
+
+
 class SuccessProgress(Progress):
     """A Progress subclass that automatically tracks cumulative successes."""
 
     def __init__(self, *args, **kwargs):
         self._memory_monitor_enabled = False
         self._status_text: str | None = None
+        self._show_table_header: bool = False
+        self._extra_renderables_provider: (
+            Callable[[], Iterable[RenderableType]] | None
+        ) = None
         super().__init__(*args, **kwargs)
 
     def enable_memory_monitor(self) -> None:
@@ -160,11 +185,22 @@ class SuccessProgress(Progress):
         """Set a persistent status line shown below the progress bars."""
         self._status_text = text
 
+    def set_extra_renderables_provider(
+        self, provider: Callable[[], Iterable[RenderableType]] | None
+    ) -> None:
+        """Set a callback that yields additional live renderables."""
+        self._extra_renderables_provider = provider
+
     def get_renderables(self) -> Iterable[RenderableType]:
         """Yield standard progress table, optionally followed by status and memory stats."""
-        yield self.make_tasks_table(self.tasks)
+        task_table = self.make_tasks_table(self.tasks)
+        if self._show_table_header:
+            task_table.show_header = True
+        yield task_table
         if self._status_text is not None:
             yield Text(self._status_text, style="bold green")
+        if self._extra_renderables_provider is not None:
+            yield from self._extra_renderables_provider()
         if self._memory_monitor_enabled:
             snapshot = collect_memory_snapshot()
             if snapshot is not None:
@@ -179,8 +215,37 @@ class SuccessProgress(Progress):
         attempt_style: str = "yellow",
         success_label: str = "Valid",
         unique_label: str = "Unique",
+        compact_stage_table: bool = False,
     ) -> SuccessProgress:
         """Factory method to create a SuccessProgress with standard columns."""
+        if compact_stage_table:
+            progress = SuccessProgress(
+                TextColumn(
+                    "{task.description}",
+                    table_column=Column("Stage", style="orange1"),
+                ),
+                DualBarColumn(
+                    bar_width=width,
+                    attempt_style=attempt_style,
+                    success_style=success_style,
+                    table_column=Column("Progress"),
+                ),
+                AttemptsColumn(table_column=Column("Attempts", justify="right")),
+                TextColumn(
+                    f"[{success_style}]{{task.fields[successes]}}[/]",
+                    table_column=Column(success_label, justify="right"),
+                ),
+                TextColumn(
+                    "[cyan]{task.fields[unique]}[/]",
+                    table_column=Column(unique_label, justify="right"),
+                ),
+                RateColumn(table_column=Column("Rate", justify="right")),
+                console=console,
+                refresh_per_second=1,
+            )
+            progress._show_table_header = True
+            return progress
+
         return SuccessProgress(
             TextColumn(description_column),
             TaskProgressColumn(),

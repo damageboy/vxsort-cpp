@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from itertools import permutations
 from multiprocessing import Pool
 
+from rich.table import Table
+
 try:
     from .bitonic_sorter import BitonicSorter
     from .bitonic_types import (
@@ -410,6 +412,51 @@ class WaveEngine:
         visit(getattr(graph, "bottom", None))
         return instruction_keys
 
+    def _instruction_stats_renderables(self) -> list[Table]:
+        """Build Rich renderables for live instruction-attempt statistics."""
+        snapshot = self.instruction_stats.snapshot_aggregated()
+        if not snapshot:
+            return []
+
+        rows = sorted(
+            snapshot.items(),
+            key=lambda item: (
+                -(
+                    item[1].attempts_unique / item[1].attempts_total
+                    if item[1].attempts_total
+                    else 0.0
+                ),
+                -item[1].attempts_unique,
+                -item[1].attempts_total,
+                item[0],
+            ),
+        )
+        rows = rows[: self.config.top_k]
+
+        table = Table(
+            title="Instruction Stats",
+            show_header=True,
+            header_style="bold cyan",
+            box=None,
+            pad_edge=False,
+        )
+        table.add_column("Instr", style="bold magenta", no_wrap=True)
+        table.add_column("Attempts", justify="right")
+        table.add_column("NoValid", justify="right")
+        table.add_column("Valid", justify="right")
+        table.add_column("Unique", justify="right")
+
+        for key, stats in rows:
+            table.add_row(
+                key,
+                str(stats.attempts_total),
+                str(stats.attempts_no_valid),
+                str(stats.attempts_valid),
+                str(stats.attempts_unique),
+            )
+
+        return [table]
+
     # ------------------------------------------------------------------
     # Job generation and enqueueing
     # ------------------------------------------------------------------
@@ -645,7 +692,9 @@ class WaveEngine:
             else:
                 outcome = "no_valid"
             if instruction_keys:
-                self.instruction_stats.record_attempt(instruction_keys, outcome)
+                self.instruction_stats.record_attempt(
+                    stage_idx, instruction_keys, outcome
+                )
 
             if progress and stage_task_ids:
                 tid = stage_task_ids.get(stage_idx)
@@ -1063,8 +1112,9 @@ class WaveEngine:
             maxtasksperchild=self.config.max_tasks_per_child,
         )
 
-        progress = SuccessProgress.create()
+        progress = SuccessProgress.create(compact_stage_table=True)
         progress.enable_memory_monitor()
+        progress.set_extra_renderables_provider(self._instruction_stats_renderables)
 
         try:
             with progress:
@@ -1072,7 +1122,7 @@ class WaveEngine:
                 for s in range(len(self.all_stages)):
                     n_unique = self.tt.unique_output_count(s)
                     tid = progress.add_task(
-                        f"Stage {s}",
+                        str(s),
                         total=max(self._stage_attempts[s], n_unique),
                         start=False,
                         successes=n_unique,
@@ -1121,16 +1171,6 @@ class WaveEngine:
                     # Generate jobs for the target stage
                     self._generate_jobs_for_stage(target)
                     self._sync_progress_totals(progress, stage_task_ids)
-
-                    task_id = stage_task_ids.get(target)
-                    if task_id is not None:
-                        progress.update(
-                            task_id,
-                            description=(
-                                f"[bold]Stage {target}[/bold] "
-                                f"(wave {self.wave_count})"
-                            ),
-                        )
 
                     # Run target stage with budget
                     new_outputs = self._run_stage_in_wave(
@@ -1183,15 +1223,6 @@ class WaveEngine:
                             self._pending_jobs[stage_idx].extend(downstream_jobs)
 
                         self._sync_progress_totals(progress, stage_task_ids)
-                        tid = stage_task_ids.get(stage_idx)
-                        if tid is not None:
-                            progress.update(
-                                tid,
-                                description=(
-                                    f"[bold]Stage {stage_idx}[/bold] "
-                                    f"(wave {self.wave_count})"
-                                ),
-                            )
 
                         stage_new = self._run_stage_in_wave(
                             stage_idx,
@@ -1250,7 +1281,6 @@ class WaveEngine:
                                 cum = max(self._stage_attempts[s], n_unique) or 1
                                 progress.update(
                                     tid,
-                                    description=f"Stage {s} (exhausted)",
                                     total=cum,
                                     completed=cum,
                                 )

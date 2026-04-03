@@ -134,3 +134,19 @@ class TestSuccessProgressMemoryMonitor:
         renderables = list(progress.get_renderables())
         # Only tasks table when snapshot is None
         assert len(renderables) == 1
+
+
+class TestSuccessProgressExtraRenderables:
+    def test_get_renderables_includes_extra_renderables(self):
+        progress = SuccessProgress.create()
+        progress.add_task("test", total=10, successes=0, unique=0)
+        progress.set_status("Live status")
+        progress.set_extra_renderables_provider(lambda: [Text("instruction stats")])
+
+        renderables = list(progress.get_renderables())
+
+        assert len(renderables) == 3
+        assert isinstance(renderables[1], Text)
+        assert str(renderables[1]) == "Live status"
+        assert isinstance(renderables[2], Text)
+        assert str(renderables[2]) == "instruction stats"

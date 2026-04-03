@@ -53,15 +53,18 @@ class InstructionStatsCollector:
     """Collect instruction attempt outcomes keyed by normalized instruction."""
 
     def __init__(self) -> None:
-        self._stats: dict[str, InstructionAttemptStats] = {}
+        self._by_stage: dict[int, dict[str, InstructionAttemptStats]] = {}
 
-    def record_attempt(self, instruction_keys: list[str], outcome: str) -> None:
+    def record_attempt(
+        self, stage_idx: int, instruction_keys: list[str], outcome: str
+    ) -> None:
         """Record one attempt outcome for each participating instruction key."""
         if outcome not in {"no_valid", "valid", "unique"}:
             raise ValueError(f"Unknown instruction outcome: {outcome}")
 
+        stage_stats = self._by_stage.setdefault(stage_idx, {})
         for key in instruction_keys:
-            stats = self._stats.get(key)
+            stats = stage_stats.get(key)
             if stats is None:
                 stats = InstructionAttemptStats()
             updates = {
@@ -76,8 +79,29 @@ class InstructionStatsCollector:
                 updates["attempts_valid"] += 1
             else:
                 updates["attempts_unique"] += 1
-            self._stats[key] = InstructionAttemptStats(**updates)
+            stage_stats[key] = InstructionAttemptStats(**updates)
+
+    def snapshot_by_stage(self) -> dict[int, dict[str, InstructionAttemptStats]]:
+        """Return an immutable snapshot of counters keyed by stage index."""
+        return {
+            stage_idx: dict(stage_stats)
+            for stage_idx, stage_stats in self._by_stage.items()
+        }
+
+    def snapshot_aggregated(self) -> dict[str, InstructionAttemptStats]:
+        """Return counters aggregated across all stages."""
+        aggregated: dict[str, InstructionAttemptStats] = {}
+        for stage_stats in self._by_stage.values():
+            for key, stats in stage_stats.items():
+                prev = aggregated.get(key, InstructionAttemptStats())
+                aggregated[key] = InstructionAttemptStats(
+                    attempts_total=prev.attempts_total + stats.attempts_total,
+                    attempts_no_valid=prev.attempts_no_valid + stats.attempts_no_valid,
+                    attempts_valid=prev.attempts_valid + stats.attempts_valid,
+                    attempts_unique=prev.attempts_unique + stats.attempts_unique,
+                )
+        return aggregated
 
     def snapshot(self) -> dict[str, InstructionAttemptStats]:
-        """Return an immutable snapshot of the current counters."""
-        return dict(self._stats)
+        """Backward-compatible aggregated snapshot of current counters."""
+        return self.snapshot_aggregated()

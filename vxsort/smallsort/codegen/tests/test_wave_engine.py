@@ -3,6 +3,8 @@
 import math
 import queue
 
+from rich.console import Console
+
 from utils import primitive_type, vector_machine
 from wave_engine import WaveConfig, WaveEngine
 
@@ -266,11 +268,11 @@ class TestInstructionStatsDrain:
         drained = engine._drain_results(completion_queue)
 
         assert drained == 1
-        stats = engine.instruction_stats.snapshot()
-        assert stats["test_add"].attempts_total == 1
-        assert stats["test_add"].attempts_no_valid == 0
-        assert stats["test_add"].attempts_valid == 0
-        assert stats["test_add"].attempts_unique == 1
+        by_stage = engine.instruction_stats.snapshot_by_stage()
+        assert by_stage[0]["test_add"].attempts_total == 1
+        assert by_stage[0]["test_add"].attempts_no_valid == 0
+        assert by_stage[0]["test_add"].attempts_valid == 0
+        assert by_stage[0]["test_add"].attempts_unique == 1
 
     def test_valid_non_unique_attempt_is_recorded(self):
         config = _fast_config()
@@ -309,11 +311,11 @@ class TestInstructionStatsDrain:
         drained = engine._drain_results(completion_queue)
 
         assert drained == 1
-        stats = engine.instruction_stats.snapshot()
-        assert stats["test_add"].attempts_total == 1
-        assert stats["test_add"].attempts_no_valid == 0
-        assert stats["test_add"].attempts_valid == 1
-        assert stats["test_add"].attempts_unique == 0
+        by_stage = engine.instruction_stats.snapshot_by_stage()
+        assert by_stage[0]["test_add"].attempts_total == 1
+        assert by_stage[0]["test_add"].attempts_no_valid == 0
+        assert by_stage[0]["test_add"].attempts_valid == 1
+        assert by_stage[0]["test_add"].attempts_unique == 0
 
     def test_no_valid_attempt_is_recorded(self):
         config = _fast_config()
@@ -339,11 +341,59 @@ class TestInstructionStatsDrain:
         drained = engine._drain_results(completion_queue)
 
         assert drained == 1
-        stats = engine.instruction_stats.snapshot()
-        assert stats["test_add"].attempts_total == 1
-        assert stats["test_add"].attempts_no_valid == 1
-        assert stats["test_add"].attempts_valid == 0
-        assert stats["test_add"].attempts_unique == 0
+        by_stage = engine.instruction_stats.snapshot_by_stage()
+        assert by_stage[0]["test_add"].attempts_total == 1
+        assert by_stage[0]["test_add"].attempts_no_valid == 1
+        assert by_stage[0]["test_add"].attempts_valid == 0
+        assert by_stage[0]["test_add"].attempts_unique == 0
+
+
+class TestInstructionStatsDisplay:
+    """WaveEngine should render instruction stats as a keyed table."""
+
+    def test_instruction_stats_table_uses_keys_as_rows(self):
+        config = _fast_config(top_k=2)
+        engine = WaveEngine(config)
+
+        engine.instruction_stats.record_attempt(
+            1, ["_mm256_shuffle_epi16_imm"], "unique"
+        )
+        engine.instruction_stats.record_attempt(
+            2, ["_mm256_shuffle_epi16_imm"], "valid"
+        )
+        engine.instruction_stats.record_attempt(
+            3, ["_mm256_permutevar8x32_epi32_v"], "no_valid"
+        )
+        engine.instruction_stats.record_attempt(
+            3, ["_mm256_permutevar8x32_epi32_v"], "no_valid"
+        )
+        engine.instruction_stats.record_attempt(4, ["_mm256_unpacklo_epi32"], "unique")
+
+        renderables = engine._instruction_stats_renderables()
+
+        assert len(renderables) == 1
+        table = renderables[0]
+        assert table.title == "Instruction Stats"
+        assert [column.header for column in table.columns] == [
+            "Instr",
+            "Attempts",
+            "NoValid",
+            "Valid",
+            "Unique",
+        ]
+
+        console = Console(record=True, width=200)
+        console.print(table)
+        rendered = console.export_text()
+
+        assert "_mm256_shuffle_epi16_imm" in rendered
+        assert "_mm256_unpacklo_epi32" in rendered
+        assert "_mm256_permutevar8x32_epi32_v" not in rendered
+        assert "2" in rendered
+        assert "50.0%" not in rendered
+        assert rendered.index("_mm256_unpacklo_epi32") < rendered.index(
+            "_mm256_shuffle_epi16_imm"
+        )
 
 
 class TestRetroactiveInput:
