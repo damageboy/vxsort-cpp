@@ -20,9 +20,16 @@ from multiprocessing import Pool
 try:
     from .bitonic_sorter import BitonicSorter
     from .bitonic_types import (
+        IntrinsicNode,
+        InstructionSpec,
+        Mux,
         PermutationGadget,
         SolutionNode,
         VectorState,
+    )
+    from .instruction_stats import (
+        InstructionStatsCollector,
+        normalize_instruction_stats_key,
     )
     from .gadget_synthesizer import (
         GadgetSynthesizer,
@@ -35,9 +42,16 @@ try:
 except ImportError:
     from bitonic_sorter import BitonicSorter  # type: ignore[no-redef]
     from bitonic_types import (  # type: ignore[no-redef]
+        IntrinsicNode,
+        InstructionSpec,
+        Mux,
         PermutationGadget,
         SolutionNode,
         VectorState,
+    )
+    from instruction_stats import (  # type: ignore[no-redef]
+        InstructionStatsCollector,
+        normalize_instruction_stats_key,
     )
     from gadget_synthesizer import (  # type: ignore[no-redef]
         GadgetSynthesizer,
@@ -258,6 +272,9 @@ class WaveEngine:
         # Accumulated scored paths across entire run
         self._all_scored_paths: list[dict] = []
 
+        # Runtime instruction-usage telemetry
+        self.instruction_stats = InstructionStatsCollector()
+
         # Per-stage attempt snapshot at wave start.  Used by _submit_jobs
         # to enforce per-stage budgets within a wave.  None outside a wave.
         self._wave_start_attempts: list[int] | None = None
@@ -330,11 +347,14 @@ class WaveEngine:
                 if self.tt.was_attempted(stage_idx, input_tuple, cand_idx):
                     continue
 
+                instruction_keys = self._collect_instruction_stats_keys(graph)
+
                 metadata = {
                     "input_state": input_state,
                     "stage_idx": stage_idx,
                     "max_unique_outputs": self.config.max_unique_outputs,
                     "candidate_index": cand_idx,
+                    "instruction_keys": instruction_keys,
                 }
                 # Final natural-order stage must enforce strict lane order
                 if self.config.natural_order and stage_idx == len(self.all_stages) - 1:
@@ -355,6 +375,40 @@ class WaveEngine:
                     return jobs
 
         return jobs
+
+    def _collect_instruction_stats_keys(self, graph) -> list[str]:
+        """Collect normalized instruction keys for one candidate graph."""
+        visited: set[int] = set()
+        instruction_keys: list[str] = []
+
+        def visit(node) -> None:
+            if node is None:
+                return
+
+            if isinstance(node, IntrinsicNode):
+                node_id = id(node)
+                if node_id in visited:
+                    return
+                visited.add(node_id)
+                for operand in node.operands.values():
+                    visit(operand)
+                instruction_keys.append(
+                    normalize_instruction_stats_key(
+                        InstructionSpec(
+                            node.name,
+                            {key: None for key in node.operands},
+                        )
+                    )
+                )
+                return
+
+            if isinstance(node, Mux):
+                for source in node.sources:
+                    visit(source)
+
+        visit(getattr(graph, "top", None))
+        visit(getattr(graph, "bottom", None))
+        return instruction_keys
 
     # ------------------------------------------------------------------
     # Job generation and enqueueing
@@ -553,6 +607,7 @@ class WaveEngine:
             success = 1 if gadget_results else 0
 
             cand_index = _metadata.get("candidate_index", -1)
+            instruction_keys = _metadata.get("instruction_keys", [])
             self.tt.record_attempted_pair(stage_idx, input_state.as_tuple(), cand_index)
             self.tt.record_attempt(stage_idx)
             self._stage_attempts[stage_idx] += 1
@@ -584,6 +639,13 @@ class WaveEngine:
                                 f"Warning: on-the-fly scoring failed: {score_exc}",
                                 file=sys.stderr,
                             )
+
+            if gadget_results:
+                outcome = "unique" if new_unique > 0 else "valid"
+            else:
+                outcome = "no_valid"
+            if instruction_keys:
+                self.instruction_stats.record_attempt(instruction_keys, outcome)
 
             if progress and stage_task_ids:
                 tid = stage_task_ids.get(stage_idx)

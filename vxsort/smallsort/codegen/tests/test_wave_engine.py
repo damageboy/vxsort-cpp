@@ -1,6 +1,7 @@
 """Tests for WaveEngine: wave-based iterative synthesis orchestrator."""
 
 import math
+import queue
 
 from utils import primitive_type, vector_machine
 from wave_engine import WaveConfig, WaveEngine
@@ -224,6 +225,125 @@ class TestExportToSolutionNodes:
         # Children should link to stage 1
         assert len(nodes[0].children) == 1
         assert nodes[0].children[0].stage == 1
+
+
+class TestInstructionStatsDrain:
+    """_drain_results should classify attempt outcomes for instruction stats."""
+
+    def test_unique_output_attempt_is_recorded(self):
+        config = _fast_config()
+        engine = WaveEngine(config)
+
+        from bitonic_types import InstructionSpec, PermutationGadget, VectorState
+
+        gadget = PermutationGadget(
+            top_instructions=[InstructionSpec("test_add", {"src": "top"})],
+            bottom_instructions=[],
+            validated=True,
+        )
+        input_state = engine.initial_state
+        output_state = VectorState(
+            top=[x + 1 for x in input_state.top],
+            bottom=[x + 1 for x in input_state.bottom],
+        )
+
+        completion_queue: queue.Queue = queue.Queue()
+        completion_queue.put(
+            (
+                "ok",
+                0,
+                (
+                    [(gadget, output_state)],
+                    input_state,
+                    {"candidate_index": 7, "instruction_keys": ["test_add"]},
+                    None,
+                    None,
+                ),
+            )
+        )
+        engine._in_flight[0] = 1
+
+        drained = engine._drain_results(completion_queue)
+
+        assert drained == 1
+        stats = engine.instruction_stats.snapshot()
+        assert stats["test_add"].attempts_total == 1
+        assert stats["test_add"].attempts_no_valid == 0
+        assert stats["test_add"].attempts_valid == 0
+        assert stats["test_add"].attempts_unique == 1
+
+    def test_valid_non_unique_attempt_is_recorded(self):
+        config = _fast_config()
+        engine = WaveEngine(config)
+
+        from bitonic_types import InstructionSpec, PermutationGadget, VectorState
+
+        gadget = PermutationGadget(
+            top_instructions=[InstructionSpec("test_add", {"src": "top"})],
+            bottom_instructions=[],
+            validated=True,
+        )
+        input_state = engine.initial_state
+        output_state = VectorState(
+            top=[x + 2 for x in input_state.top],
+            bottom=[x + 2 for x in input_state.bottom],
+        )
+        engine.tt.add_transition(0, input_state, output_state, gadget)
+
+        completion_queue: queue.Queue = queue.Queue()
+        completion_queue.put(
+            (
+                "ok",
+                0,
+                (
+                    [(gadget, output_state)],
+                    input_state,
+                    {"candidate_index": 11, "instruction_keys": ["test_add"]},
+                    None,
+                    None,
+                ),
+            )
+        )
+        engine._in_flight[0] = 1
+
+        drained = engine._drain_results(completion_queue)
+
+        assert drained == 1
+        stats = engine.instruction_stats.snapshot()
+        assert stats["test_add"].attempts_total == 1
+        assert stats["test_add"].attempts_no_valid == 0
+        assert stats["test_add"].attempts_valid == 1
+        assert stats["test_add"].attempts_unique == 0
+
+    def test_no_valid_attempt_is_recorded(self):
+        config = _fast_config()
+        engine = WaveEngine(config)
+        input_state = engine.initial_state
+
+        completion_queue: queue.Queue = queue.Queue()
+        completion_queue.put(
+            (
+                "ok",
+                0,
+                (
+                    [],
+                    input_state,
+                    {"candidate_index": 13, "instruction_keys": ["test_add"]},
+                    None,
+                    None,
+                ),
+            )
+        )
+        engine._in_flight[0] = 1
+
+        drained = engine._drain_results(completion_queue)
+
+        assert drained == 1
+        stats = engine.instruction_stats.snapshot()
+        assert stats["test_add"].attempts_total == 1
+        assert stats["test_add"].attempts_no_valid == 1
+        assert stats["test_add"].attempts_valid == 0
+        assert stats["test_add"].attempts_unique == 0
 
 
 class TestRetroactiveInput:
