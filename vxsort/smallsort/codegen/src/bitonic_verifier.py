@@ -335,6 +335,7 @@ class BitonicPathVerifier:
         """
         N = 2 * self.elements_per_vector
         num_stages = len(steps)
+        solver = Solver()
 
         elems = [BitVec(f"e_{i}", self.lane_width) for i in range(N)]
 
@@ -347,10 +348,18 @@ class BitonicPathVerifier:
             is_last_stage = step_idx == num_stages - 1
 
             new_top = self._apply_concrete_instructions(
-                top_vec, bottom_vec, gadget.top_instructions, is_top=True
+                top_vec,
+                bottom_vec,
+                gadget.top_instructions,
+                is_top=True,
+                solver=solver,
             )
             new_bottom = self._apply_concrete_instructions(
-                top_vec, bottom_vec, gadget.bottom_instructions, is_top=False
+                top_vec,
+                bottom_vec,
+                gadget.bottom_instructions,
+                is_top=False,
+                solver=solver,
             )
 
             if natural_order and is_last_stage:
@@ -563,7 +572,12 @@ class BitonicPathVerifier:
         return sorted_elems
 
     def _apply_concrete_instructions(
-        self, top_reg, bottom_reg, instructions: list[InstructionSpec], is_top: bool
+        self,
+        top_reg,
+        bottom_reg,
+        instructions: list[InstructionSpec],
+        is_top: bool,
+        solver: Solver | None = None,
     ):
         """Apply concrete (non-symbolic) instructions to compute an output register.
 
@@ -578,6 +592,8 @@ class BitonicPathVerifier:
             3+ instruction chains to reference any earlier intermediate.
         """
         current_reg = top_reg if is_top else bottom_reg
+        if solver is None:
+            solver = Solver()
         prev_output = None
         results: list = []
 
@@ -598,7 +614,7 @@ class BitonicPathVerifier:
                     results,
                 )
 
-            current_reg = self._dispatch_intrinsic(intrinsic, args)
+            current_reg = self._dispatch_intrinsic(intrinsic, args, solver=solver)
             prev_output = current_reg
             results.append(current_reg)
 
@@ -645,6 +661,6 @@ class BitonicPathVerifier:
 
         return value
 
-    def _dispatch_intrinsic(self, intrinsic, args: dict):
+    def _dispatch_intrinsic(self, intrinsic, args: dict, solver: Solver | None = None):
         """Dispatch an intrinsic call using shared signature patterns."""
-        return _dispatch_intrinsic_by_signature(intrinsic, args)
+        return _dispatch_intrinsic_by_signature(intrinsic, args, solver=solver)

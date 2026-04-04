@@ -843,6 +843,13 @@ def main():
         metavar="N",
         help="Budget per stage per wave in distinct outputs (default: 100).",
     )
+    parser.add_argument(
+        "--runtime-ui",
+        type=str,
+        default="auto",
+        choices=["auto", "textual", "none"],
+        help="Wave runtime UI mode. 'auto' uses Textual only on an interactive TTY (default: auto).",
+    )
 
     args = parser.parse_args()
 
@@ -952,6 +959,7 @@ def main():
         llvm_mca_path=args.llvm_mca_path,
         max_waves=args.max_waves,
         top_k=args.top_k or 10,
+        runtime_ui=args.runtime_ui,
     )
 
     engine = WaveEngine(wave_config)

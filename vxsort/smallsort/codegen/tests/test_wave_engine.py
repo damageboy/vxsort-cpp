@@ -3,8 +3,6 @@
 import math
 import queue
 
-from rich.console import Console
-
 from utils import primitive_type, vector_machine
 from wave_engine import WaveConfig, WaveEngine
 
@@ -35,6 +33,43 @@ def _fast_config(**overrides) -> WaveConfig:
     )
     defaults.update(overrides)
     return WaveConfig(**defaults)
+
+
+class _RecordingRuntimeSession:
+    """Capture wave runtime adapter calls for integration-style testing."""
+
+    def __init__(self, selected_stage: int) -> None:
+        self._selected_stage = selected_stage
+        self.selected_stage_writes: list[int] = []
+        self.stage_metrics = []
+        self.memory_lines: list[str] = []
+        self.instruction_stats = []
+        self.logs: list[str] = []
+        self.statuses: list[str | None] = []
+
+    @property
+    def selected_stage(self) -> int:
+        return self._selected_stage
+
+    @selected_stage.setter
+    def selected_stage(self, value: int) -> None:
+        self.selected_stage_writes.append(value)
+        self._selected_stage = value
+
+    def update_stage_metrics(self, stage_metrics) -> None:
+        self.stage_metrics.append(stage_metrics)
+
+    def update_memory_line(self, memory_text: str) -> None:
+        self.memory_lines.append(memory_text)
+
+    def update_instruction_stats(self, snapshot_by_stage) -> None:
+        self.instruction_stats.append(snapshot_by_stage)
+
+    def log(self, line: str) -> None:
+        self.logs.append(line)
+
+    def set_status(self, text: str | None) -> None:
+        self.statuses.append(text)
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +114,42 @@ class TestWaveEngineInit:
 
         assert len(engine.shallow_candidates) > 0
         assert len(engine._candidates_with_index) > 0
+
+
+def test_wave_engine_emits_stage_updates_without_mutating_selected_stage():
+    config = _fast_config()
+    engine = WaveEngine(config)
+
+    from bitonic_types import InstructionSpec, PermutationGadget, VectorState
+
+    input_state = engine.initial_state
+    output_state = VectorState(
+        top=[x + 10 for x in input_state.top],
+        bottom=[x + 10 for x in input_state.bottom],
+    )
+    gadget = PermutationGadget(
+        top_instructions=[InstructionSpec("test_add", {"src": "top"})],
+        bottom_instructions=[],
+        validated=True,
+    )
+    engine.tt.add_transition(0, input_state, output_state, gadget)
+    engine.tt.record_attempt(0, count=4)
+    engine._stage_attempts[0] = 4
+    engine.instruction_stats.record_attempt(1, ["test_add"], "unique")
+
+    session = _RecordingRuntimeSession(selected_stage=2)
+
+    engine._sync_runtime_session(session)
+
+    assert session.selected_stage == 2
+    assert session.selected_stage_writes == []
+    assert session.stage_metrics
+    assert len(session.stage_metrics[-1]) == len(engine.all_stages)
+    assert session.stage_metrics[-1][0].stage_idx == 0
+    assert session.stage_metrics[-1][0].attempts == 4
+    assert session.stage_metrics[-1][0].unique == 1
+    assert session.memory_lines[-1].startswith("Memory:")
+    assert session.instruction_stats[-1][1]["test_add"].attempts_unique == 1
 
 
 class TestFirstWaveDiscoveries:
@@ -346,54 +417,6 @@ class TestInstructionStatsDrain:
         assert by_stage[0]["test_add"].attempts_no_valid == 1
         assert by_stage[0]["test_add"].attempts_valid == 0
         assert by_stage[0]["test_add"].attempts_unique == 0
-
-
-class TestInstructionStatsDisplay:
-    """WaveEngine should render instruction stats as a keyed table."""
-
-    def test_instruction_stats_table_uses_keys_as_rows(self):
-        config = _fast_config(top_k=2)
-        engine = WaveEngine(config)
-
-        engine.instruction_stats.record_attempt(
-            1, ["_mm256_shuffle_epi16_imm"], "unique"
-        )
-        engine.instruction_stats.record_attempt(
-            2, ["_mm256_shuffle_epi16_imm"], "valid"
-        )
-        engine.instruction_stats.record_attempt(
-            3, ["_mm256_permutevar8x32_epi32_v"], "no_valid"
-        )
-        engine.instruction_stats.record_attempt(
-            3, ["_mm256_permutevar8x32_epi32_v"], "no_valid"
-        )
-        engine.instruction_stats.record_attempt(4, ["_mm256_unpacklo_epi32"], "unique")
-
-        renderables = engine._instruction_stats_renderables()
-
-        assert len(renderables) == 1
-        table = renderables[0]
-        assert table.title == "Instruction Stats"
-        assert [column.header for column in table.columns] == [
-            "Instr",
-            "Attempts",
-            "NoValid",
-            "Valid",
-            "Unique",
-        ]
-
-        console = Console(record=True, width=200)
-        console.print(table)
-        rendered = console.export_text()
-
-        assert "_mm256_shuffle_epi16_imm" in rendered
-        assert "_mm256_unpacklo_epi32" in rendered
-        assert "_mm256_permutevar8x32_epi32_v" not in rendered
-        assert "2" in rendered
-        assert "50.0%" not in rendered
-        assert rendered.index("_mm256_unpacklo_epi32") < rendered.index(
-            "_mm256_shuffle_epi16_imm"
-        )
 
 
 class TestRetroactiveInput:

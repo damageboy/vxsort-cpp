@@ -32,19 +32,19 @@ class InstructionAttemptStats:
 def normalize_instruction_stats_key(spec: InstructionSpec) -> str:
     """Return a stable key for an instruction family.
 
-    The key is the intrinsic name, optionally suffixed with ``_imm`` for
-    immediate-controlled instructions or ``_v`` for actual control-vector
+    The key is the intrinsic name, optionally suffixed with ``/imm`` for
+    immediate-controlled instructions or ``/v`` for actual control-vector
     instruction families.
     """
     args = spec.args or {}
     arg_names = {str(name).lower() for name in args}
 
     if any(any(marker in name for marker in _IMM_MARKERS) for name in arg_names):
-        return f"{spec.intrinsic_name}_imm"
+        return f"{spec.intrinsic_name}/imm"
 
     intrinsic_name = spec.intrinsic_name.lower()
     if any(marker in intrinsic_name for marker in _CONTROL_VECTOR_MARKERS):
-        return f"{spec.intrinsic_name}_v"
+        return f"{spec.intrinsic_name}/v"
 
     return spec.intrinsic_name
 

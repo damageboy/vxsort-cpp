@@ -248,15 +248,17 @@ def _accepts_solver(intrinsic) -> bool:
         return False
 
 
-def _dispatch_intrinsic_fallback(intrinsic, args: dict, solver: Solver):
+def _dispatch_intrinsic_fallback(intrinsic, args: dict, solver: Solver | None = None):
     """Fallback positional dispatch that preserves incoming argument order."""
     arg_order = tuple(args.keys())
-    if _accepts_solver(intrinsic):
+    if solver is not None and _accepts_solver(intrinsic):
         return intrinsic(*(args[key] for key in arg_order), solver=solver)
     return intrinsic(*(args[key] for key in arg_order))
 
 
-def _dispatch_intrinsic_by_signature(intrinsic, args: dict, solver: Solver):
+def _dispatch_intrinsic_by_signature(
+    intrinsic, args: dict, solver: Solver | None = None
+):
     """Call an intrinsic using the first matching dispatch rule.
 
     Falls back to legacy positional call order when no rule matches.
@@ -264,7 +266,7 @@ def _dispatch_intrinsic_by_signature(intrinsic, args: dict, solver: Solver):
     rule = _match_dispatch_rule(frozenset(args.keys()))
     if rule is None:
         return _dispatch_intrinsic_fallback(intrinsic, args, solver=solver)
-    if _accepts_solver(intrinsic):
+    if solver is not None and _accepts_solver(intrinsic):
         return intrinsic(*(args[key] for key in rule.call_order), solver=solver)
     return intrinsic(*(args[key] for key in rule.call_order))
 

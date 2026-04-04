@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import os
 import signal
+import sys
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from itertools import permutations
 from multiprocessing import Pool
-
-from rich.table import Table
 
 try:
     from .bitonic_sorter import BitonicSorter
@@ -37,7 +37,7 @@ try:
         GadgetSynthesizer,
         _validate_gadget_worker,
     )
-    from .success_progress import SuccessProgress
+    from .memory_monitor import collect_memory_snapshot
     from .transition_table import TransitionTable
     from .utils import primitive_type, vector_machine, width_dict
     from .wave_checkpoint import WaveCheckpoint, WaveMasterConfig
@@ -59,7 +59,7 @@ except ImportError:
         GadgetSynthesizer,
         _validate_gadget_worker,
     )
-    from success_progress import SuccessProgress  # type: ignore[no-redef]
+    from memory_monitor import collect_memory_snapshot  # type: ignore[no-redef]
     from transition_table import TransitionTable  # type: ignore[no-redef]
     from utils import primitive_type, vector_machine, width_dict  # type: ignore[no-redef]
     from wave_checkpoint import WaveCheckpoint, WaveMasterConfig  # type: ignore[no-redef]
@@ -182,6 +182,8 @@ class WaveConfig:
     llvm_mca_path: str | None = None
     max_waves: int | None = None
     top_k: int = 10
+    runtime_ui: str = "auto"
+    runtime_session_factory: Callable[[int], object] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +258,7 @@ class WaveEngine:
 
         # Cumulative progress counters per stage (for progress bars)
         self._stage_attempts: list[int] = [0] * len(self.all_stages)
+        self._stage_successes: list[int] = [0] * len(self.all_stages)
 
         # Ctrl-C handling
         self._interrupted = False
@@ -412,50 +415,96 @@ class WaveEngine:
         visit(getattr(graph, "bottom", None))
         return instruction_keys
 
-    def _instruction_stats_renderables(self) -> list[Table]:
-        """Build Rich renderables for live instruction-attempt statistics."""
-        snapshot = self.instruction_stats.snapshot_aggregated()
-        if not snapshot:
-            return []
+    def _resolve_runtime_ui(self) -> str:
+        """Resolve runtime UI mode, defaulting to Textual only on a TTY."""
+        if self.config.runtime_ui != "auto":
+            return self.config.runtime_ui
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            return "textual"
+        return "none"
 
-        rows = sorted(
-            snapshot.items(),
-            key=lambda item: (
-                -(
-                    item[1].attempts_unique / item[1].attempts_total
-                    if item[1].attempts_total
-                    else 0.0
-                ),
-                -item[1].attempts_unique,
-                -item[1].attempts_total,
-                item[0],
-            ),
+    def _request_interrupt_from_ui(self) -> None:
+        """Handle a user-initiated stop request from the runtime UI."""
+        if self._interrupted:
+            return
+        self._interrupted = True
+        print(
+            "\n'q' pressed in runtime UI - stopping and saving checkpoint...",
+            file=sys.stderr,
         )
-        rows = rows[: self.config.top_k]
 
-        table = Table(
-            title="Instruction Stats",
-            show_header=True,
-            header_style="bold cyan",
-            box=None,
-            pad_edge=False,
-        )
-        table.add_column("Instr", style="bold magenta", no_wrap=True)
-        table.add_column("Attempts", justify="right")
-        table.add_column("NoValid", justify="right")
-        table.add_column("Valid", justify="right")
-        table.add_column("Unique", justify="right")
+    def _create_runtime_session(self):
+        """Create the configured runtime UI session."""
+        if self.config.runtime_session_factory is not None:
+            return self.config.runtime_session_factory(len(self.all_stages))
 
-        for key, stats in rows:
-            table.add_row(
-                key,
-                str(stats.attempts_total),
-                str(stats.attempts_no_valid),
-                str(stats.attempts_valid),
-                str(stats.attempts_unique),
+        try:
+            from .textual_progress_ui import (
+                NullWaveRuntimeSession,
+                TextualWaveRuntimeSession,
+            )
+        except ImportError:
+            from textual_progress_ui import (  # type: ignore[no-redef]
+                NullWaveRuntimeSession,
+                TextualWaveRuntimeSession,
             )
 
-        return [table]
+        if self._resolve_runtime_ui() == "textual":
+            return TextualWaveRuntimeSession(
+                stage_count=len(self.all_stages),
+                instruction_top_k=self.config.top_k,
+                on_quit_requested=self._request_interrupt_from_ui,
+            )
+        return NullWaveRuntimeSession(stage_count=len(self.all_stages))
+
+    def _stage_progress_snapshots(self):
+        """Build a render-ready snapshot of current stage metrics."""
+        try:
+            from .textual_progress_ui import StageProgressSnapshot
+        except ImportError:
+            from textual_progress_ui import StageProgressSnapshot  # type: ignore[no-redef]
+
+        snapshots = []
+        for stage_idx in range(len(self.all_stages)):
+            total = (
+                self._stage_attempts[stage_idx]
+                + len(self._pending_jobs[stage_idx])
+                + self._in_flight[stage_idx]
+            )
+            snapshots.append(
+                StageProgressSnapshot(
+                    stage_idx=stage_idx,
+                    attempts=self._stage_attempts[stage_idx],
+                    total=total,
+                    valid=self._stage_successes[stage_idx],
+                    unique=self.tt.unique_output_count(stage_idx),
+                )
+            )
+        return snapshots
+
+    def _runtime_status_text(self) -> str | None:
+        """Build footer status text for best LLVM-MCA scores."""
+        if not self.best_scores:
+            return None
+        parts = [
+            f"{cpu}: {s['cycles']:.1f}cy (throughput {s['throughput']:.2f})"
+            for cpu, s in sorted(self.best_scores.items())
+        ]
+        return "Best: " + "  |  ".join(parts)
+
+    def _sync_runtime_session(self, runtime_session) -> None:
+        """Push the latest runtime snapshot into the active UI session."""
+        if runtime_session is None:
+            return
+        runtime_session.update_stage_metrics(self._stage_progress_snapshots())
+        runtime_session.update_instruction_stats(
+            self.instruction_stats.snapshot_by_stage()
+        )
+        snapshot = collect_memory_snapshot()
+        runtime_session.update_memory_line(
+            snapshot.format() if snapshot is not None else "Memory: unavailable"
+        )
+        runtime_session.set_status(self._runtime_status_text())
 
     # ------------------------------------------------------------------
     # Job generation and enqueueing
@@ -615,8 +664,7 @@ class WaveEngine:
     def _drain_results(
         self,
         completion_queue,
-        progress: SuccessProgress | None = None,
-        stage_task_ids: dict[int, int] | None = None,
+        runtime_session=None,
     ) -> int:
         """Process all available results from the completion queue.
 
@@ -641,10 +689,6 @@ class WaveEngine:
                 self._in_flight[stage_idx] -= 1
                 self._stage_attempts[stage_idx] += 1
                 self.tt.record_attempt(stage_idx)
-                if progress and stage_task_ids:
-                    tid = stage_task_ids.get(stage_idx)
-                    if tid is not None:
-                        progress.update(tid, advance=1, success=0)
                 continue
 
             _, stage_idx, payload = item
@@ -658,6 +702,7 @@ class WaveEngine:
             self.tt.record_attempted_pair(stage_idx, input_state.as_tuple(), cand_index)
             self.tt.record_attempt(stage_idx)
             self._stage_attempts[stage_idx] += 1
+            self._stage_successes[stage_idx] += success
 
             new_unique = 0
             for gadget, output_state in gadget_results:
@@ -677,11 +722,9 @@ class WaveEngine:
                                 stage_idx,
                                 input_state.as_tuple(),
                                 out_t,
-                                progress,
+                                runtime_session,
                             )
                         except Exception as score_exc:
-                            import sys
-
                             print(
                                 f"Warning: on-the-fly scoring failed: {score_exc}",
                                 file=sys.stderr,
@@ -696,10 +739,8 @@ class WaveEngine:
                     stage_idx, instruction_keys, outcome
                 )
 
-            if progress and stage_task_ids:
-                tid = stage_task_ids.get(stage_idx)
-                if tid is not None:
-                    progress.update(tid, advance=1, success=success, unique=new_unique)
+        if count > 0:
+            self._sync_runtime_session(runtime_session)
 
         return count
 
@@ -712,7 +753,7 @@ class WaveEngine:
         stage_idx: int,
         input_tuple: tuple,
         output_tuple: tuple,
-        progress: SuccessProgress | None = None,
+        runtime_session=None,
     ) -> None:
         """Score complete paths formed by a new transition at the last stage.
 
@@ -736,13 +777,7 @@ class WaveEngine:
         scored = self._score_complete_paths(paths=new_paths)
         if scored:
             self._all_scored_paths.extend(scored)
-
-            if progress and self.best_scores:
-                parts = [
-                    f"{cpu}: {s['cycles']:.1f}cy (throughput {s['throughput']:.2f})"
-                    for cpu, s in sorted(self.best_scores.items())
-                ]
-                progress.set_status("Best: " + "  |  ".join(parts))
+            self._sync_runtime_session(runtime_session)
 
     def _score_complete_paths(self, paths: list[list[tuple]]) -> list[dict]:
         """Score the given complete paths with LLVM-MCA.
@@ -992,8 +1027,7 @@ class WaveEngine:
         pool: Pool,
         completion_queue,
         pool_target: int,
-        progress: SuccessProgress | None,
-        stage_task_ids: dict[int, int] | None,
+        runtime_session,
     ) -> int:
         """Run one stage within a wave, respecting budget limits.
 
@@ -1021,12 +1055,10 @@ class WaveEngine:
             if self._interrupted:
                 break
 
-            self._submit_jobs(pool, completion_queue, pool_target)
-            drained = self._drain_results(completion_queue, progress, stage_task_ids)
-
-            # Update progress totals
-            if drained > 0:
-                self._sync_progress_totals(progress, stage_task_ids)
+            submitted = self._submit_jobs(pool, completion_queue, pool_target)
+            if submitted > 0:
+                self._sync_runtime_session(runtime_session)
+            drained = self._drain_results(completion_queue, runtime_session)
 
             # Check budget limits for this stage (since wave start, not call start)
             attempts_this_wave = self._stage_attempts[stage_idx] - wave_start
@@ -1054,25 +1086,6 @@ class WaveEngine:
         self._save_checkpoint()
 
         return self.tt.unique_output_count(stage_idx) - outputs_at_wave_start
-
-    def _sync_progress_totals(
-        self,
-        progress: SuccessProgress | None,
-        stage_task_ids: dict[int, int] | None,
-    ) -> None:
-        """Update progress bar totals from actual counts."""
-        if not progress or not stage_task_ids:
-            return
-        for s in range(len(self.all_stages)):
-            total = (
-                self._stage_attempts[s]
-                + len(self._pending_jobs[s])
-                + self._in_flight[s]
-            )
-            tid = stage_task_ids[s]
-            if total > 0:
-                progress.start_task(tid)
-                progress.update(tid, total=total)
 
     def run(self) -> dict:
         """Main loop: long-lived pool, depth-first waves with per-stage budgets.
@@ -1112,34 +1125,19 @@ class WaveEngine:
             maxtasksperchild=self.config.max_tasks_per_child,
         )
 
-        progress = SuccessProgress.create(compact_stage_table=True)
-        progress.enable_memory_monitor()
-        progress.set_extra_renderables_provider(self._instruction_stats_renderables)
+        runtime_session = self._create_runtime_session()
 
         try:
-            with progress:
-                stage_task_ids: dict[int, int] = {}
-                for s in range(len(self.all_stages)):
-                    n_unique = self.tt.unique_output_count(s)
-                    tid = progress.add_task(
-                        str(s),
-                        total=max(self._stage_attempts[s], n_unique),
-                        start=False,
-                        successes=n_unique,
-                        unique=n_unique,
-                    )
-                    stage_task_ids[s] = tid
-
+            with runtime_session:
                 # Seed pending queues from unforwarded outputs (resume case)
                 for s in range(1, len(self.all_stages)):
                     self._enqueue_from_unforwarded(s)
+                self._sync_runtime_session(runtime_session)
 
                 while True:
                     if self._interrupted:
                         self._save_checkpoint()
-                        progress.console.print(
-                            "[yellow]Interrupted — checkpoint saved.[/yellow]"
-                        )
+                        runtime_session.log("Interrupted - checkpoint saved.")
                         break
 
                     if (
@@ -1149,9 +1147,7 @@ class WaveEngine:
                         break
 
                     if len(self.exhausted_stages) >= len(self.all_stages):
-                        progress.console.print(
-                            "[green]All stages exhausted — search complete.[/green]"
-                        )
+                        runtime_session.log("All stages exhausted - search complete.")
                         break
 
                     # --- Start a new wave ---
@@ -1170,7 +1166,7 @@ class WaveEngine:
 
                     # Generate jobs for the target stage
                     self._generate_jobs_for_stage(target)
-                    self._sync_progress_totals(progress, stage_task_ids)
+                    self._sync_runtime_session(runtime_session)
 
                     # Run target stage with budget
                     new_outputs = self._run_stage_in_wave(
@@ -1178,8 +1174,7 @@ class WaveEngine:
                         pool,
                         completion_queue,
                         pool_target,
-                        progress,
-                        stage_task_ids,
+                        runtime_session,
                     )
 
                     # Track consecutive zero-output budgets
@@ -1222,15 +1217,14 @@ class WaveEngine:
                             )
                             self._pending_jobs[stage_idx].extend(downstream_jobs)
 
-                        self._sync_progress_totals(progress, stage_task_ids)
+                        self._sync_runtime_session(runtime_session)
 
                         stage_new = self._run_stage_in_wave(
                             stage_idx,
                             pool,
                             completion_queue,
                             pool_target,
-                            progress,
-                            stage_task_ids,
+                            runtime_session,
                         )
 
                         if stage_new > 0:
@@ -1243,12 +1237,8 @@ class WaveEngine:
                     while sum(self._in_flight) > 0:
                         if self._interrupted:
                             break
-                        drained = self._drain_results(
-                            completion_queue, progress, stage_task_ids
-                        )
-                        if drained > 0:
-                            self._sync_progress_totals(progress, stage_task_ids)
-                        else:
+                        drained = self._drain_results(completion_queue, runtime_session)
+                        if drained == 0:
                             time.sleep(0.05)
 
                     # --- Wave complete ---
@@ -1271,19 +1261,7 @@ class WaveEngine:
                         sd.unproductive_waves += 1
 
                     self._save_checkpoint()
-
-                    # Update progress for exhausted stages
-                    for s in range(len(self.all_stages)):
-                        if s in self.exhausted_stages:
-                            tid = stage_task_ids.get(s)
-                            if tid is not None:
-                                n_unique = self.tt.unique_output_count(s)
-                                cum = max(self._stage_attempts[s], n_unique) or 1
-                                progress.update(
-                                    tid,
-                                    total=cum,
-                                    completed=cum,
-                                )
+                    self._sync_runtime_session(runtime_session)
 
                     # Wave summary
                     stats = self.tt.stage_stats(target)
@@ -1295,12 +1273,8 @@ class WaveEngine:
                         prop_str = f" | propagated: {', '.join(prop_parts)}"
                     scored_total = len(self._all_scored_paths)
                     unprod = self.tt.stages[target].unproductive_waves
-                    unprod_str = (
-                        f" [yellow](unproductive x{unprod})[/yellow]"
-                        if unprod > 0
-                        else ""
-                    )
-                    progress.console.print(
+                    unprod_str = f" | unproductive x{unprod}" if unprod > 0 else ""
+                    runtime_session.log(
                         f"Wave {self.wave_count}: "
                         f"stage {target} targeted, "
                         f"+{new_outputs} outputs "
@@ -1309,14 +1283,7 @@ class WaveEngine:
                         f" | {scored_total} paths scored total"
                         f"{unprod_str}",
                     )
-
-                    if self.best_scores:
-                        parts = [
-                            f"{cpu}: {s['cycles']:.1f}cy "
-                            f"(throughput {s['throughput']:.2f})"
-                            for cpu, s in sorted(self.best_scores.items())
-                        ]
-                        progress.set_status("Best: " + "  |  ".join(parts))
+                    self._sync_runtime_session(runtime_session)
 
                     self.wave_count += 1
 
@@ -1355,6 +1322,9 @@ class WaveEngine:
         # Restore cumulative progress counters from TransitionTable
         for i in range(len(self.all_stages)):
             self._stage_attempts[i] = self.tt.stages[i].attempts
+            # Valid-attempt counts were previously UI-only and are not
+            # checkpointed, so resume from the known unique-output floor.
+            self._stage_successes[i] = self.tt.unique_output_count(i)
 
         # Restore scored paths and rebuild derived state
         self._all_scored_paths = ckpt.load_scored_paths()
