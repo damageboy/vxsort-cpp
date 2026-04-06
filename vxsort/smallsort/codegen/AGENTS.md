@@ -1,41 +1,95 @@
-# Repository Guidelines
+# CLAUDE.md
 
-## Project Structure & Module Organization
-This directory (`vxsort/smallsort/codegen`) contains a Python super-optimizer for bitonic sorter generation.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-- `src/`: core implementation (`bitonic_super_optimizer.py`, `bitonic_compiler.py`, `z3_avx.py`, exporters, cost model).
-- `tests/`: pytest suite plus JSON fixtures (for example `tests/fixture_2xAVX2_i64.json`).
-- `docs/plans/`: design and implementation notes for larger features.
-- Repository root artifacts: generated outputs like `bitonic_solutions_*.json` and `bitonic_solutions_*.asm`.
+## Project Overview
 
-Do not hand-edit generated `.json`/`.asm` files; regenerate them via the compiler flow.
+vxsort is a fast, vectorized hybrid quicksort+bitonic sorting algorithm in C++. It supports AVX2 and AVX512 vector ISAs with multiple primitive types (i16, i32, i64, u16, u32, u64, f32, f64).
 
-## Build, Test, and Development Commands
-Use `uv` for all Python environment and command execution.
+The `vxsort/smallsort/codegen/` directory contains a Python-based super-optimizer that generates optimized bitonic sorter implementations using Z3 SMT solver for correctness verification.
 
-- `uv sync`: install/update dependencies from `pyproject.toml` and `uv.lock`.
-- `uv run pytest`: run default test suite (excludes `slow` tests).
-- `uv run pytest -m slow`: run long Z3 proof tests.
-- `uv run ruff check .`: lint and style checks.
-- `uv run vulture`: detect unused code.
-- `uv run python src/bitonic_compiler.py --depth-limit=3 --gadget-depth 1 --vector-machine AVX2 --datatype i64`: run a bounded synthesis pass for local validation (keep testing limited to AVX2/i64 and gadget-depth 1 to keep things fast).
+## Build Commands
 
-## Coding Style & Naming Conventions
-- Python 3.13, 4-space indentation, PEP 8-compatible formatting.
-- Naming: `snake_case` for modules/functions/variables, `PascalCase` for classes, `UPPER_SNAKE_CASE` for constants.
-- Keep type hints on public functions and non-trivial internal interfaces.
-- Prefer focused, testable functions over large procedural blocks.
+### C++ (Main Library)
 
-## Testing Guidelines
-- Framework: `pytest` (configured in `pyproject.toml` with `testpaths = ["tests"]`).
-- Test files follow `test_*.py`; test classes use `Test...`; test names describe behavior.
-- Mark expensive solver proofs with `@pytest.mark.slow`.
-- For bug fixes, add a regression test and run at least `uv run pytest` before opening a PR.
+```bash
+mkdir build && cd build
+export CC=clang CXX=clang++
+cmake .. -G Ninja
+ninja
+ctest -J $(nproc)
+```
 
-## Commit & Pull Request Guidelines
-Recent history uses Conventional Commit-style prefixes: `feat:`, `fix:`, `refactor:`, `chore:`.
+### Python Codegen (in vxsort/smallsort/codegen/)
 
-- Keep commits scoped to one logical change.
-- Use imperative, concise commit summaries (for example `feat: add stage-level checkpoint resume`).
-- PRs should include: problem statement, approach summary, validation commands run, and impact on generated outputs/performance.
-- If synthesis output changes, include the updated generated artifacts and note why they changed.
+**Always use `uv` for Python package management. Never use pip, poetry, or conda.**
+
+```bash
+uv sync                                    # Install dependencies
+uv run pytest                              # Run tests
+uv run ruff check .                        # Lint
+uv run python src/bitonic_compiler.py --depth-limit=3 --gadget-depth 1 # Full synthesis (limited depth for speed)
+```
+
+### Quick integration testing during development
+
+When you need to run the compiler to test a feature (not the full test suite), use **AVX2 i64** —
+it's the fastest configuration because 64-bit elements mean only 4 lanes per YMM register,
+so Z3 solves much faster than 8-lane i32 or 16-lane i16:
+
+```bash
+uv run python src/bitonic_compiler.py --vector-machine AVX2 --datatype i64 \
+  --depth-limit 3 --gadget-depth 1 --top-k 5
+```
+
+### Post work-item checklist
+
+When you finish working on any given feature please ensure that you don't report success to the user before:
+
+- Running tests with `uv run pytest` and fixing test failures when needed
+- In general, and specifically if tests are added, it is important to ensure the test suite
+  doesn't run for more than 1 minute of wall clock
+- Running `uv run ruff check .` and fixing ruff failures
+- Running `uv run vulture` and inspecting the output, removing dead code that may have resulted from the work
+
+## Codegen Architecture
+
+The super-optimizer generates AVX permutation sequences for bitonic sort stages:
+
+1. **BitonicSorter** (`bitonic_sorter.py`) - Generates comparison stages for the sorting network
+2. **BitonicSuperVectorizer** (`bitonic_super_optimizer.py`) - Main entry point; orchestrates synthesis, builds solution tree, computes costs
+3. **GadgetSynthesizer** - Enumerates AVX instruction combinations, validates with Z3
+4. **z3_avx.py** - Z3 bindings for AVX instruction semantics (symbolic register operations)
+5. **CostModel** (`cost_model.py`) - CPU microarchitecture instruction costs (supports uops.info data)
+6. **BitonicCompiler** (`bitonic_compiler.py`) - Generates assembly and JSON output
+
+### Key Data Structures
+
+- **VectorState**: Tracks element positions in top/bottom vectors
+- **InstructionSpec**: Single AVX instruction with operands
+- **PermutationGadget**: Sequence of 0-3 instructions validated by Z3
+- **SolutionNode**: Tree node linking gadgets across stages
+
+### ASM Export Architecture
+
+**There must be exactly ONE assembly emitter.** The canonical ASM emission path lives in
+`perf_estimator.py` (`_emit_gadget_asm` + `generate_solution_asm`). All ASM output — whether
+for LLVM-MCA estimation or `--output-format=asm` — must go through this single code path.
+Never duplicate gadget emission logic. The old `asm_exporter.py` `_format_instruction` /
+`_print_solution_step_as_assembly` path is legacy and must be replaced.
+
+### Performance Estimation
+
+Performance estimation uses **LLVM-MCA** (not OSACA). The pipeline:
+1. `generate_solution_asm()` emits Intel/NASM syntax assembly
+2. `sanitize_asm_for_llvm_mca()` converts NASM constructs for LLVM-MCA's Intel parser
+3. `llvm_mca_runner.py` runs `llvm-mca --json` and parses `BlockRThroughput` + `TotalCycles/Iterations`
+
+Use `--estimate` or `--estimate-only` with `--target-cpu` to run estimation.
+Use `--llvm-mca-path` if auto-detection doesn't find your LLVM installation.
+
+### Generated Output
+
+- `bitonic_solutions_*.json` - Solution database
+- `bitonic_solutions_*.asm` - Annotated x86-64 assembly
+- `vxsort/smallsort/avx2/*.generated.h` - C++ headers used by the main library
