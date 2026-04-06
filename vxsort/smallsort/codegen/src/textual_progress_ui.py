@@ -9,7 +9,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from memory_monitor import collect_memory_snapshot
+from util.memory_monitor import collect_memory_snapshot
 from rich.console import Group
 from rich.table import Table
 from rich.text import Text
@@ -57,6 +57,7 @@ class InstructionStatsRow:
     attempts_no_valid: int
     attempts_valid: int
     attempts_unique: int
+    arch_latencies: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +69,9 @@ class StageProgressSnapshot:
     total: int
     valid: int
     unique: int
+    covered_inputs: int | None = None
+    total_inputs: int | None = None
+    uncovered_input_pct: float | None = None
 
 
 def _instruction_stats_sort_key(
@@ -84,10 +88,14 @@ def select_stage_rows(
     snapshot_by_stage: dict[int, dict[str, InstructionAttemptStats]],
     selected_stage: int,
     top_k: int,
+    latency_arches: list[str] | None = None,
+    latency_by_key: dict[str, dict[str, str]] | None = None,
 ) -> list[InstructionStatsRow]:
-    """Return the top instruction rows for the selected stage only."""
-    if top_k <= 0:
-        return []
+    """Return sorted instruction rows for the selected stage."""
+    del top_k
+
+    latency_arches = latency_arches or []
+    latency_by_key = latency_by_key or {}
 
     stage_stats = snapshot_by_stage.get(selected_stage, {})
     rows = sorted(stage_stats.items(), key=_instruction_stats_sort_key)
@@ -98,8 +106,11 @@ def select_stage_rows(
             attempts_no_valid=stats.attempts_no_valid,
             attempts_valid=stats.attempts_valid,
             attempts_unique=stats.attempts_unique,
+            arch_latencies=tuple(
+                latency_by_key.get(key, {}).get(arch, "-") for arch in latency_arches
+            ),
         )
-        for key, stats in rows[:top_k]
+        for key, stats in rows
     ]
 
 
@@ -129,6 +140,15 @@ class FocusModel:
 
 class FocusablePane(Static, can_focus=True):
     """Simple focusable pane used for keyboard navigation."""
+
+    def on_mouse_down(self, event: MouseDown) -> None:
+        """Clicking a pane should move keyboard focus into it."""
+        self.focus(scroll_visible=False)
+        event.stop()
+
+
+class RuntimeLogPane(Log, can_focus=False):
+    """Runtime log output pane; intentionally not keyboard-focusable."""
 
 
 class VerticalResizeHandle(Static):
@@ -211,9 +231,15 @@ class WaveProgressApp(App):
 
     BINDINGS = [
         Binding("tab", "toggle_focus", "Toggle Focus", priority=True),
-        ("up", "previous_stage", "Prev Stage"),
-        ("down", "next_stage", "Next Stage"),
-        ("q", "quit", "Quit"),
+        Binding("s", "focus_stats", "Focus Stats", priority=True),
+        Binding("g", "focus_stage", "Focus Stage", priority=True),
+        Binding("up", "previous_stage", "Prev Stage", priority=True),
+        Binding("down", "next_stage", "Next Stage", priority=True),
+        Binding("pageup", "page_up", "Page Up", priority=True),
+        Binding("pagedown", "page_down", "Page Down", priority=True),
+        Binding("home", "jump_top", "Top", priority=True),
+        Binding("end", "jump_bottom", "Bottom", priority=True),
+        Binding("q", "quit", "Quit", priority=True),
     ]
 
     MIN_TOP_PANEL_HEIGHT = 8
@@ -237,6 +263,8 @@ class WaveProgressApp(App):
         log_lines: list[str] | None = None,
         ready_event: threading.Event | None = None,
         on_quit_requested: Callable[[], None] | None = None,
+        instruction_latency_arches: list[str] | None = None,
+        instruction_latency_by_key: dict[str, dict[str, str]] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -268,6 +296,11 @@ class WaveProgressApp(App):
         }
         self._instruction_top_k = instruction_top_k or self.DEFAULT_INSTRUCTION_TOP_K
         self._instruction_scroll_offset = 0
+        self._instruction_latency_arches = list(instruction_latency_arches or [])
+        self._instruction_latency_by_key = {
+            key: dict(per_arch)
+            for key, per_arch in (instruction_latency_by_key or {}).items()
+        }
         self._memory_text = memory_text
         self._status_text = status_text
         self._log_lines = list(log_lines or [])
@@ -284,13 +317,13 @@ class WaveProgressApp(App):
                 yield FocusablePane(id="stage-pane")
                 yield FocusablePane(id="instruction-stats-pane")
             yield VerticalResizeHandle(id="top-bottom-separator")
-            yield Log(id="log-pane")
+            yield RuntimeLogPane(id="log-pane")
             yield Static(id="status-line")
 
     def on_mount(self) -> None:
         self._mounted = True
         self.adjust_top_panel(0)
-        log_widget = self.query_one(Log)
+        log_widget = self.query_one(RuntimeLogPane)
         if self._log_lines:
             for line in self._log_lines:
                 log_widget.write_line(line)
@@ -336,6 +369,63 @@ class WaveProgressApp(App):
         self._sync_widget_focus()
         self._refresh_status_line()
 
+    def action_focus_stats(self) -> None:
+        self.focus_model.current = "stats"
+        self._sync_widget_focus()
+        self._refresh_status_line()
+
+    def action_focus_stage(self) -> None:
+        self.focus_model.current = "stage"
+        self._sync_widget_focus()
+        self._refresh_status_line()
+
+    def action_page_up(self) -> None:
+        if self._active_pane() == "stage":
+            self.stage_selection.move(-self._instruction_window_rows())
+            self._refresh_stage_pane()
+            self._instruction_scroll_offset = 0
+            self._refresh_instruction_stats_pane()
+            self._refresh_status_line()
+            return
+        self._scroll_instruction_rows(-self._instruction_window_rows())
+
+    def action_page_down(self) -> None:
+        if self._active_pane() == "stage":
+            self.stage_selection.move(self._instruction_window_rows())
+            self._refresh_stage_pane()
+            self._instruction_scroll_offset = 0
+            self._refresh_instruction_stats_pane()
+            self._refresh_status_line()
+            return
+        self._scroll_instruction_rows(self._instruction_window_rows())
+
+    def action_jump_top(self) -> None:
+        if self._active_pane() == "stage":
+            self.stage_selection.selected_stage = 0
+            self._refresh_stage_pane()
+            self._instruction_scroll_offset = 0
+            self._refresh_instruction_stats_pane()
+            self._refresh_status_line()
+            return
+        self._instruction_scroll_offset = 0
+        self._refresh_instruction_stats_pane()
+        self._refresh_status_line()
+
+    def action_jump_bottom(self) -> None:
+        if self._active_pane() == "stage":
+            self.stage_selection.selected_stage = self.stage_selection.stage_count - 1
+            self._refresh_stage_pane()
+            self._instruction_scroll_offset = 0
+            self._refresh_instruction_stats_pane()
+            self._refresh_status_line()
+            return
+        row_count = len(self._instruction_rows_for_selected_stage())
+        self._instruction_scroll_offset = max(
+            0, row_count - self._instruction_window_rows()
+        )
+        self._refresh_instruction_stats_pane()
+        self._refresh_status_line()
+
     def action_quit(self) -> None:
         if self._on_quit_requested is not None:
             self._on_quit_requested()
@@ -367,6 +457,7 @@ class WaveProgressApp(App):
         table.add_column("Attempts", justify="right")
         table.add_column("Valid", justify="right")
         table.add_column("Unique", justify="right")
+        table.add_column("Uncovered", justify="right")
         table.add_column("Rate", justify="right")
 
         for snapshot in self._stage_metrics:
@@ -380,6 +471,7 @@ class WaveProgressApp(App):
                 str(snapshot.attempts),
                 str(snapshot.valid),
                 str(snapshot.unique),
+                self._format_uncovered_input(snapshot),
                 f"{self._rate_by_stage.get(snapshot.stage_idx, 0.0):7.2f}/s",
             )
 
@@ -432,18 +524,26 @@ class WaveProgressApp(App):
         pieces.append("]")
         return pieces
 
+    def _format_uncovered_input(self, snapshot: StageProgressSnapshot) -> str:
+        """Render uncovered input-domain percentage for a stage."""
+        if (
+            snapshot.uncovered_input_pct is None
+            or snapshot.covered_inputs is None
+            or snapshot.total_inputs is None
+        ):
+            return "N/A"
+        pct = f"{snapshot.uncovered_input_pct:.2f}".rstrip("0").rstrip(".")
+        return f"{pct}%"
+
     def _refresh_instruction_stats_pane(self) -> None:
-        rows = select_stage_rows(
-            self._snapshot_by_stage,
-            selected_stage=self.stage_selection.selected_stage,
-            top_k=self._instruction_top_k,
-        )
-        max_offset = max(0, len(rows) - self.INSTRUCTION_WINDOW_ROWS)
+        rows = self._instruction_rows_for_selected_stage()
+        window_rows = self._instruction_window_rows()
+        max_offset = max(0, len(rows) - window_rows)
         self._instruction_scroll_offset = min(
             self._instruction_scroll_offset, max_offset
         )
         start = self._instruction_scroll_offset
-        visible_rows = rows[start : start + self.INSTRUCTION_WINDOW_ROWS]
+        visible_rows = rows[start : start + window_rows]
         table = Table(
             title="Instruction Stats",
             show_header=True,
@@ -456,6 +556,8 @@ class WaveProgressApp(App):
         table.add_column("NoValid", justify="right")
         table.add_column("Valid", justify="right")
         table.add_column("Unique", justify="right")
+        for arch in self._instruction_latency_arches:
+            table.add_column(arch, justify="right")
 
         if visible_rows:
             for row in visible_rows:
@@ -465,6 +567,10 @@ class WaveProgressApp(App):
                     str(row.attempts_no_valid),
                     str(row.attempts_valid),
                     str(row.attempts_unique),
+                    *[
+                        latency if latency == "-" else f"{latency}c"
+                        for latency in row.arch_latencies
+                    ],
                 )
             try:
                 self.query_one("#instruction-stats-pane", Static).update(Group(table))
@@ -506,7 +612,8 @@ class WaveProgressApp(App):
                 f"Stage {current_stage}/{stage_count}",
                 focus_text,
                 "Tab toggle focus",
-                "Up/Down navigate focused pane",
+                "s stats | g stage",
+                "Up/Down + PgUp/PgDn + Home/End",
                 "Drag separator",
                 "q stop+quit",
             ]
@@ -514,19 +621,30 @@ class WaveProgressApp(App):
         return " | ".join(status_parts)
 
     def _scroll_instruction_rows(self, delta: int) -> None:
-        row_count = len(
-            select_stage_rows(
-                self._snapshot_by_stage,
-                selected_stage=self.stage_selection.selected_stage,
-                top_k=self._instruction_top_k,
-            )
-        )
-        max_offset = max(0, row_count - self.INSTRUCTION_WINDOW_ROWS)
+        row_count = len(self._instruction_rows_for_selected_stage())
+        max_offset = max(0, row_count - self._instruction_window_rows())
         self._instruction_scroll_offset = max(
             0, min(self._instruction_scroll_offset + delta, max_offset)
         )
         self._refresh_instruction_stats_pane()
         self._refresh_status_line()
+
+    def _instruction_rows_for_selected_stage(self) -> list[InstructionStatsRow]:
+        """Return all rows for selected stage, including zero-attempt entries."""
+        return select_stage_rows(
+            self._snapshot_by_stage,
+            selected_stage=self.stage_selection.selected_stage,
+            top_k=self._instruction_top_k,
+            latency_arches=self._instruction_latency_arches,
+            latency_by_key=self._instruction_latency_by_key,
+        )
+
+    def _instruction_window_rows(self) -> int:
+        """Rows visible in the stats pane at current size."""
+        # Use tracked top panel height as the primary source of truth since
+        # widget-reported size can be zero during early/background refreshes.
+        # Approximate: title + header + spacing consume ~4 rows.
+        return max(1, self._top_panel_height - 4)
 
     def _sync_widget_focus(self) -> None:
         target_id = (
@@ -537,8 +655,6 @@ class WaveProgressApp(App):
         self.set_focus(self.query_one(target_id, FocusablePane), scroll_visible=False)
 
     def _active_pane(self) -> str:
-        focused = self.focused
-        self._sync_focus_model_from_widget(focused)
         return self.focus_model.current
 
     def _sync_focus_model_from_widget(self, widget: object | None) -> None:
@@ -602,7 +718,7 @@ class WaveProgressApp(App):
         """Append one runtime log line."""
         self._log_lines.append(line)
         if self._mounted:
-            self.query_one(Log).write_line(line)
+            self.query_one(RuntimeLogPane).write_line(line)
 
     def set_memory_text(self, memory_text: str | None) -> None:
         """Set the status-line memory text."""
@@ -659,6 +775,8 @@ class TextualWaveRuntimeSession:
         stage_count: int,
         instruction_top_k: int | None = None,
         selected_stage: int = 0,
+        instruction_latency_arches: list[str] | None = None,
+        instruction_latency_by_key: dict[str, dict[str, str]] | None = None,
         app_factory=None,
         headless: bool = False,
         inline: bool = False,
@@ -673,6 +791,8 @@ class TextualWaveRuntimeSession:
             instruction_top_k=instruction_top_k,
             ready_event=self._ready_event,
             on_quit_requested=on_quit_requested,
+            instruction_latency_arches=instruction_latency_arches,
+            instruction_latency_by_key=instruction_latency_by_key,
         )
         self._headless = headless
         self._inline = inline

@@ -37,9 +37,9 @@ try:
         GadgetSynthesizer,
         _validate_gadget_worker,
     )
-    from .memory_monitor import collect_memory_snapshot
+    from .util.memory_monitor import collect_memory_snapshot
     from .transition_table import TransitionTable
-    from .utils import primitive_type, vector_machine, width_dict
+    from .util.enums import primitive_type, vector_machine, width_dict
     from .wave_checkpoint import WaveCheckpoint, WaveMasterConfig
 except ImportError:
     from bitonic_sorter import BitonicSorter  # type: ignore[no-redef]
@@ -59,9 +59,9 @@ except ImportError:
         GadgetSynthesizer,
         _validate_gadget_worker,
     )
-    from memory_monitor import collect_memory_snapshot  # type: ignore[no-redef]
+    from util.memory_monitor import collect_memory_snapshot  # type: ignore[no-redef]
     from transition_table import TransitionTable  # type: ignore[no-redef]
-    from utils import primitive_type, vector_machine, width_dict  # type: ignore[no-redef]
+    from util.enums import primitive_type, vector_machine, width_dict  # type: ignore[no-redef]
     from wave_checkpoint import WaveCheckpoint, WaveMasterConfig  # type: ignore[no-redef]
 
 
@@ -279,6 +279,17 @@ class WaveEngine:
 
         # Runtime instruction-usage telemetry
         self.instruction_stats = InstructionStatsCollector()
+        menu_instruction_keys = self._collect_menu_instruction_stats_keys()
+        for stage_idx in range(len(self.all_stages)):
+            self.instruction_stats.prepopulate_stage(stage_idx, menu_instruction_keys)
+        self._menu_instruction_count = sum(
+            self._candidate_instruction_count(graph)
+            for _candidate_idx, graph in self._candidates_with_index
+        )
+        (
+            self._instruction_latency_arches,
+            self._instruction_latency_by_key,
+        ) = self._build_instruction_latency_table(menu_instruction_keys)
 
         # Per-stage attempt snapshot at wave start.  Used by _submit_jobs
         # to enforce per-stage budgets within a wave.  None outside a wave.
@@ -415,6 +426,112 @@ class WaveEngine:
         visit(getattr(graph, "bottom", None))
         return instruction_keys
 
+    def _collect_menu_instruction_stats_keys(self) -> list[str]:
+        """Flatten intrinsic keys from the full precomputed candidate menu."""
+        keys: set[str] = set()
+        for _candidate_idx, graph in self._candidates_with_index:
+            keys.update(self._collect_instruction_stats_keys(graph))
+        return sorted(keys)
+
+    def _candidate_instruction_count(self, graph) -> int:
+        """Count intrinsic nodes in one candidate graph (deduping shared nodes)."""
+        visited: set[int] = set()
+        count = 0
+
+        def visit(node) -> None:
+            nonlocal count
+            if node is None:
+                return
+            if isinstance(node, IntrinsicNode):
+                node_id = id(node)
+                if node_id in visited:
+                    return
+                visited.add(node_id)
+                count += 1
+                for operand in node.operands.values():
+                    visit(operand)
+                return
+            if isinstance(node, Mux):
+                for source in node.sources:
+                    visit(source)
+
+        visit(getattr(graph, "top", None))
+        visit(getattr(graph, "bottom", None))
+        return count
+
+    @staticmethod
+    def _format_latency_cell(latency: float) -> str:
+        """Format latency values for compact table display."""
+        return f"{latency:g}"
+
+    def _build_instruction_latency_table(
+        self, instruction_keys: list[str]
+    ) -> tuple[list[str], dict[str, dict[str, str]]]:
+        """Build instruction-latency lookup per selected target architecture."""
+        arches = list(self.config.target_cpus)
+        if not arches:
+            return [], {}
+
+        xml_path = os.path.join(os.path.dirname(__file__), "..", "instructions.xml.zst")
+        if not os.path.exists(xml_path):
+            print(
+                "Warning: instructions.xml.zst not found, latency columns will show '-'",
+                file=sys.stderr,
+            )
+            return arches, {}
+
+        try:
+            from intrinsic_registry import get_intrinsic_registry, xml_string_key
+            from cost_model import resolve_arch_name
+            from util.uops_parser import parse_uops_xml
+        except ImportError:
+            from .intrinsic_registry import get_intrinsic_registry, xml_string_key  # type: ignore[no-redef]
+            from .cost_model import resolve_arch_name  # type: ignore[no-redef]
+            from .util.uops_parser import parse_uops_xml  # type: ignore[no-redef]
+
+        registry = get_intrinsic_registry()
+        xml_costs_by_arch: dict[str, dict[str, object]] = {}
+
+        for arch in arches:
+            canonical = resolve_arch_name(arch)
+            if canonical is None:
+                continue
+            try:
+                xml_costs_by_arch[arch] = parse_uops_xml(xml_path, canonical)
+            except Exception as exc:
+                print(
+                    f"Warning: failed loading uops.info costs for {arch}: {exc}",
+                    file=sys.stderr,
+                )
+
+        latency_by_key: dict[str, dict[str, str]] = {}
+        for instruction_key in instruction_keys:
+            intrinsic_name = instruction_key.split("/", 1)[0]
+            info = registry.get(intrinsic_name)
+            if info is None:
+                continue
+
+            xml_key = xml_string_key(info)
+            evex_key = xml_key.replace(
+                info.asm_mnemonic, f"{info.asm_mnemonic}_EVEX", 1
+            )
+
+            for arch in arches:
+                arch_costs = xml_costs_by_arch.get(arch)
+                if not arch_costs:
+                    continue
+                cost = arch_costs.get(xml_key) or arch_costs.get(evex_key)
+                if cost is None:
+                    continue
+                latency = getattr(cost, "latency", None)
+                if latency is None:
+                    continue
+                latency_by_key.setdefault(instruction_key, {})[arch] = (
+                    self._format_latency_cell(float(latency))
+                )
+
+        return arches, latency_by_key
+
     def _resolve_runtime_ui(self) -> str:
         """Resolve runtime UI mode, defaulting to Textual only on a TTY."""
         if self.config.runtime_ui != "auto":
@@ -454,6 +571,8 @@ class WaveEngine:
                 stage_count=len(self.all_stages),
                 instruction_top_k=self.config.top_k,
                 on_quit_requested=self._request_interrupt_from_ui,
+                instruction_latency_arches=self._instruction_latency_arches,
+                instruction_latency_by_key=self._instruction_latency_by_key,
             )
         return NullWaveRuntimeSession(stage_count=len(self.all_stages))
 
@@ -471,6 +590,9 @@ class WaveEngine:
                 + len(self._pending_jobs[stage_idx])
                 + self._in_flight[stage_idx]
             )
+            covered_inputs, total_inputs, uncovered_input_pct = (
+                self._stage_input_domain_coverage(stage_idx)
+            )
             snapshots.append(
                 StageProgressSnapshot(
                     stage_idx=stage_idx,
@@ -478,19 +600,43 @@ class WaveEngine:
                     total=total,
                     valid=self._stage_successes[stage_idx],
                     unique=self.tt.unique_output_count(stage_idx),
+                    covered_inputs=covered_inputs,
+                    total_inputs=total_inputs,
+                    uncovered_input_pct=uncovered_input_pct,
                 )
             )
         return snapshots
 
+    def _stage_input_domain_coverage(
+        self, stage_idx: int
+    ) -> tuple[int | None, int | None, float | None]:
+        """Return (covered_inputs, total_inputs, uncovered_pct) for one stage."""
+        if stage_idx == 0:
+            return None, None, None
+
+        total_inputs = self.tt.unique_output_count(stage_idx - 1)
+        if total_inputs == 0:
+            return 0, 0, None
+
+        covered_inputs = len(
+            {
+                input_tuple
+                for input_tuple, _cand_idx in self.tt.stages[stage_idx].attempted_pairs
+            }
+        )
+        uncovered_pct = max(0.0, 100.0 * (1.0 - (covered_inputs / total_inputs)))
+        return covered_inputs, total_inputs, uncovered_pct
+
     def _runtime_status_text(self) -> str | None:
         """Build footer status text for best LLVM-MCA scores."""
-        if not self.best_scores:
-            return None
-        parts = [
-            f"{cpu}: {s['cycles']:.1f}cy (throughput {s['throughput']:.2f})"
-            for cpu, s in sorted(self.best_scores.items())
-        ]
-        return "Best: " + "  |  ".join(parts)
+        parts = [f"Menu instructions: {self._menu_instruction_count}"]
+        if self.best_scores:
+            best = [
+                f"{cpu}: {s['cycles']:.1f}cy (throughput {s['throughput']:.2f})"
+                for cpu, s in sorted(self.best_scores.items())
+            ]
+            parts.append("Best: " + "  |  ".join(best))
+        return " | ".join(parts)
 
     def _sync_runtime_session(self, runtime_session) -> None:
         """Push the latest runtime snapshot into the active UI session."""
@@ -644,7 +790,11 @@ class WaveEngine:
                     if used >= budget:
                         break
 
-                _cand_idx, job = pending.popleft()
+                cand_idx, job = pending.popleft()
+                _graph, input_state, _stage_pairs, _vm, _prim_type, _metadata = job
+                self.tt.record_attempted_pair(
+                    stage_idx, input_state.as_tuple(), cand_idx
+                )
 
                 pool.apply_async(
                     _validate_gadget_worker,
@@ -695,14 +845,12 @@ class WaveEngine:
             self._in_flight[stage_idx] -= 1
 
             gadget_results, input_state, _metadata, _ct, _st = payload
-            success = 1 if gadget_results else 0
+            valid_output_count = len(gadget_results)
 
-            cand_index = _metadata.get("candidate_index", -1)
             instruction_keys = _metadata.get("instruction_keys", [])
-            self.tt.record_attempted_pair(stage_idx, input_state.as_tuple(), cand_index)
             self.tt.record_attempt(stage_idx)
             self._stage_attempts[stage_idx] += 1
-            self._stage_successes[stage_idx] += success
+            self._stage_successes[stage_idx] += valid_output_count
 
             new_unique = 0
             for gadget, output_state in gadget_results:
@@ -812,14 +960,14 @@ class WaveEngine:
                 generate_solution_asm,
                 sanitize_asm_for_llvm_mca,
             )
-            from llvm_mca_runner import find_llvm_mca, run_llvm_mca
+            from util.llvm_mca_runner import find_llvm_mca, run_llvm_mca
             from cost_model import resolve_llvm_mca_cpu
         except ImportError:
             from .perf_estimator import (  # type: ignore[no-redef]
                 generate_solution_asm,
                 sanitize_asm_for_llvm_mca,
             )
-            from .llvm_mca_runner import find_llvm_mca, run_llvm_mca  # type: ignore[no-redef]
+            from .util.llvm_mca_runner import find_llvm_mca, run_llvm_mca  # type: ignore[no-redef]
             from .cost_model import resolve_llvm_mca_cpu  # type: ignore[no-redef]
 
         mca_bin = find_llvm_mca(self.config.llvm_mca_path)
