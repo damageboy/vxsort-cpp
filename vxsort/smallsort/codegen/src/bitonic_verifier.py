@@ -41,7 +41,7 @@ try:
         get_available_intrinsics,
     )
     from .path_selector import CompletePath
-    from .utils import vector_machine, primitive_type, width_dict
+    from .util.enums import vector_machine, primitive_type, width_dict
 except ImportError:
     import z3_avx  # type: ignore
     from bitonic_super_optimizer import (  # type: ignore
@@ -53,7 +53,7 @@ except ImportError:
         get_available_intrinsics,
     )
     from path_selector import CompletePath  # type: ignore
-    from utils import vector_machine, primitive_type, width_dict  # type: ignore
+    from util.enums import vector_machine, primitive_type, width_dict  # type: ignore
 
 
 @dataclass

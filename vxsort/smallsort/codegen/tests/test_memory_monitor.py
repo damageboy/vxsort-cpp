@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import psutil
 
-from src.memory_monitor import MemorySnapshot, _fmt_bytes, collect_memory_snapshot
+from src.util.memory_monitor import MemorySnapshot, _fmt_bytes, collect_memory_snapshot
 
 
 class TestFmtBytes:
@@ -72,7 +72,7 @@ class TestMemorySnapshot:
 
 
 class TestCollectMemorySnapshot:
-    @patch("src.memory_monitor.psutil.Process")
+    @patch("src.util.memory_monitor.psutil.Process")
     def test_basic_collection(self, mock_process_cls):
         main_proc = MagicMock()
         main_mem = MagicMock()
@@ -98,7 +98,7 @@ class TestCollectMemorySnapshot:
         assert snap.worker_rss_bytes == 300 * 1024 * 1024
         assert snap.worker_count == 2
 
-    @patch("src.memory_monitor.psutil.Process")
+    @patch("src.util.memory_monitor.psutil.Process")
     def test_dead_child_skipped(self, mock_process_cls):
         main_proc = MagicMock()
         main_mem = MagicMock()
@@ -121,14 +121,14 @@ class TestCollectMemorySnapshot:
         assert snap.worker_count == 1
         assert snap.worker_rss_bytes == 100 * 1024 * 1024
 
-    @patch("src.memory_monitor.psutil.Process")
+    @patch("src.util.memory_monitor.psutil.Process")
     def test_main_process_gone(self, mock_process_cls):
         mock_process_cls.side_effect = psutil.NoSuchProcess(999)
 
         snap = collect_memory_snapshot()
         assert snap is None
 
-    @patch("src.memory_monitor.psutil.Process")
+    @patch("src.util.memory_monitor.psutil.Process")
     def test_no_children(self, mock_process_cls):
         main_proc = MagicMock()
         main_mem = MagicMock()

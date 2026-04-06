@@ -10,7 +10,7 @@ from bitonic_super_optimizer import (
 from bitonic_verifier import BitonicPathVerifier, load_solutions_from_json
 from cost_model import CostModel
 from path_selector import CompletePath, PathSelector, PathStep
-from utils import primitive_type, vector_machine
+from util.enums import primitive_type, vector_machine
 
 FIXTURE_DIR = os.path.dirname(__file__)
 

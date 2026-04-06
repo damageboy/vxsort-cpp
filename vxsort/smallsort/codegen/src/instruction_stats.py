@@ -55,6 +55,12 @@ class InstructionStatsCollector:
     def __init__(self) -> None:
         self._by_stage: dict[int, dict[str, InstructionAttemptStats]] = {}
 
+    def prepopulate_stage(self, stage_idx: int, instruction_keys: list[str]) -> None:
+        """Ensure a stage contains zeroed counters for every instruction key."""
+        stage_stats = self._by_stage.setdefault(stage_idx, {})
+        for key in instruction_keys:
+            stage_stats.setdefault(key, InstructionAttemptStats())
+
     def record_attempt(
         self, stage_idx: int, instruction_keys: list[str], outcome: str
     ) -> None:

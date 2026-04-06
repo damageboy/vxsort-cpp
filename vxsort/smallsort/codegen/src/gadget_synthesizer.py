@@ -33,7 +33,7 @@ from z3 import (
 
 try:
     from . import z3_avx
-    from .utils import vector_machine, primitive_type, width_dict
+    from .util.enums import vector_machine, primitive_type, width_dict
     from .bitonic_types import (
         VectorState,
         InstructionSpec,
@@ -51,7 +51,7 @@ try:
     )
 except ImportError:
     import z3_avx  # type: ignore
-    from utils import vector_machine, primitive_type, width_dict
+    from util.enums import vector_machine, primitive_type, width_dict
     from bitonic_types import (  # type: ignore
         VectorState,
         InstructionSpec,

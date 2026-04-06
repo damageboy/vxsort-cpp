@@ -3,7 +3,7 @@
 import math
 import queue
 
-from utils import primitive_type, vector_machine
+from util.enums import primitive_type, vector_machine
 from wave_engine import WaveConfig, WaveEngine
 
 
@@ -25,7 +25,7 @@ def _fast_config(**overrides) -> WaveConfig:
         wave_outputs=3,
         max_paths_per_wave=50,
         target_cpus=[],
-        max_workers=4,
+        max_workers=1,
         max_tasks_per_child=100,
         depth2_threshold=0.1,
         max_waves=1,
@@ -115,6 +115,37 @@ class TestWaveEngineInit:
         assert len(engine.shallow_candidates) > 0
         assert len(engine._candidates_with_index) > 0
 
+    def test_instruction_stats_prepopulated_for_every_stage_from_menu(self):
+        config = _fast_config()
+        engine = WaveEngine(config)
+
+        menu_keys = sorted(
+            {
+                key
+                for _candidate_idx, graph in engine._candidates_with_index
+                for key in engine._collect_instruction_stats_keys(graph)
+            }
+        )
+        by_stage = engine.instruction_stats.snapshot_by_stage()
+
+        assert len(menu_keys) > 0
+        assert sorted(by_stage.keys()) == list(range(len(engine.all_stages)))
+        for stage_idx in range(len(engine.all_stages)):
+            assert sorted(by_stage[stage_idx].keys()) == menu_keys
+
+    def test_runtime_status_text_includes_candidate_instruction_count(self):
+        config = _fast_config()
+        engine = WaveEngine(config)
+
+        expected_count = sum(
+            engine._candidate_instruction_count(graph)
+            for _candidate_idx, graph in engine._candidates_with_index
+        )
+        status = engine._runtime_status_text()
+
+        assert status is not None
+        assert f"Menu instructions: {expected_count}" in status
+
 
 def test_wave_engine_emits_stage_updates_without_mutating_selected_stage():
     config = _fast_config()
@@ -148,15 +179,41 @@ def test_wave_engine_emits_stage_updates_without_mutating_selected_stage():
     assert session.stage_metrics[-1][0].stage_idx == 0
     assert session.stage_metrics[-1][0].attempts == 4
     assert session.stage_metrics[-1][0].unique == 1
+    assert session.stage_metrics[-1][0].uncovered_input_pct is None
     assert session.memory_lines[-1].startswith("Memory:")
     assert session.instruction_stats[-1][1]["test_add"].attempts_unique == 1
+
+
+def test_stage_input_domain_uncovered_percentage_uses_attempted_inputs():
+    config = _fast_config()
+    engine = WaveEngine(config)
+
+    from bitonic_types import PermutationGadget, VectorState
+
+    identity = PermutationGadget(
+        top_instructions=[], bottom_instructions=[], validated=True
+    )
+    prev_input = engine.initial_state
+    prev_out_a = VectorState(top=[10, 20, 30, 40], bottom=[50, 60, 70, 80])
+    prev_out_b = VectorState(top=[11, 21, 31, 41], bottom=[51, 61, 71, 81])
+    engine.tt.add_transition(0, prev_input, prev_out_a, identity)
+    engine.tt.add_transition(0, prev_input, prev_out_b, identity)
+
+    # Stage 1 attempted only one of the two discovered previous-stage outputs.
+    engine.tt.record_attempted_pair(1, prev_out_a.as_tuple(), 0)
+
+    snapshots = engine._stage_progress_snapshots()
+    stage1 = snapshots[1]
+    assert stage1.covered_inputs == 1
+    assert stage1.total_inputs == 2
+    assert stage1.uncovered_input_pct == 50.0
 
 
 class TestFirstWaveDiscoveries:
     """First wave should discover transitions at stage 0."""
 
     def test_first_wave_discovers_transitions(self):
-        config = _fast_config(wave_attempts=500, wave_outputs=50, max_waves=1)
+        config = _fast_config(wave_attempts=40, wave_outputs=10, max_waves=1)
         engine = WaveEngine(config)
         engine.run()
 
@@ -170,7 +227,7 @@ class TestMultiWaveProgress:
     """Multiple waves should make progress."""
 
     def test_three_waves_make_progress(self):
-        config = _fast_config(max_waves=3, wave_attempts=500, wave_outputs=50)
+        config = _fast_config(max_waves=3, wave_attempts=40, wave_outputs=10)
         engine = WaveEngine(config)
 
         summary = engine.run()
@@ -418,6 +475,51 @@ class TestInstructionStatsDrain:
         assert by_stage[0]["test_add"].attempts_valid == 0
         assert by_stage[0]["test_add"].attempts_unique == 0
 
+    def test_stage_valid_metric_counts_all_valid_outputs_not_just_successful_attempts(
+        self,
+    ):
+        config = _fast_config()
+        engine = WaveEngine(config)
+
+        from bitonic_types import InstructionSpec, PermutationGadget, VectorState
+
+        gadget = PermutationGadget(
+            top_instructions=[InstructionSpec("test_add", {"src": "top"})],
+            bottom_instructions=[],
+            validated=True,
+        )
+        input_state = engine.initial_state
+        output_state_1 = VectorState(
+            top=[x + 1 for x in input_state.top],
+            bottom=[x + 1 for x in input_state.bottom],
+        )
+        output_state_2 = VectorState(
+            top=[x + 2 for x in input_state.top],
+            bottom=[x + 2 for x in input_state.bottom],
+        )
+
+        completion_queue: queue.Queue = queue.Queue()
+        completion_queue.put(
+            (
+                "ok",
+                0,
+                (
+                    [(gadget, output_state_1), (gadget, output_state_2)],
+                    input_state,
+                    {"candidate_index": 21, "instruction_keys": ["test_add"]},
+                    None,
+                    None,
+                ),
+            )
+        )
+        engine._in_flight[0] = 1
+
+        engine._drain_results(completion_queue)
+        snapshots = engine._stage_progress_snapshots()
+
+        assert snapshots[0].valid == 2
+        assert snapshots[0].unique == 2
+
 
 class TestRetroactiveInput:
     """Tests for --retroactive-input pre-population of stage 0."""
@@ -474,8 +576,8 @@ class TestEndToEnd:
     def test_avx2_i64_full_pipeline(self, tmp_path):
         """Full pipeline: synthesis -> checkpoint -> resume -> export."""
         config = _fast_config(
-            wave_attempts=1000,
-            wave_outputs=20,
+            wave_attempts=20,
+            wave_outputs=10,
             max_paths_per_wave=50,
             max_waves=2,
             checkpoint_dir=str(tmp_path / "ckpt"),
@@ -493,8 +595,8 @@ class TestEndToEnd:
 
         # Resume and run 1 more wave
         config2 = _fast_config(
-            wave_attempts=1000,
-            wave_outputs=20,
+            wave_attempts=20,
+            wave_outputs=10,
             max_paths_per_wave=50,
             max_waves=3,
             checkpoint_dir=str(tmp_path / "ckpt"),

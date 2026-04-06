@@ -24,7 +24,7 @@ from checkpoint import (
     save_checkpoint,
     validate_checkpoint_config,
 )
-from utils import primitive_type, vector_machine
+from util.enums import primitive_type, vector_machine
 
 
 # ---------------------------------------------------------------------------

@@ -12,7 +12,7 @@ from bitonic_super_optimizer import (
     InstructionSpec,
     _BATCH_THRESHOLDS,
 )
-from utils import primitive_type, vector_machine
+from util.enums import primitive_type, vector_machine
 
 
 # ---------------------------------------------------------------------------

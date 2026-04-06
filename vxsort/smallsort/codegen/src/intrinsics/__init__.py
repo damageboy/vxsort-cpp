@@ -7,7 +7,7 @@ try:
     from ..bitonic_types import InputRef, IntrinsicNode
     from . import avx2_i32, avx2_i64, avx512_i32, avx512_i64
 except ImportError:
-    from utils import vector_machine, primitive_type  # type: ignore
+    from util.enums import vector_machine, primitive_type  # type: ignore
     from bitonic_types import InputRef, IntrinsicNode  # type: ignore
     import intrinsics.avx2_i32 as avx2_i32  # type: ignore
     import intrinsics.avx2_i64 as avx2_i64  # type: ignore

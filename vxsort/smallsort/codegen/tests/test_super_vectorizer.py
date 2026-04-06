@@ -26,7 +26,7 @@ from bitonic_types import (
 )
 from gadget_synthesizer import _node_depth
 from functional import seq
-from utils import primitive_type, vector_machine
+from util.enums import primitive_type, vector_machine
 from z3 import And, If, Int, Not, Solver, unsat
 
 

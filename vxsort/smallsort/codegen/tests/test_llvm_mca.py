@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import patch
 from cost_model import resolve_llvm_mca_cpu, get_supported_cpus
 from perf_estimator import sanitize_asm_for_llvm_mca
-from llvm_mca_runner import (
+from util.llvm_mca_runner import (
     McaResult,
     find_llvm_mca,
     _parse_mca_json,
@@ -138,14 +138,14 @@ class TestFindLlvmMca:
         result = find_llvm_mca("/usr/bin/llvm-mca")
         assert result == "/usr/bin/llvm-mca"
 
-    @patch("llvm_mca_runner.Path.is_file", return_value=False)
-    @patch("llvm_mca_runner.shutil.which", return_value="/usr/bin/llvm-mca")
+    @patch("util.llvm_mca_runner.Path.is_file", return_value=False)
+    @patch("util.llvm_mca_runner.shutil.which", return_value="/usr/bin/llvm-mca")
     def test_find_on_path(self, mock_which, mock_is_file):
         result = find_llvm_mca(None)
         assert result == "/usr/bin/llvm-mca"
 
-    @patch("llvm_mca_runner.Path.is_file", return_value=False)
-    @patch("llvm_mca_runner.shutil.which", return_value=None)
+    @patch("util.llvm_mca_runner.Path.is_file", return_value=False)
+    @patch("util.llvm_mca_runner.shutil.which", return_value=None)
     def test_find_returns_none_when_missing(self, mock_which, mock_is_file):
         result = find_llvm_mca(None)
         assert result is None

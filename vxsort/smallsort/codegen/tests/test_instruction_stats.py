@@ -137,3 +137,13 @@ def test_collector_keeps_per_stage_counters_and_aggregates_for_display():
         attempts_valid=0,
         attempts_unique=0,
     )
+
+
+def test_collector_can_prepopulate_stage_with_zero_counters():
+    collector = InstructionStatsCollector()
+
+    collector.prepopulate_stage(3, ["alpha/imm", "beta/v"])
+
+    by_stage = collector.snapshot_by_stage()
+    assert by_stage[3]["alpha/imm"] == InstructionAttemptStats()
+    assert by_stage[3]["beta/v"] == InstructionAttemptStats()

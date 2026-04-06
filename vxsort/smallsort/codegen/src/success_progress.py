@@ -16,7 +16,7 @@ from rich.rule import Rule
 from rich.table import Column
 from rich.text import Text
 
-from memory_monitor import collect_memory_snapshot
+from util.memory_monitor import collect_memory_snapshot
 
 console = Console()
 

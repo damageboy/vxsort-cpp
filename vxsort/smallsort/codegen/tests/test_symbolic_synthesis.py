@@ -3,7 +3,7 @@
 
 import sys
 
-from utils import vector_machine, primitive_type
+from util.enums import vector_machine, primitive_type
 from bitonic_super_optimizer import GadgetSynthesizer, VectorState
 from bitonic_types import InputRef, Symbolic, IntrinsicNode, GadgetGraph
 
@@ -216,7 +216,7 @@ def test_shape_b_includes_swapped_for_asymmetric():
     """depth-1 candidates include both orderings for isomorphic_order=False duals."""
     from bitonic_super_optimizer import GadgetSynthesizer
     from bitonic_types import IntrinsicNode, InputRef
-    from utils import vector_machine, primitive_type
+    from util.enums import vector_machine, primitive_type
 
     synth = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i32)
     graphs = synth._build_gadget_graphs(depth=1, single_intrinsics=[])
@@ -257,7 +257,7 @@ def test_shape_d_includes_swapped_for_asymmetric():
     """depth-2 dual→single candidates include both orderings for asymmetric inst0."""
     from bitonic_super_optimizer import GadgetSynthesizer
     from bitonic_types import IntrinsicNode, InputRef
-    from utils import vector_machine, primitive_type
+    from util.enums import vector_machine, primitive_type
 
     synth = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i32)
     single = synth.single_intrinsics_top[:1]  # one single-input instruction

@@ -106,7 +106,7 @@ class TestSuccessProgressMemoryMonitor:
 
     @patch("src.success_progress.collect_memory_snapshot")
     def test_get_renderables_with_memory(self, mock_collect):
-        from src.memory_monitor import MemorySnapshot
+        from src.util.memory_monitor import MemorySnapshot
 
         mock_collect.return_value = MemorySnapshot(
             main_rss_bytes=200 * 1024 * 1024,

@@ -8,7 +8,7 @@ from multiprocessing import Pool
 try:
     from .success_progress import SuccessProgress
     from .bitonic_sorter import BitonicSorter
-    from .utils import vector_machine, primitive_type, width_dict
+    from .util.enums import vector_machine, primitive_type, width_dict
     from .bitonic_types import (
         VectorState,
         InstructionSpec,
@@ -26,7 +26,7 @@ try:
 except ImportError:
     from success_progress import SuccessProgress
     from bitonic_sorter import BitonicSorter
-    from utils import vector_machine, primitive_type, width_dict
+    from util.enums import vector_machine, primitive_type, width_dict
     from bitonic_types import (  # type: ignore
         VectorState,
         InstructionSpec,

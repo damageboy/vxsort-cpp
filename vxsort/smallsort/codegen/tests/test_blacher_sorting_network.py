@@ -28,7 +28,7 @@ from bitonic_verifier import (
     VerifyStep,
     load_solutions_from_json,
 )
-from utils import primitive_type, vector_machine
+from util.enums import primitive_type, vector_machine
 
 FIXTURE_DIR = os.path.dirname(__file__)
 

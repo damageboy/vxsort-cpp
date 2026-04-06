@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from intrinsic_registry import get_intrinsic_registry
-from utils import vector_machine, primitive_type
+from util.enums import vector_machine, primitive_type
 
 
 def _get_instruction_metadata(intrinsic_name: str) -> dict:

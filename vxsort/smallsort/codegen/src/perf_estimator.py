@@ -29,7 +29,7 @@ from asm_exporter import (
 )
 from z3_avx import mm_shuffle2_str, mm_shuffle_str
 from cost_model import get_supported_cpus
-from utils import primitive_type, vector_machine, width_dict
+from util.enums import primitive_type, vector_machine, width_dict
 
 
 @dataclass
@@ -792,7 +792,7 @@ def estimate_solutions(
         List of EstimationResult objects, one per path.
     """
     from cost_model import resolve_llvm_mca_cpu
-    from llvm_mca_runner import find_llvm_mca, run_llvm_mca
+    from util.llvm_mca_runner import find_llvm_mca, run_llvm_mca
 
     mcpu = resolve_llvm_mca_cpu(target_cpu)
     if mcpu is None:

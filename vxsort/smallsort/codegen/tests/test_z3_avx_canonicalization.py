@@ -152,7 +152,7 @@ def test_synthesizer_passes_solver_to_intrinsics():
     """Integration: synthesizer should produce canonical (minimal) control vectors."""
     from gadget_synthesizer import GadgetSynthesizer, VectorState
     from bitonic_types import InputRef, Symbolic, IntrinsicNode, GadgetGraph
-    from utils import vector_machine, primitive_type
+    from util.enums import vector_machine, primitive_type
 
     synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i64)
 

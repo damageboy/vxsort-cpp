@@ -13,7 +13,7 @@ from json_exporter import export_solutions_to_json
 try:
     from .cost_model import CostModel, get_supported_cpus
     from .bitonic_super_optimizer import BitonicSuperVectorizer
-    from .utils import vector_machine, primitive_type, width_dict
+    from .util.enums import vector_machine, primitive_type, width_dict
     from .asm_exporter import export_solutions_to_asm
     from .path_selector import PathSelector
     from .bitonic_verifier import (
@@ -33,7 +33,7 @@ try:
 except ImportError:
     from cost_model import CostModel, get_supported_cpus
     from bitonic_super_optimizer import BitonicSuperVectorizer
-    from utils import vector_machine, primitive_type, width_dict
+    from util.enums import vector_machine, primitive_type, width_dict
     from asm_exporter import export_solutions_to_asm
     from path_selector import PathSelector
     from bitonic_verifier import (  # type: ignore
@@ -863,7 +863,7 @@ def main():
 
     # --list-cpus mode: print supported architectures and exit
     if args.list_cpus:
-        from uops_parser import list_available_architectures
+        from util.uops_parser import list_available_architectures
 
         xml_path = os.path.join(os.path.dirname(__file__), "..", "instructions.xml.zst")
         has_xml = os.path.exists(xml_path)
