@@ -9,6 +9,8 @@ from z3.z3 import (
     Extract,
     Concat,
     If,
+    LShR,
+    ZeroExt,
     simplify,
 )
 
@@ -2142,6 +2144,8 @@ def _mm256_blendv_ps(a: BitVecRef, b: BitVecRef, mask: BitVecRef, solver: Solver
 
 ##
 # 2xInput -> 1xOutput, alignr (concatenate and shift right)
+# - vpalignr:
+#   -  _mm256_alignr_epi8
 # - valignd:
 #   -  _mm256_alignr_epi32
 #   -  _mm512_alignr_epi32
@@ -2208,6 +2212,7 @@ def _generic_alignr(
         ```
 
     Examples:
+        - _mm256_alignr_epi8: total_width=256, element_width=8 → 32 elements, shift by 0-31
         - _mm256_alignr_epi32: total_width=256, element_width=32 → 8 elements, shift by 0-7
         - _mm512_alignr_epi32: total_width=512, element_width=32 → 16 elements, shift by 0-15
         - _mm256_alignr_epi64: total_width=256, element_width=64 → 4 elements, shift by 0-3
@@ -2276,6 +2281,40 @@ def _generic_alignr(
         solver.add(Extract(7, shift_bits_needed, imm) == 0)
 
     return simplify(Concat(result_elements[::-1]))
+
+
+def _mm256_alignr_epi8(
+    a: BitVecRef, b: BitVecRef, imm8: BitVecRef | int, solver: Solver
+):
+    """
+    Align packed bytes from b and a within each 128-bit lane.
+
+    FOR j := 0 to 1
+        i := j*128
+        tmp[255:0] := ((a[i+127:i] << 128)[255:0] OR b[i+127:i]) >> (imm8*8)
+        dst[i+127:i] := tmp[127:0]
+    ENDFOR
+
+    Implements __m256i _mm256_alignr_epi8(__m256i a, __m256i b, const int imm8)
+    (VPALIGNR YMM form; lane-local semantics).
+    """
+    del solver
+
+    imm = imm8 if isinstance(imm8, BitVecRef) else BitVecVal(imm8, 8)
+    shift_bits = ZeroExt(248, imm) * BitVecVal(8, 256)
+
+    lane_results = []
+    for lane in range(2):
+        lo = lane * 128
+        hi = lo + 127
+        a_lane = Extract(hi, lo, a)
+        b_lane = Extract(hi, lo, b)
+        lane_concat = Concat(a_lane, b_lane)
+        lane_shifted = LShR(lane_concat, shift_bits)
+        lane_results.append(Extract(127, 0, lane_shifted))
+
+    # Z3 concat is MSB-first; lane 1 is high half, lane 0 is low half.
+    return simplify(Concat(lane_results[1], lane_results[0]))
 
 
 def _mm256_alignr_epi32(

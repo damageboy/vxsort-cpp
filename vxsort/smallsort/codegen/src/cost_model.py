@@ -136,10 +136,10 @@ class CostModel:
         """Overlay architecture-specific costs from the uops.info XML."""
         try:
             from intrinsic_registry import get_intrinsic_registry, xml_string_key
-            from uops_parser import parse_uops_xml
+            from util.uops_parser import parse_uops_xml
         except ImportError:
             from .intrinsic_registry import get_intrinsic_registry, xml_string_key
-            from .uops_parser import parse_uops_xml
+            from .util.uops_parser import parse_uops_xml
 
         xml_costs = parse_uops_xml(xml_path, arch_name)
         if not xml_costs:
@@ -191,6 +191,7 @@ class CostModel:
                 "_mm256_unpackhi_epi64": InstructionCost(1.0, 1.0, ["p5"]),
                 "_mm256_blend_pd": InstructionCost(1.0, 0.33, ["p015"]),
                 "_mm256_blendv_pd": InstructionCost(2.0, 0.67, ["p015"]),
+                "_mm256_alignr_epi8": InstructionCost(1.0, 1.0, ["p5"]),
                 "_mm256_alignr_epi64": InstructionCost(1.0, 1.0, ["p5"]),
             }
         )

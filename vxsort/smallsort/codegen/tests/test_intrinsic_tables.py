@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from utils import vector_machine, primitive_type
+from util.enums import vector_machine, primitive_type
 from bitonic_types import InputRef, IntrinsicNode, Symbolic
 from intrinsics import get_z3_functions, get_single_input_nodes, get_dual_input_nodes
 
@@ -115,6 +115,30 @@ def test_node_counts_match_expected(vm, prim, expected_single, expected_dual):
     ), f"Expected {expected_dual} dual-input nodes for {vm}/{prim}, got {len(dual)}"
 
 
+def _assert_avx2_uses_alignr_epi8_only(prim: primitive_type, forbidden: str) -> None:
+    ref1 = InputRef("top")
+    ref2 = InputRef("bottom")
+
+    funcs = get_z3_functions(vector_machine.AVX2, prim)
+    dual = get_dual_input_nodes(vector_machine.AVX2, prim, ref1, ref2)
+    dual_names = {node.name for node in dual}
+
+    assert "_mm256_alignr_epi8" in funcs
+    assert forbidden not in funcs
+    assert "_mm256_alignr_epi8" in dual_names
+    assert forbidden not in dual_names
+
+
+def test_avx2_i32_uses_alignr_epi8_instead_of_alignr_epi32() -> None:
+    """Strict AVX2 i32 table should expose VPALIGNR-style alignr_epi8 only."""
+    _assert_avx2_uses_alignr_epi8_only(primitive_type.i32, "_mm256_alignr_epi32")
+
+
+def test_avx2_i64_uses_alignr_epi8_instead_of_alignr_epi64() -> None:
+    """Strict AVX2 i64 table should expose VPALIGNR-style alignr_epi8 only."""
+    _assert_avx2_uses_alignr_epi8_only(primitive_type.i64, "_mm256_alignr_epi64")
+
+
 def test_asymmetric_dual_intrinsics_tagged():
     """Instructions that are order-dependent carry isomorphic_order=False."""
     # Instructions known to be order-dependent
@@ -123,11 +147,10 @@ def test_asymmetric_dual_intrinsics_tagged():
         "_mm256_shuffle_ps",
         "_mm256_unpacklo_epi32",
         "_mm256_unpackhi_epi32",
-        "_mm256_alignr_epi32",
+        "_mm256_alignr_epi8",
         "_mm256_shuffle_pd",
         "_mm256_unpacklo_epi64",
         "_mm256_unpackhi_epi64",
-        "_mm256_alignr_epi64",
         # AVX512
         "_mm512_shuffle_ps",
         "_mm512_unpacklo_epi32",

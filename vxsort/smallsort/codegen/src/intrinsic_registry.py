@@ -61,6 +61,7 @@ def _build_registry() -> dict[str, IntrinsicInfo]:
         _i("_mm256_blendv_ps", "VBLENDVPS", "YMM, YMM, YMM, YMM"),
         _i("_mm256_blendv_pd", "VBLENDVPD", "YMM, YMM, YMM, YMM"),
         _i("_mm256_blend_epi32", "VPBLENDD", "YMM, YMM, YMM, I8", imm_type="binary"),
+        _i("_mm256_alignr_epi8", "VPALIGNR", "YMM, YMM, YMM, I8"),
         _i("_mm256_alignr_epi32", "VALIGND", "YMM, YMM, YMM, I8"),
         _i("_mm256_alignr_epi64", "VALIGNQ", "YMM, YMM, YMM, I8"),
         _i("_mm256_min_ps", "VMINPS", "YMM, YMM, YMM"),

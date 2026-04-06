@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from cost_model import CostModel, InstructionCost, resolve_arch_name, _ARCH_ALIASES
 from intrinsic_registry import get_intrinsic_registry, xml_string_key
-from uops_parser import (
+from util.uops_parser import (
     parse_uops_xml,
     list_available_architectures,
     load_xml_root,
@@ -40,7 +40,7 @@ def _cache_xml_root(monkeypatch):
     """Monkeypatch load_xml_root so every caller in uops_parser reuses the cached root."""
     if not _HAS_XML:
         return
-    import uops_parser as _uops_mod
+    import util.uops_parser as _uops_mod
 
     root = _get_xml_root()
     monkeypatch.setattr(_uops_mod, "load_xml_root", lambda _path: root)
@@ -292,6 +292,7 @@ def test_asm_exporter_mnemonics_unchanged():
         "_mm256_shuffle_ps": "vshufps",
         "_mm256_unpacklo_epi32": "vpunpckldq",
         "_mm256_blend_ps": "vblendps",
+        "_mm256_alignr_epi8": "vpalignr",
         "_mm256_alignr_epi32": "valignd",
         "_mm512_permutexvar_epi32": "vpermd",
         "_mm512_mask_shuffle_ps": "vshufps",

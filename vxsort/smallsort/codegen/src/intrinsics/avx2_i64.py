@@ -32,8 +32,8 @@ def z3_functions() -> dict[str, object]:
     intrinsics["_mm256_blend_pd"] = z3_avx._mm256_blend_pd
     intrinsics["_mm256_blendv_pd"] = z3_avx._mm256_blendv_pd
 
-    # Align operations
-    intrinsics["_mm256_alignr_epi64"] = z3_avx._mm256_alignr_epi64
+    # Align operations (strict AVX2: VPALIGNR byte-granularity)
+    intrinsics["_mm256_alignr_epi8"] = z3_avx._mm256_alignr_epi8
 
     return intrinsics
 
@@ -111,7 +111,7 @@ def dual_input_nodes(ref1: InputRef, ref2: InputRef) -> list[IntrinsicNode]:
             },
         ),
         IntrinsicNode(
-            "_mm256_alignr_epi64",
+            "_mm256_alignr_epi8",
             {
                 "a": ref1,
                 "b": ref2,

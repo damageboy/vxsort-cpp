@@ -53,7 +53,12 @@ from z3_avx import _mm256_permutevar_ps, _mm512_permutevar_ps, _mm512_mask_permu
 from z3_avx import _mm256_permutevar_pd, _mm512_permutevar_pd, _mm512_mask_permutevar_pd
 from z3_avx import _mm256_blend_pd, _mm256_blend_ps, _mm256_blendv_pd, _mm256_blendv_ps
 from z3_avx import _mm256_permute4x64_epi64
-from z3_avx import _mm256_alignr_epi32, _mm512_alignr_epi32, _mm512_mask_alignr_epi32
+from z3_avx import (
+    _mm256_alignr_epi8,
+    _mm256_alignr_epi32,
+    _mm512_alignr_epi32,
+    _mm512_mask_alignr_epi32,
+)
 from z3_avx import _mm256_alignr_epi64, _mm512_alignr_epi64, _mm512_mask_alignr_epi64
 from z3_avx import (
     ymm_reg,
@@ -5082,6 +5087,84 @@ class TestPermute4x64Epi64:
         assert (
             model_imm8 == expected_mask
         ), f"Z3 found unexpected mask: got 0x{model_imm8:02x}, expected 0x{expected_mask:02x}"
+
+
+class TestAlignrEpi8:
+    """Tests for _mm256_alignr_epi8"""
+
+    def test_mm256_alignr_epi8_shift_zero(self):
+        """Shift by 0 should return b unchanged."""
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a, b = ymm_reg_pair_with_unique_values("pair", s, bits=8, ctx=ctx)
+
+        output = _mm256_alignr_epi8(a, b, 0, solver=s)
+        expected = construct_ymm_reg_from_elements(8, [(b, i) for i in range(32)])
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm256_alignr_epi8_shift_one(self):
+        """Shift by 1 byte is lane-local (128-bit lanes)."""
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a, b = ymm_reg_pair_with_unique_values("pair", s, bits=8, ctx=ctx)
+
+        output = _mm256_alignr_epi8(a, b, 1, solver=s)
+        expected = construct_ymm_reg_from_elements(
+            8,
+            # lane 0: b[1..15], a[0]
+            [(b, i) for i in range(1, 16)]
+            + [(a, 0)]
+            # lane 1: b[17..31], a[16]
+            + [(b, i) for i in range(17, 32)]
+            + [(a, 16)],
+        )
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm256_alignr_epi8_shift_thirty_one(self):
+        """Shift by 31 bytes keeps one byte from each lane's a and zero-fills rest."""
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a, b = ymm_reg_pair_with_unique_values("pair", s, bits=8, ctx=ctx)
+
+        output = _mm256_alignr_epi8(a, b, 31, solver=s)
+        expected = construct_ymm_reg_from_elements(
+            8,
+            # lane 0: a[15], then 15 zero bytes
+            [(a, 15)]
+            + [(BitVecVal(0, 256, ctx=ctx), 0) for _ in range(15)]
+            # lane 1: a[31], then 15 zero bytes
+            + [(a, 31)]
+            + [(BitVecVal(0, 256, ctx=ctx), 0) for _ in range(15)],
+        )
+
+        s.add(output == expected)
+        assert s.check() == sat
+
+    def test_mm256_alignr_epi8_find_shift(self):
+        """Use Z3 to recover lane-local byte shift amount."""
+        ctx = main_ctx()
+        s = Solver(ctx=ctx)
+        a, b = ymm_reg_pair_with_unique_values("pair", s, bits=8, ctx=ctx)
+        imm8 = BitVec("imm8_alignr_epi8", 8, ctx=ctx)
+
+        output = _mm256_alignr_epi8(a, b, imm8, solver=s)
+        expected = construct_ymm_reg_from_elements(
+            8,
+            # lane 0 with shift 2: b[2..15], a[0], a[1]
+            [(b, i) for i in range(2, 16)]
+            + [(a, 0), (a, 1)]
+            # lane 1 with shift 2: b[18..31], a[16], a[17]
+            + [(b, i) for i in range(18, 32)]
+            + [(a, 16), (a, 17)],
+        )
+
+        s.add(output == expected)
+        assert s.check() == sat
+        assert s.model().evaluate(imm8).as_long() == 2
 
 
 class TestAlignrEpi32:
