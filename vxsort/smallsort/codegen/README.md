@@ -49,6 +49,22 @@ uv run python src/demo_super_vectorizer.py
 uv run python src/bitonic_compiler.py --depth-limit=3
 ```
 
+### uops Database Source Selection (JSON only)
+
+Runtime loading uses compact JSON only:
+- `instructions.json.zst` (preferred)
+- `instructions.json` (fallback)
+
+Selection controls:
+
+```bash
+# JSON mode (default)
+export VXSORT_UOPS_DB_FORMAT=json
+
+# Pin an explicit JSON database path
+export VXSORT_UOPS_DB_PATH=/absolute/path/to/instructions.json.zst
+```
+
 ### Current Status
 
 **Implemented:**

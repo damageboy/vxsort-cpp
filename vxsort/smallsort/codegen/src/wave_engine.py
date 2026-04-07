@@ -472,22 +472,27 @@ class WaveEngine:
         if not arches:
             return [], {}
 
-        xml_path = os.path.join(os.path.dirname(__file__), "..", "instructions.xml.zst")
-        if not os.path.exists(xml_path):
-            print(
-                "Warning: instructions.xml.zst not found, latency columns will show '-'",
-                file=sys.stderr,
-            )
-            return arches, {}
-
         try:
             from intrinsic_registry import get_intrinsic_registry, xml_string_key
             from cost_model import resolve_arch_name
-            from util.uops_parser import parse_uops_xml
+            from util.uops_parser import find_uops_database_path, parse_uops_database
         except ImportError:
             from .intrinsic_registry import get_intrinsic_registry, xml_string_key  # type: ignore[no-redef]
             from .cost_model import resolve_arch_name  # type: ignore[no-redef]
-            from .util.uops_parser import parse_uops_xml  # type: ignore[no-redef]
+            from .util.uops_parser import (  # type: ignore[no-redef]
+                find_uops_database_path,
+                parse_uops_database,
+            )
+
+        database_path = find_uops_database_path(
+            base_dir=os.path.join(os.path.dirname(__file__), "..")
+        )
+        if database_path is None:
+            print(
+                "Warning: no uops database found, latency columns will show '-'",
+                file=sys.stderr,
+            )
+            return arches, {}
 
         registry = get_intrinsic_registry()
         xml_costs_by_arch: dict[str, dict[str, object]] = {}
@@ -497,7 +502,7 @@ class WaveEngine:
             if canonical is None:
                 continue
             try:
-                xml_costs_by_arch[arch] = parse_uops_xml(xml_path, canonical)
+                xml_costs_by_arch[arch] = parse_uops_database(database_path, canonical)
             except Exception as exc:
                 print(
                     f"Warning: failed loading uops.info costs for {arch}: {exc}",

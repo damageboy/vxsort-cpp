@@ -863,16 +863,24 @@ def main():
 
     # --list-cpus mode: print supported architectures and exit
     if args.list_cpus:
-        from util.uops_parser import list_available_architectures
+        from util.uops_parser import (
+            find_uops_database_path,
+            list_available_architectures,
+        )
 
-        xml_path = os.path.join(os.path.dirname(__file__), "..", "instructions.xml.zst")
-        has_xml = os.path.exists(xml_path)
-        xml_archs = list_available_architectures(xml_path) if has_xml else set()
+        database_path = find_uops_database_path(
+            base_dir=os.path.join(os.path.dirname(__file__), "..")
+        )
+        archs = (
+            set(list_available_architectures(database_path))
+            if database_path is not None
+            else set()
+        )
 
         rows = []
         for info in get_supported_cpus():
             aliases = ", ".join(info.aliases)
-            uops_col = "yes" if info.canonical in xml_archs else "-"
+            uops_col = "yes" if info.canonical in archs else "-"
             mca_col = info.llvm_mca_cpu if info.llvm_mca_cpu else "-"
             rows.append([info.canonical, aliases, info.vendor, uops_col, mca_col])
 

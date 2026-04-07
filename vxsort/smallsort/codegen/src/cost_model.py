@@ -66,13 +66,16 @@ _ARCH_BY_CANONICAL: dict[str, ArchInfo] = {
 }
 
 
-def _find_xml_path() -> str | None:
-    """Find instructions.xml.zst relative to this module's directory."""
-    module_dir = os.path.dirname(__file__)
-    candidate = os.path.join(module_dir, "..", "instructions.xml.zst")
-    if os.path.exists(candidate):
-        return os.path.abspath(candidate)
-    return None
+def _find_uops_database_path() -> str | None:
+    """Find compact JSON uops database path."""
+    try:
+        from util.uops_parser import find_uops_database_path
+    except ImportError:
+        from .util.uops_parser import find_uops_database_path
+
+    return find_uops_database_path(
+        base_dir=os.path.join(os.path.dirname(__file__), "..")
+    )
 
 
 def resolve_arch_name(target_cpu: str) -> str | None:
@@ -125,23 +128,23 @@ class CostModel:
         if arch_name is None:
             return
 
-        xml_path = _find_xml_path()
-        if xml_path is None:
-            print("Warning: instructions.xml.zst not found, using generic costs")
+        database_path = _find_uops_database_path()
+        if database_path is None:
+            print("Warning: no uops database found, using generic costs")
             return
 
-        self._overlay_arch_costs(xml_path, arch_name)
+        self._overlay_arch_costs(database_path, arch_name)
 
-    def _overlay_arch_costs(self, xml_path: str, arch_name: str):
-        """Overlay architecture-specific costs from the uops.info XML."""
+    def _overlay_arch_costs(self, database_path: str, arch_name: str):
+        """Overlay architecture-specific costs from compact JSON uops data."""
         try:
             from intrinsic_registry import get_intrinsic_registry, xml_string_key
-            from util.uops_parser import parse_uops_xml
+            from util.uops_parser import parse_uops_database
         except ImportError:
             from .intrinsic_registry import get_intrinsic_registry, xml_string_key
-            from .util.uops_parser import parse_uops_xml
+            from .util.uops_parser import parse_uops_database
 
-        xml_costs = parse_uops_xml(xml_path, arch_name)
+        xml_costs = parse_uops_database(database_path, arch_name)
         if not xml_costs:
             print(
                 f"Warning: No data for architecture '{arch_name}', using generic costs"
