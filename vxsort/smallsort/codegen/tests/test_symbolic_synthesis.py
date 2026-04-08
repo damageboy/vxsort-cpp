@@ -14,8 +14,8 @@ def test_symbolic_synthesis():
 
     synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i32)
 
-    # Test case 1: Identity - input already matches target
-    # This should find a 0-instruction gadget
+    # Test case 1: input already matches target pairs, but solve using
+    # explicit single-instruction nodes on both sides.
     input_state = VectorState(
         top=[0, 1, 2, 3, 4, 5, 6, 7], bottom=[8, 9, 10, 11, 12, 13, 14, 15]
     )
@@ -31,14 +31,20 @@ def test_symbolic_synthesis():
         (7, 15),
     ]
 
-    print("Test 1: Identity case (should find 0-instruction gadget)")
+    print("Test 1: Explicit permutation nodes (non-zero instruction gadget)")
     print(f"Input state: {input_state}")
     print(f"Target pairs: {target_pairs}")
 
-    # Try with no instructions (should succeed)
-    # Returns (results, construction_time, solver_time)
-    # where results is list of (gadget, output_state) tuples
-    graph = GadgetGraph(top=None, bottom=None)
+    top_node = IntrinsicNode(
+        "_mm256_permute_ps",
+        {"a": InputRef("top"), "imm8": Symbolic("test_identity_top", 8)},
+    )
+    bottom_node = IntrinsicNode(
+        "_mm256_permute_ps",
+        {"a": InputRef("bottom"), "imm8": Symbolic("test_identity_bottom", 8)},
+    )
+    graph = GadgetGraph(top=top_node, bottom=bottom_node)
+
     results, _, _ = synthesizer.synthesize_gadget_with_symbolic(
         graph, input_state, target_pairs
     )
@@ -46,15 +52,15 @@ def test_symbolic_synthesis():
     print(f"Found {len(results)} gadget(s)")
     if results:
         gadget, output_state = results[0]
-        if gadget.instruction_count() == 0:
+        if gadget.instruction_count() > 0:
             print(f"Output state: {output_state}")
-            print("✓ Identity test passed!\n")
+            print("✓ Explicit-node identity test passed!\n")
         else:
-            print("✗ Identity test failed!\n")
-            assert False, "Identity test failed!"
+            print("✗ Explicit-node identity test failed!\n")
+            assert False, "Explicit-node identity test failed!"
     else:
-        print("✗ Identity test failed - no results!\n")
-        assert False, "Identity test failed!"
+        print("✗ Explicit-node identity test failed - no results!\n")
+        assert False, "Explicit-node identity test failed!"
 
     # Test case 2: Simple permutation using _mm256_permute2x128_si256
     # Swap the two 128-bit lanes

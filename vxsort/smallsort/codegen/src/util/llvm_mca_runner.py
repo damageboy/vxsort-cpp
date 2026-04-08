@@ -85,6 +85,7 @@ def run_llvm_mca(
     llvm_mca_cmd: str,
     solution_index: int,
     output_dir: str | None = None,
+    include_timeline: bool = True,
 ) -> McaResult:
     """Run llvm-mca on Intel-syntax assembly and return parsed results.
 
@@ -97,6 +98,10 @@ def run_llvm_mca(
             Split via :func:`shlex.split`.
         solution_index: 1-based solution index for reporting.
         output_dir: Optional directory for saving .s input files.
+        include_timeline: When True (default), run a second llvm-mca pass
+            with ``-timeline`` and write full text analysis output.
+            Disable for lower-overhead scoring when only JSON metrics
+            are needed.
 
     Returns:
         McaResult with throughput and simulated cycle estimates.
@@ -142,14 +147,15 @@ def run_llvm_mca(
         mca_json = json.loads(result.stdout)
         mca_result = _parse_mca_json(mca_json, solution_index, asm_path)
 
-        # Run again without --json for full text analysis
-        mca_result.analysis_path = _run_full_analysis(
-            base_cmd,
-            asm_text,
-            output_dir,
-            solution_index,
-            mca_result.warnings,
-        )
+        # Optional second pass for full text timeline analysis.
+        if include_timeline:
+            mca_result.analysis_path = _run_full_analysis(
+                base_cmd,
+                asm_text,
+                output_dir,
+                solution_index,
+                mca_result.warnings,
+            )
 
         return mca_result
 

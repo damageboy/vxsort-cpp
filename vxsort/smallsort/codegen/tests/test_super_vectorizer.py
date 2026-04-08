@@ -195,11 +195,9 @@ def test_generate_candidate_graphs_order_and_counts():
         assert isinstance(g.top, IntrinsicNode)  # depth-2 top is never None
         assert isinstance(g.bottom, IntrinsicNode)  # depth-1 bottom is never None
 
-    # Depth (0, 0) should produce a single identity graph
+    # Strict (0, 0) identity graph is excluded from synthesis candidates.
     identity_candidates = synthesizer._generate_candidate_graphs_at_depth(0, 0)
-    assert len(identity_candidates) == 1
-    assert identity_candidates[0].top is None
-    assert identity_candidates[0].bottom is None
+    assert identity_candidates == []
 
 
 def test_output_state_computation():
@@ -262,8 +260,8 @@ def test_first_stage_initial_state_matches_pairs(vm, dt):
         ),
     ],
 )
-def test_first_stage_null_gadget(vm, dt):
-    """Z3 synthesis: first stage should yield a 0-instruction gadget."""
+def test_first_stage_excludes_zero_instruction_gadgets(vm, dt):
+    """Synthesis should not produce strict 0-instruction gadgets."""
     super_opt = BitonicSuperVectorizer(2, dt, vm)
 
     solutions, _ = super_opt.build_solution_tree(
@@ -271,31 +269,34 @@ def test_first_stage_null_gadget(vm, dt):
     )
 
     assert len(solutions) > 0, "Should find at least one valid solution"
-    null_solutions = [
-        s for s in solutions if any(g.instruction_count() == 0 for g in s.gadgets)
-    ]
-    assert (
-        len(null_solutions) > 0
-    ), "Should find at least one solution with null (0-instruction) gadget for first stage"
+    assert all(
+        g.instruction_count() > 0 for s in solutions for g in s.gadgets
+    ), "Synthesis should exclude strict 0-instruction gadgets"
 
 
-def test_natural_order_identity():
-    """When input state IS already natural order, the stage should find a 0-instruction gadget."""
-    print("Testing natural order identity (already in natural order)...")
+def test_natural_order_with_explicit_permute_nodes():
+    """Natural-order stage can be solved with explicit permutation instructions."""
+    print("Testing natural order stage with explicit permute nodes...")
 
     synthesizer = GadgetSynthesizer(vector_machine.AVX2, primitive_type.i64)
     n = synthesizer.elements_per_vector  # 4 for AVX2 i64
 
-    # Input is already in natural order
     input_state = VectorState(
         top=list(range(1, n + 1)),
         bottom=list(range(n + 1, 2 * n + 1)),
     )
-    # Target pairs: (1, 5), (2, 6), (3, 7), (4, 8)
     target_pairs = [(i + 1, n + i + 1) for i in range(n)]
 
-    # Empty gadget (0 instructions) should satisfy strict constraints
-    graph = GadgetGraph(top=None, bottom=None)
+    top_node = IntrinsicNode(
+        "_mm256_permutexvar_epi64",
+        {"a": InputRef("top"), "op_idx": Symbolic("ctrl_top_nat", 256)},
+    )
+    bottom_node = IntrinsicNode(
+        "_mm256_permutexvar_epi64",
+        {"a": InputRef("bottom"), "op_idx": Symbolic("ctrl_bot_nat", 256)},
+    )
+    graph = GadgetGraph(top=top_node, bottom=bottom_node)
+
     results, _, _ = synthesizer.synthesize_gadget_with_symbolic(
         graph,
         input_state=input_state,
@@ -303,13 +304,13 @@ def test_natural_order_identity():
         allow_any_lane_order=False,
     )
 
-    assert len(results) == 1, f"Expected 1 result, got {len(results)}"
+    assert len(results) >= 1, f"Expected >=1 result, got {len(results)}"
     gadget, output_state = results[0]
-    assert gadget.instruction_count() == 0, "Should be a 0-instruction gadget"
+    assert gadget.instruction_count() > 0
     assert output_state.top == list(range(1, n + 1))
     assert output_state.bottom == list(range(n + 1, 2 * n + 1))
     print("  Output state:", output_state)
-    print("✓ Natural order identity test passed\n")
+    print("✓ Natural order explicit-permute test passed\n")
 
 
 def test_natural_order_strict_constraints():
@@ -635,10 +636,9 @@ def test_bitonicsupervectorizer_is_single_use():
 
 
 def test_avx512_i32_synthesis_depth1():
-    """Test that AVX512 i32 synthesis infrastructure works (null gadget for first stage).
+    """Test that AVX512 i32 synthesis infrastructure works.
 
     Full depth-2 synthesis is too slow for CI (~4 min for 16-element vectors).
-    The parametrized test_first_stage_requires_no_permutation covers i32+AVX512.
     """
     super_opt = BitonicSuperVectorizer(2, primitive_type.i32, vector_machine.AVX512)
     assert super_opt.elements_per_vector == 16, "AVX512 i32 should have 16 elements"

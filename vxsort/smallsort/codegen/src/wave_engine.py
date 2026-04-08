@@ -10,11 +10,13 @@ last-stage transitions form complete paths.
 from __future__ import annotations
 
 import os
+import queue as queue_mod
 import signal
 import sys
 import time
 from collections import deque
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from itertools import permutations
 from multiprocessing import Pool
@@ -180,6 +182,7 @@ class WaveConfig:
     smt2_dump_dir: str | None = None
     checkpoint_dir: str | None = None
     llvm_mca_path: str | None = None
+    llvm_mca_workers: int | None = None
     max_waves: int | None = None
     top_k: int = 10
     runtime_ui: str = "auto"
@@ -241,6 +244,20 @@ class WaveEngine:
             (offset + i, g) for i, g in enumerate(self.deep_candidates)
         )
 
+        # Candidate lookup and scoring caches
+        self._candidate_by_index: dict[int, object] = dict(self._candidates_with_index)
+        self._candidate_instruction_keys: dict[int, list[str]] = {
+            candidate_idx: self._collect_instruction_stats_keys(graph)
+            for candidate_idx, graph in self._candidates_with_index
+        }
+        self._candidate_instruction_counts: dict[int, int] = {
+            candidate_idx: self._candidate_instruction_count(graph)
+            for candidate_idx, graph in self._candidates_with_index
+        }
+        self._candidate_priority_order: list[int] = (
+            self._build_candidate_priority_order()
+        )
+
         # TransitionTable and initial state
         self.tt = TransitionTable(num_stages=len(self.all_stages))
         self.initial_state = self._create_initial_state()
@@ -253,7 +270,7 @@ class WaveEngine:
         # Stages with no untried jobs right now, but not truly exhausted
         self._stalled_stages: set[int] = set()
 
-        # Already-scored path keys (avoid re-scoring)
+        # Complete path keys already discovered (avoid duplicate reporting/scoring)
         self._scored_path_keys: set[tuple] = set()
 
         # Cumulative progress counters per stage (for progress bars)
@@ -277,15 +294,18 @@ class WaveEngine:
         # Accumulated scored paths across entire run
         self._all_scored_paths: list[dict] = []
 
+        # Dedicated async LLVM-MCA scoring lane (separate from synthesis pool)
+        self._mca_executor: ThreadPoolExecutor | None = None
+        self._mca_future_sizes: dict[object, int] = {}
+        self._mca_result_queue: queue_mod.Queue = queue_mod.Queue()
+        self._mca_pending_paths: int = 0
+
         # Runtime instruction-usage telemetry
         self.instruction_stats = InstructionStatsCollector()
         menu_instruction_keys = self._collect_menu_instruction_stats_keys()
         for stage_idx in range(len(self.all_stages)):
             self.instruction_stats.prepopulate_stage(stage_idx, menu_instruction_keys)
-        self._menu_instruction_count = sum(
-            self._candidate_instruction_count(graph)
-            for _candidate_idx, graph in self._candidates_with_index
-        )
+        self._menu_instruction_count = sum(self._candidate_instruction_counts.values())
         (
             self._instruction_latency_arches,
             self._instruction_latency_by_key,
@@ -341,6 +361,167 @@ class WaveEngine:
     # Job creation
     # ------------------------------------------------------------------
 
+    def _candidate_throughput_score_for_cpu(
+        self,
+        candidate_idx: int,
+        cost_model,
+    ) -> float:
+        """Return summed reciprocal throughput for one candidate on one CPU."""
+        score = 0.0
+        for key in self._candidate_instruction_keys.get(candidate_idx, []):
+            intrinsic_name = key.split("/", 1)[0]
+            score += cost_model.get_instruction_cost(intrinsic_name).throughput
+        return score
+
+    def _rank_candidates_for_cpu(self, target_cpu: str) -> list[int]:
+        """Rank candidate indices for one CPU by (throughput, length, index)."""
+        try:
+            from cost_model import CostModel
+        except ImportError:
+            from .cost_model import CostModel  # type: ignore[no-redef]
+
+        cost_model = CostModel(target_cpu)
+
+        scored: list[tuple[float, int, int]] = []
+        for candidate_idx, _graph in self._candidates_with_index:
+            scored.append(
+                (
+                    self._candidate_throughput_score_for_cpu(candidate_idx, cost_model),
+                    self._candidate_instruction_counts.get(candidate_idx, 0),
+                    candidate_idx,
+                )
+            )
+
+        scored.sort(key=lambda item: (item[0], item[1], item[2]))
+        return [candidate_idx for _score, _length, candidate_idx in scored]
+
+    @staticmethod
+    def _interleave_candidate_rankings(
+        rankings: list[list[int]], fallback_order: list[int]
+    ) -> list[int]:
+        """Interleave per-CPU candidate rankings with stable deduplication."""
+        if not rankings:
+            return list(fallback_order)
+
+        merged: list[int] = []
+        seen: set[int] = set()
+
+        max_len = max((len(ranking) for ranking in rankings), default=0)
+        for offset in range(max_len):
+            for ranking in rankings:
+                if offset >= len(ranking):
+                    continue
+                candidate_idx = ranking[offset]
+                if candidate_idx in seen:
+                    continue
+                seen.add(candidate_idx)
+                merged.append(candidate_idx)
+
+        for candidate_idx in fallback_order:
+            if candidate_idx not in seen:
+                merged.append(candidate_idx)
+
+        return merged
+
+    def _build_candidate_priority_order(self) -> list[int]:
+        """Build a single candidate priority order for job scheduling."""
+        fallback_order = [
+            candidate_idx for candidate_idx, _ in self._candidates_with_index
+        ]
+        arches = [cpu for cpu in self.config.target_cpus if cpu]
+
+        self._candidate_rankings_by_cpu: dict[str, list[int]] = {}
+        if not arches:
+            return fallback_order
+
+        rankings: list[list[int]] = []
+        for arch in arches:
+            try:
+                ranked = self._rank_candidates_for_cpu(arch)
+                self._candidate_rankings_by_cpu[arch] = ranked
+                rankings.append(ranked)
+            except Exception as exc:  # pragma: no cover - defensive fallback
+                print(
+                    f"Warning: failed to rank candidates for {arch}: {exc}",
+                    file=sys.stderr,
+                )
+
+        return self._interleave_candidate_rankings(rankings, fallback_order)
+
+    @staticmethod
+    def _format_candidate_head(ordering: list[int], top_n: int) -> str:
+        """Render a compact candidate index head for runtime logs."""
+        head = ordering[:top_n]
+        tail = " ..." if len(ordering) > top_n else ""
+        return f"[{', '.join(str(i) for i in head)}]{tail}"
+
+    def _log_candidate_priority_startup(self, runtime_session, top_n: int = 12) -> None:
+        """Emit startup logs describing candidate ordering in the runtime UI."""
+        if runtime_session is None:
+            return
+
+        runtime_session.log(
+            "candidate-ordering: windowed tiers enabled "
+            "(window ~= wave_attempts / input_count)"
+        )
+
+        if self._candidate_rankings_by_cpu:
+            ordered_arches = [
+                arch
+                for arch in self.config.target_cpus
+                if arch in self._candidate_rankings_by_cpu
+            ]
+            ordered_arches.extend(
+                arch
+                for arch in self._candidate_rankings_by_cpu
+                if arch not in ordered_arches
+            )
+            for arch in ordered_arches:
+                ranked = self._candidate_rankings_by_cpu.get(arch)
+                if not ranked:
+                    continue
+                runtime_session.log(
+                    f"candidate-ordering: {arch} top{top_n}: "
+                    f"{self._format_candidate_head(ranked, top_n)}"
+                )
+        else:
+            runtime_session.log(
+                "candidate-ordering: no target CPUs selected, "
+                "using default candidate order"
+            )
+
+        runtime_session.log(
+            f"candidate-ordering: interleaved top{top_n}: "
+            f"{self._format_candidate_head(self._candidate_priority_order, top_n)}"
+        )
+
+    def _ordered_inputs_for_stage(
+        self, stage_idx: int, input_states: list[VectorState]
+    ) -> list[VectorState]:
+        """Prioritize uncovered input states before previously-attempted ones."""
+        if stage_idx == 0:
+            return list(input_states)
+
+        attempted_inputs = {
+            input_tuple
+            for input_tuple, _candidate_idx in self.tt.stages[stage_idx].attempted_pairs
+        }
+
+        uncovered: list[VectorState] = []
+        covered: list[VectorState] = []
+        for state in input_states:
+            (covered if state.as_tuple() in attempted_inputs else uncovered).append(
+                state
+            )
+
+        return uncovered + covered
+
+    def _candidate_window_size(self, input_count: int) -> int:
+        """Window size derived from per-wave attempt budget."""
+        if input_count <= 0:
+            return 1
+        return max(1, self.config.wave_attempts // input_count)
+
     def _make_jobs(
         self,
         stage_idx: int,
@@ -349,46 +530,63 @@ class WaveEngine:
     ) -> list[tuple[int, tuple]]:
         """Create (candidate_index, job_tuple) pairs, skipping already-attempted.
 
-        Returns list of (candidate_index, job) where job is the tuple
-        expected by ``_validate_gadget_worker``.
-
-        If *limit* is set, stop collecting once that many jobs are gathered.
+        Uses windowed candidate tiers: for each candidate window, scan all
+        (uncovered-first) inputs before moving to the next window.
         """
         stage_pairs = self.all_stages[stage_idx]
         jobs: list[tuple[int, tuple]] = []
 
-        for input_state in input_states:
-            input_tuple = input_state.as_tuple()
-            for cand_idx, graph in self._candidates_with_index:
-                if self.tt.was_attempted(stage_idx, input_tuple, cand_idx):
+        ordered_inputs = self._ordered_inputs_for_stage(stage_idx, input_states)
+        candidate_order = self._candidate_priority_order
+        if not ordered_inputs or not candidate_order:
+            return jobs
+
+        window_size = min(
+            len(candidate_order),
+            self._candidate_window_size(len(ordered_inputs)),
+        )
+
+        for window_start in range(0, len(candidate_order), window_size):
+            window = candidate_order[window_start : window_start + window_size]
+            for cand_idx in window:
+                graph = self._candidate_by_index.get(cand_idx)
+                if graph is None:
                     continue
 
-                instruction_keys = self._collect_instruction_stats_keys(graph)
+                instruction_keys = self._candidate_instruction_keys.get(cand_idx, [])
 
-                metadata = {
-                    "input_state": input_state,
-                    "stage_idx": stage_idx,
-                    "max_unique_outputs": self.config.max_unique_outputs,
-                    "candidate_index": cand_idx,
-                    "instruction_keys": instruction_keys,
-                }
-                # Final natural-order stage must enforce strict lane order
-                if self.config.natural_order and stage_idx == len(self.all_stages) - 1:
-                    metadata["allow_any_lane_order"] = False
-                if self.config.smt2_dump_dir:
-                    metadata["smt2_dump_dir"] = self.config.smt2_dump_dir
+                for input_state in ordered_inputs:
+                    input_tuple = input_state.as_tuple()
+                    if self.tt.was_attempted(stage_idx, input_tuple, cand_idx):
+                        continue
 
-                job = (
-                    graph,
-                    input_state,
-                    stage_pairs,
-                    self.config.vm,
-                    self.config.prim_type,
-                    metadata,
-                )
-                jobs.append((cand_idx, job))
-                if limit is not None and len(jobs) >= limit:
-                    return jobs
+                    metadata = {
+                        "input_state": input_state,
+                        "stage_idx": stage_idx,
+                        "max_unique_outputs": self.config.max_unique_outputs,
+                        "candidate_index": cand_idx,
+                        "instruction_keys": instruction_keys,
+                    }
+                    # Final natural-order stage must enforce strict lane order
+                    if (
+                        self.config.natural_order
+                        and stage_idx == len(self.all_stages) - 1
+                    ):
+                        metadata["allow_any_lane_order"] = False
+                    if self.config.smt2_dump_dir:
+                        metadata["smt2_dump_dir"] = self.config.smt2_dump_dir
+
+                    job = (
+                        graph,
+                        input_state,
+                        stage_pairs,
+                        self.config.vm,
+                        self.config.prim_type,
+                        metadata,
+                    )
+                    jobs.append((cand_idx, job))
+                    if limit is not None and len(jobs) >= limit:
+                        return jobs
 
         return jobs
 
@@ -429,8 +627,8 @@ class WaveEngine:
     def _collect_menu_instruction_stats_keys(self) -> list[str]:
         """Flatten intrinsic keys from the full precomputed candidate menu."""
         keys: set[str] = set()
-        for _candidate_idx, graph in self._candidates_with_index:
-            keys.update(self._collect_instruction_stats_keys(graph))
+        for candidate_idx, _graph in self._candidates_with_index:
+            keys.update(self._candidate_instruction_keys.get(candidate_idx, []))
         return sorted(keys)
 
     def _candidate_instruction_count(self, graph) -> int:
@@ -633,8 +831,17 @@ class WaveEngine:
         return covered_inputs, total_inputs, uncovered_pct
 
     def _runtime_status_text(self) -> str | None:
-        """Build footer status text for best LLVM-MCA scores."""
+        """Build footer status text for path discovery/scoring + best LLVM-MCA."""
         parts = [f"Menu instructions: {self._menu_instruction_count}"]
+
+        discovered = len(self._scored_path_keys)
+        scored = len(self._all_scored_paths)
+        pending = self._mca_pending_paths
+        parts.append(
+            f"Paths: {discovered} discovered, {scored} scored"
+            + (f", {pending} pending LLVM-MCA" if pending > 0 else "")
+        )
+
         if self.best_scores:
             best = [
                 f"{cpu}: {s['cycles']:.1f}cy (throughput {s['throughput']:.2f})"
@@ -821,13 +1028,12 @@ class WaveEngine:
         completion_queue,
         runtime_session=None,
     ) -> int:
-        """Process all available results from the completion queue.
+        """Process all available results from the synthesis completion queue.
 
-        Records transitions, enqueues downstream jobs, triggers on-the-fly
-        scoring for last-stage transitions. Returns count of results processed.
+        Records transitions, enqueues downstream jobs, and queues complete-path
+        scoring for last-stage discoveries. Returns count of synthesis results
+        processed (not LLVM-MCA completions).
         """
-        import queue as queue_mod
-
         count = 0
         last_stage = len(self.all_stages) - 1
 
@@ -868,7 +1074,7 @@ class WaveEngine:
                     # Feed downstream stage to keep pool busy during stragglers
                     self._enqueue_downstream(stage_idx, output_state)
 
-                    # On-the-fly scoring: new last-stage transition
+                    # Queue on-the-fly scoring for newly discovered complete paths
                     if stage_idx == last_stage:
                         try:
                             self._score_new_paths_for_transition(
@@ -892,7 +1098,9 @@ class WaveEngine:
                     stage_idx, instruction_keys, outcome
                 )
 
-        if count > 0:
+        mca_count = self._drain_scoring_results(runtime_session)
+
+        if count > 0 or mca_count > 0:
             self._sync_runtime_session(runtime_session)
 
         return count
@@ -901,6 +1109,77 @@ class WaveEngine:
     # Scoring via LLVM-MCA
     # ------------------------------------------------------------------
 
+    def _enqueue_scoring_batch(self, paths: list[list[tuple]]) -> None:
+        """Queue one batch of complete paths on the dedicated LLVM-MCA lane."""
+        if not paths:
+            return
+
+        if self._mca_executor is None:
+            self._integrate_scored_paths(self._score_complete_paths(paths))
+            return
+
+        future = self._mca_executor.submit(self._score_complete_paths, paths)
+        self._mca_future_sizes[future] = len(paths)
+        self._mca_pending_paths += len(paths)
+        future.add_done_callback(lambda done: self._mca_result_queue.put(done))
+
+    def _integrate_scored_paths(self, scored: list[dict]) -> None:
+        """Merge scored paths and update per-CPU best-score summary."""
+        if not scored:
+            return
+
+        self._all_scored_paths.extend(scored)
+
+        for entry in scored:
+            for cpu, scores in entry.get("scores", {}).items():
+                cycles = scores.get("cycles", float("inf"))
+                if cycles <= 0:
+                    continue
+                prev = self.best_scores.get(cpu)
+                if prev is None or cycles < prev["cycles"]:
+                    self.best_scores[cpu] = {
+                        "throughput": scores["throughput"],
+                        "cycles": cycles,
+                        "path_key": entry.get("path_key"),
+                    }
+
+    def _drain_scoring_results(self, runtime_session=None) -> int:
+        """Drain finished LLVM-MCA batches and merge them into engine state."""
+        completed_paths = 0
+
+        while True:
+            try:
+                future = self._mca_result_queue.get_nowait()
+            except queue_mod.Empty:
+                break
+
+            batch_size = self._mca_future_sizes.pop(future, 0)
+            self._mca_pending_paths = max(0, self._mca_pending_paths - batch_size)
+
+            try:
+                scored = future.result()
+            except Exception as exc:
+                print(f"Warning: async LLVM-MCA batch failed: {exc}", file=sys.stderr)
+                continue
+
+            completed_paths += len(scored)
+            self._integrate_scored_paths(scored)
+
+        if completed_paths > 0 and runtime_session is not None:
+            runtime_session.log(
+                f"LLVM-MCA: scored {completed_paths} complete path(s) "
+                f"({len(self._all_scored_paths)} total scored)"
+            )
+
+        return completed_paths
+
+    def _wait_for_pending_scoring(self, runtime_session=None) -> None:
+        """Wait for queued LLVM-MCA work before shutdown/checkpoint handoff."""
+        while self._mca_pending_paths > 0:
+            drained = self._drain_scoring_results(runtime_session)
+            if drained == 0:
+                time.sleep(0.05)
+
     def _score_new_paths_for_transition(
         self,
         stage_idx: int,
@@ -908,29 +1187,30 @@ class WaveEngine:
         output_tuple: tuple,
         runtime_session=None,
     ) -> None:
-        """Score complete paths formed by a new transition at the last stage.
-
-        Traces backwards to find all complete paths ending with this
-        transition, filters already-scored, scores the rest.
-        """
+        """Queue complete paths formed by a new transition at the last stage."""
         paths = self.tt.trace_paths_ending_with(stage_idx, input_tuple, output_tuple)
         if not paths:
             return
 
-        # Filter already-scored
+        # Filter already discovered path keys
         new_paths = []
         for path in paths:
             key = tuple(tuple(step) for step in path)
-            if key not in self._scored_path_keys:
-                new_paths.append(path)
+            if key in self._scored_path_keys:
+                continue
+            self._scored_path_keys.add(key)
+            new_paths.append(path)
 
         if not new_paths:
             return
 
-        scored = self._score_complete_paths(paths=new_paths)
-        if scored:
-            self._all_scored_paths.extend(scored)
-            self._sync_runtime_session(runtime_session)
+        if runtime_session is not None:
+            runtime_session.log(
+                f"Stage {stage_idx}: +{len(new_paths)} complete path(s) discovered "
+                f"({len(self._scored_path_keys)} total discovered)"
+            )
+
+        self._enqueue_scoring_batch(new_paths)
 
     def _score_complete_paths(self, paths: list[list[tuple]]) -> list[dict]:
         """Score the given complete paths with LLVM-MCA.
@@ -939,10 +1219,6 @@ class WaveEngine:
         """
         if not paths:
             return []
-
-        # Register as scored
-        for path in paths:
-            self._scored_path_keys.add(tuple(tuple(step) for step in path))
 
         scored: list[dict] = []
         for path in paths:
@@ -1002,8 +1278,6 @@ class WaveEngine:
                 )
                 path_asm[i] = sanitize_asm_for_llvm_mca(asm)
             except Exception as exc:
-                import sys
-
                 print(
                     f"Warning: ASM generation for path {i} failed: {exc}",
                     file=sys.stderr,
@@ -1024,7 +1298,13 @@ class WaveEngine:
 
         def _run_one(job):
             idx, target_cpu, mcpu, sanitized = job
-            result = run_llvm_mca(sanitized, mcpu, mca_bin, idx + 1)
+            result = run_llvm_mca(
+                sanitized,
+                mcpu,
+                mca_bin,
+                idx + 1,
+                include_timeline=False,
+            )
             return idx, target_cpu, result.throughput, result.simulated_cycles
 
         num_threads = min(len(mca_jobs), self.config.max_workers or os.cpu_count() or 4)
@@ -1037,16 +1317,7 @@ class WaveEngine:
                         "throughput": throughput,
                         "cycles": cycles,
                     }
-                    prev = self.best_scores.get(target_cpu)
-                    if cycles > 0 and (prev is None or cycles < prev["cycles"]):
-                        self.best_scores[target_cpu] = {
-                            "throughput": throughput,
-                            "cycles": cycles,
-                            "path_key": scored[idx]["path_key"],
-                        }
                 except Exception as exc:
-                    import sys
-
                     job = futures[future]
                     print(
                         f"Warning: LLVM-MCA scoring path {job[0]} "
@@ -1087,7 +1358,12 @@ class WaveEngine:
                 if upstream not in excluded:
                     return upstream
                 upstream -= 1
-            # All upstream exhausted/stalled — mark appropriately
+            # All upstream exhausted/stalled.
+            # If this stage still has untried pairs, keep targeting it
+            # instead of exhausting it prematurely.
+            if self._stage_has_untried_work(target):
+                return target
+
             predecessors_exhausted = all(
                 s in self.exhausted_stages for s in range(target)
             )
@@ -1099,6 +1375,19 @@ class WaveEngine:
             return self._pick_target(excluded)
 
         return target
+
+    def _stage_has_untried_work(self, stage_idx: int) -> bool:
+        """Return True if a stage still has at least one untried job pair."""
+        if stage_idx == 0:
+            input_states = [self.initial_state]
+        else:
+            prev_outputs = self.tt.get_unique_outputs(stage_idx - 1)
+            input_states = list(prev_outputs.values()) if prev_outputs else []
+
+        if not input_states:
+            return False
+
+        return bool(self._make_jobs(stage_idx, input_states, limit=1))
 
     def _pick_target(self, excluded: set[int]) -> int | None:
         """Pick the weakest stage, penalizing unproductive ones.
@@ -1254,8 +1543,6 @@ class WaveEngine:
 
         Termination: Ctrl-C, max_waves reached, or all stages exhausted.
         """
-        import queue as queue_mod
-
         original_sigint = signal.getsignal(signal.SIGINT)
 
         def _sigint_handler(_signum, _frame):
@@ -1280,12 +1567,28 @@ class WaveEngine:
 
         runtime_session = self._create_runtime_session()
 
+        if self.config.target_cpus:
+            mca_workers = self.config.llvm_mca_workers
+            if mca_workers is None:
+                mca_workers = max(1, min(4, num_workers))
+            self._mca_executor = ThreadPoolExecutor(
+                max_workers=mca_workers,
+                thread_name_prefix="llvm-mca",
+            )
+
         try:
             with runtime_session:
+                if self._mca_executor is not None:
+                    runtime_session.log(
+                        "LLVM-MCA async lane enabled "
+                        f"({self.config.llvm_mca_workers or max(1, min(4, num_workers))} worker(s))"
+                    )
+
                 # Seed pending queues from unforwarded outputs (resume case)
                 for s in range(1, len(self.all_stages)):
                     self._enqueue_from_unforwarded(s)
                 self._sync_runtime_session(runtime_session)
+                self._log_candidate_priority_startup(runtime_session)
 
                 while True:
                     if self._interrupted:
@@ -1424,7 +1727,9 @@ class WaveEngine:
                             f"s{s}+{n}" for s, n in sorted(propagation.items())
                         ]
                         prop_str = f" | propagated: {', '.join(prop_parts)}"
+                    discovered_total = len(self._scored_path_keys)
                     scored_total = len(self._all_scored_paths)
+                    pending_total = self._mca_pending_paths
                     unprod = self.tt.stages[target].unproductive_waves
                     unprod_str = f" | unproductive x{unprod}" if unprod > 0 else ""
                     runtime_session.log(
@@ -1433,14 +1738,29 @@ class WaveEngine:
                         f"+{new_outputs} outputs "
                         f"({stats['distinct_outputs']} total)"
                         f"{prop_str}"
-                        f" | {scored_total} paths scored total"
-                        f"{unprod_str}",
+                        f" | paths: {discovered_total} discovered, "
+                        f"{scored_total} scored"
+                        + (
+                            f", {pending_total} pending LLVM-MCA"
+                            if pending_total > 0
+                            else ""
+                        )
+                        + unprod_str
                     )
                     self._sync_runtime_session(runtime_session)
 
                     self.wave_count += 1
 
+                # Ensure queued LLVM-MCA work is integrated before exit.
+                self._wait_for_pending_scoring(runtime_session)
+                self._save_checkpoint()
+                self._sync_runtime_session(runtime_session)
+
         finally:
+            if self._mca_executor is not None:
+                self._mca_executor.shutdown(wait=False)
+                self._mca_executor = None
+
             pool.terminate()
             pool.join()
             signal.signal(signal.SIGINT, original_sigint)

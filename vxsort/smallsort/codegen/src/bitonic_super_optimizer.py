@@ -167,7 +167,7 @@ class BitonicSuperVectorizer:
 
         The initial state is constructed from the FIRST stage's comparison pairs.
         For each pair (a, b), element a goes to top vector and element b goes to bottom.
-        This ensures the first stage requires no permutation (0-instruction gadget).
+        This aligns lane pairing with stage-0 compare-swap semantics.
         """
         first_stage_pairs = self.bitonic_sorter.stages[0]
 

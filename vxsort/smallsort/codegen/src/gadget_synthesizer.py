@@ -1435,7 +1435,15 @@ class GadgetSynthesizer:
     def _generate_candidate_graphs_at_depth(
         self, top_depth: int, bottom_depth: int
     ) -> list[GadgetGraph]:
-        """Generate candidate GadgetGraphs for a given (top_depth, bottom_depth)."""
+        """Generate candidate GadgetGraphs for a given (top_depth, bottom_depth).
+
+        The strict identity candidate (top=None, bottom=None) is intentionally
+        excluded from synthesis. Zero-instruction gadgets are provided via
+        retroactive input seeding instead of SMT synthesis.
+        """
+        if top_depth == 0 and bottom_depth == 0:
+            return []
+
         top_graphs = self._build_gadget_graphs(top_depth, self.single_intrinsics_top)
         bottom_graphs = self._build_gadget_graphs(
             bottom_depth, self.single_intrinsics_bottom
@@ -1447,6 +1455,9 @@ class GadgetSynthesizer:
 
         The candidates depend only on gadget_depth and the available intrinsics,
         not on input state or stage pairs.
+
+        Note: strict 0-instruction candidates (both sides identity) are excluded
+        from synthesis and therefore omitted from this menu.
         """
         all_candidates: list[GadgetGraph] = []
         for top_depth in range(gadget_depth + 1):
@@ -1463,7 +1474,8 @@ class GadgetSynthesizer:
     ) -> tuple[list[GadgetGraph], list[GadgetGraph]]:
         """Split candidates into (shallow, deep) tiers.
 
-        shallow: graph_max_depth <= 1 (identity + single-instruction per side)
+        shallow: graph_max_depth <= 1 (single-instruction templates, optionally
+            with identity on one side)
         deep: graph_max_depth >= 2 (multi-instruction, shared-prefix)
         """
         all_candidates = self.precompute_all_candidates(gadget_depth)

@@ -2,6 +2,8 @@
 
 import math
 import queue
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 from util.enums import primitive_type, vector_machine
 from wave_engine import WaveConfig, WaveEngine
@@ -146,6 +148,19 @@ class TestWaveEngineInit:
         assert status is not None
         assert f"Menu instructions: {expected_count}" in status
 
+    def test_runtime_status_text_includes_path_scoring_progress(self):
+        config = _fast_config()
+        engine = WaveEngine(config)
+
+        engine._scored_path_keys.add(((0, ((1,), (2,)), ((1,), (2,))),))
+        engine._all_scored_paths.append({"path_key": [], "path": [], "scores": {}})
+        engine._mca_pending_paths = 2
+
+        status = engine._runtime_status_text()
+
+        assert status is not None
+        assert "Paths: 1 discovered, 1 scored, 2 pending LLVM-MCA" in status
+
 
 def test_wave_engine_emits_stage_updates_without_mutating_selected_stage():
     config = _fast_config()
@@ -207,6 +222,60 @@ def test_stage_input_domain_uncovered_percentage_uses_attempted_inputs():
     assert stage1.covered_inputs == 1
     assert stage1.total_inputs == 2
     assert stage1.uncovered_input_pct == 50.0
+
+
+def test_last_stage_discovery_is_reported_before_async_scoring_completes(monkeypatch):
+    engine = WaveEngine(_fast_config(target_cpus=["skylake"]))
+    engine._mca_executor = ThreadPoolExecutor(max_workers=1)
+    session = _RecordingRuntimeSession(selected_stage=0)
+
+    last_stage = len(engine.all_stages) - 1
+    in_state = ((1, 2, 3, 4), (5, 6, 7, 8))
+    out_state = ((1, 3, 2, 4), (5, 7, 6, 8))
+    fake_path = [(last_stage, in_state, out_state)]
+
+    monkeypatch.setattr(
+        engine.tt,
+        "trace_paths_ending_with",
+        lambda *_args, **_kwargs: [fake_path],
+    )
+
+    def _slow_score(paths):
+        time.sleep(0.25)
+        return [
+            {
+                "path_key": [
+                    [
+                        last_stage,
+                        [list(in_state[0]), list(in_state[1])],
+                        [list(out_state[0]), list(out_state[1])],
+                    ]
+                ],
+                "path": paths[0],
+                "scores": {},
+            }
+        ]
+
+    monkeypatch.setattr(engine, "_score_complete_paths", _slow_score)
+
+    start = time.perf_counter()
+    engine._score_new_paths_for_transition(last_stage, in_state, out_state, session)
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 0.15
+    assert engine._mca_pending_paths == 1
+    assert any("complete path(s) discovered" in line for line in session.logs)
+
+    try:
+        while engine._mca_pending_paths > 0:
+            engine._drain_scoring_results(session)
+            time.sleep(0.01)
+    finally:
+        engine._mca_executor.shutdown(wait=True)
+        engine._mca_executor = None
+
+    assert len(engine._all_scored_paths) == 1
+    assert engine._mca_pending_paths == 0
 
 
 class TestFirstWaveDiscoveries:
@@ -318,6 +387,26 @@ class TestBubbleUp:
         # but it's stuck, so bubble up to stage 0
         assert target == 0
 
+    def test_does_not_exhaust_stage_with_untried_work_when_upstream_exhausted(self):
+        engine = WaveEngine(_fast_config(retroactive_input=True))
+
+        # Skip first-wave override so normal target selection applies.
+        engine.wave_count = 1
+
+        # Stage 1 looks unproductive enough to trigger bubble-up logic.
+        engine.tt.stages[1].unproductive_waves = 3
+
+        # Mimic runtime state where downstream stages are stalled because
+        # stage 1 has produced no outputs yet.
+        engine._stalled_stages.update(range(2, len(engine.all_stages)))
+
+        target = engine._select_target_stage()
+
+        # Even though stage 0 is already exhausted (retroactive input mode),
+        # stage 1 still has many untried (input, candidate) pairs.
+        assert target == 1
+        assert 1 not in engine.exhausted_stages
+
 
 class TestExportToSolutionNodes:
     """export_to_solution_nodes produces valid SolutionNode tree."""
@@ -355,6 +444,23 @@ class TestExportToSolutionNodes:
         # Children should link to stage 1
         assert len(nodes[0].children) == 1
         assert nodes[0].children[0].stage == 1
+
+
+class TestInstructionStatsKeys:
+    """Instruction stats should track concrete intrinsic keys only."""
+
+    def test_candidate_menu_excludes_zero_instruction_sentinel(self):
+        engine = WaveEngine(_fast_config())
+
+        assert all(
+            engine._candidate_instruction_count(graph) > 0
+            for _idx, graph in engine._candidates_with_index
+        )
+
+        all_keys = {
+            key for keys in engine._candidate_instruction_keys.values() for key in keys
+        }
+        assert "<0-instruction-gadget>" not in all_keys
 
 
 class TestInstructionStatsDrain:
@@ -609,3 +715,91 @@ class TestEndToEnd:
         # Export to SolutionNode tree
         solutions = engine2.export_to_solution_nodes()
         assert len(solutions) > 0
+
+
+class TestCandidatePriorityOrdering:
+    """Candidate ordering should support per-CPU interleaving and wide tiers."""
+
+    def test_interleaves_per_cpu_candidate_rankings(self, monkeypatch):
+        def _fake_rank(self, target_cpu: str) -> list[int]:
+            if target_cpu == "ZEN5":
+                return [0, 1, 2, 3]
+            if target_cpu == "ADL-P":
+                return [2, 3, 1, 0]
+            return []
+
+        monkeypatch.setattr(
+            WaveEngine,
+            "_rank_candidates_for_cpu",
+            _fake_rank,
+            raising=False,
+        )
+
+        engine = WaveEngine(_fast_config(target_cpus=["ZEN5", "ADL-P"]))
+
+        assert engine._candidate_priority_order[:4] == [0, 2, 1, 3]
+
+    def test_make_jobs_uses_candidate_window_tiers_across_inputs(self):
+        from bitonic_types import VectorState
+
+        engine = WaveEngine(_fast_config(wave_attempts=4))
+
+        input_a = engine.initial_state
+        input_b = VectorState(
+            top=[x + 100 for x in input_a.top],
+            bottom=[x + 100 for x in input_a.bottom],
+        )
+
+        engine._candidate_priority_order = [10, 11, 12, 13]
+        engine._candidate_by_index = {idx: f"graph-{idx}" for idx in [10, 11, 12, 13]}
+        engine._candidate_instruction_keys = {
+            idx: [f"intrinsic_{idx}"] for idx in [10, 11, 12, 13]
+        }
+
+        jobs = engine._make_jobs(0, [input_a, input_b], limit=8)
+
+        assert [cand_idx for cand_idx, _job in jobs] == [10, 10, 11, 11, 12, 12, 13, 13]
+
+    def test_make_jobs_prefers_uncovered_inputs_before_covered_inputs(self):
+        from bitonic_types import VectorState
+
+        engine = WaveEngine(_fast_config(wave_attempts=4))
+
+        covered = VectorState(
+            top=[10, 20, 30, 40],
+            bottom=[50, 60, 70, 80],
+        )
+        uncovered = VectorState(
+            top=[11, 21, 31, 41],
+            bottom=[51, 61, 71, 81],
+        )
+
+        engine.tt.record_attempted_pair(1, covered.as_tuple(), 99999)
+
+        engine._candidate_priority_order = [7]
+        engine._candidate_by_index = {7: "graph-7"}
+        engine._candidate_instruction_keys = {7: ["intrinsic_7"]}
+
+        jobs = engine._make_jobs(1, [covered, uncovered], limit=2)
+
+        first_input = jobs[0][1][1]
+        second_input = jobs[1][1][1]
+        assert first_input.as_tuple() == uncovered.as_tuple()
+        assert second_input.as_tuple() == covered.as_tuple()
+
+    def test_startup_log_includes_candidate_ordering_summary(self):
+        engine = WaveEngine(_fast_config())
+        session = _RecordingRuntimeSession(selected_stage=0)
+
+        engine._candidate_rankings_by_cpu = {
+            "ZEN5": [0, 1, 2, 3],
+            "ADL-P": [2, 3, 1, 0],
+        }
+        engine._candidate_priority_order = [0, 2, 1, 3]
+
+        engine._log_candidate_priority_startup(session, top_n=3)
+
+        assert any("candidate-ordering" in line for line in session.logs)
+        assert any("ZEN5" in line and "0, 1, 2" in line for line in session.logs)
+        assert any("ADL-P" in line and "2, 3, 1" in line for line in session.logs)
+        assert any("interleaved" in line and "0, 2, 1" in line for line in session.logs)

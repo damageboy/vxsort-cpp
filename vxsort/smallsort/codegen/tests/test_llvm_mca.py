@@ -1,7 +1,9 @@
 """Tests for LLVM-MCA integration."""
 
-import pytest
+import subprocess
 from unittest.mock import patch
+
+import pytest
 from cost_model import resolve_llvm_mca_cpu, get_supported_cpus
 from perf_estimator import sanitize_asm_for_llvm_mca
 from util.llvm_mca_runner import (
@@ -197,6 +199,36 @@ class TestMcaResult:
         assert result.solution_index == 1
         assert result.throughput == 3.5
         assert result.simulated_cycles == 4.2
+
+
+class TestRunLlvmMcaModes:
+    """Mode-specific behavior for llvm-mca invocations."""
+
+    @patch(
+        "util.llvm_mca_runner.subprocess.run",
+        return_value=subprocess.CompletedProcess(
+            args=["llvm-mca"],
+            returncode=0,
+            stdout=(
+                '{"CodeRegions":[{"SummaryView":'
+                '{"BlockRThroughput":3.5,"TotalCycles":350,"Iterations":100}}]}'
+            ),
+            stderr="",
+        ),
+    )
+    def test_skip_timeline_analysis_when_disabled(self, mock_run):
+        result = run_llvm_mca(
+            "vmovdqa ymm1, ymm0\n",
+            "znver5",
+            "llvm-mca",
+            solution_index=1,
+            include_timeline=False,
+        )
+
+        assert result.throughput == pytest.approx(3.5)
+        assert result.simulated_cycles == pytest.approx(3.5)
+        assert result.analysis_path == ""
+        assert mock_run.call_count == 1
 
 
 @pytest.mark.skipif(
