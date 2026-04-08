@@ -300,6 +300,11 @@ class WaveEngine:
         self._mca_result_queue: queue_mod.Queue = queue_mod.Queue()
         self._mca_pending_paths: int = 0
 
+        # Backlog of terminal transitions awaiting path discovery/chunking.
+        # We process this incrementally to keep UI/search responsive.
+        self._pending_score_anchors: deque[tuple[int, tuple, tuple]] = deque()
+        self._queued_score_anchors: set[tuple[int, tuple, tuple]] = set()
+
         # Runtime instruction-usage telemetry
         self.instruction_stats = InstructionStatsCollector()
         menu_instruction_keys = self._collect_menu_instruction_stats_keys()
@@ -837,9 +842,12 @@ class WaveEngine:
         discovered = len(self._scored_path_keys)
         scored = len(self._all_scored_paths)
         pending = self._mca_pending_paths
+        pending_anchors = len(self._pending_score_anchors)
+
         parts.append(
             f"Paths: {discovered} discovered, {scored} scored"
             + (f", {pending} pending LLVM-MCA" if pending > 0 else "")
+            + (f", {pending_anchors} pending discovery" if pending_anchors > 0 else "")
         )
 
         if self.best_scores:
@@ -1098,9 +1106,13 @@ class WaveEngine:
                     stage_idx, instruction_keys, outcome
                 )
 
+        discovered_count = self._drain_score_anchor_queue(
+            runtime_session,
+            max_anchors=2,
+        )
         mca_count = self._drain_scoring_results(runtime_session)
 
-        if count > 0 or mca_count > 0:
+        if count > 0 or discovered_count > 0 or mca_count > 0:
             self._sync_runtime_session(runtime_session)
 
         return count
@@ -1109,19 +1121,39 @@ class WaveEngine:
     # Scoring via LLVM-MCA
     # ------------------------------------------------------------------
 
+    def _path_discovery_chunk_size(self) -> int:
+        """Bound per-anchor path discovery work to keep the UI responsive."""
+        return max(1, self.config.max_paths_per_wave)
+
+    def _queue_score_anchor(
+        self,
+        stage_idx: int,
+        input_tuple: tuple,
+        output_tuple: tuple,
+    ) -> None:
+        """Queue one terminal transition for incremental complete-path discovery."""
+        anchor = (stage_idx, input_tuple, output_tuple)
+        if anchor in self._queued_score_anchors:
+            return
+        self._queued_score_anchors.add(anchor)
+        self._pending_score_anchors.append(anchor)
+
     def _enqueue_scoring_batch(self, paths: list[list[tuple]]) -> None:
-        """Queue one batch of complete paths on the dedicated LLVM-MCA lane."""
+        """Queue complete paths on the dedicated LLVM-MCA lane in small batches."""
         if not paths:
             return
 
-        if self._mca_executor is None:
-            self._integrate_scored_paths(self._score_complete_paths(paths))
-            return
+        chunk_size = self._path_discovery_chunk_size()
+        for start in range(0, len(paths), chunk_size):
+            batch = paths[start : start + chunk_size]
+            if self._mca_executor is None:
+                self._integrate_scored_paths(self._score_complete_paths(batch))
+                continue
 
-        future = self._mca_executor.submit(self._score_complete_paths, paths)
-        self._mca_future_sizes[future] = len(paths)
-        self._mca_pending_paths += len(paths)
-        future.add_done_callback(lambda done: self._mca_result_queue.put(done))
+            future = self._mca_executor.submit(self._score_complete_paths, batch)
+            self._mca_future_sizes[future] = len(batch)
+            self._mca_pending_paths += len(batch)
+            future.add_done_callback(lambda done: self._mca_result_queue.put(done))
 
     def _integrate_scored_paths(self, scored: list[dict]) -> None:
         """Merge scored paths and update per-CPU best-score summary."""
@@ -1142,6 +1174,53 @@ class WaveEngine:
                         "cycles": cycles,
                         "path_key": entry.get("path_key"),
                     }
+
+    def _drain_score_anchor_queue(
+        self, runtime_session=None, max_anchors: int = 1
+    ) -> int:
+        """Incrementally discover complete paths from queued terminal anchors."""
+        discovered_paths = 0
+        anchors_processed = 0
+        chunk_size = self._path_discovery_chunk_size()
+
+        while (
+            anchors_processed < max_anchors
+            and len(self._pending_score_anchors) > 0
+            and not self._interrupted
+        ):
+            anchor = self._pending_score_anchors.popleft()
+            self._queued_score_anchors.discard(anchor)
+            stage_idx, input_tuple, output_tuple = anchor
+
+            new_paths = self.tt.trace_paths_ending_with(
+                stage_idx,
+                input_tuple,
+                output_tuple,
+                max_paths=chunk_size,
+                exclude_paths=self._scored_path_keys,
+            )
+            anchors_processed += 1
+
+            if not new_paths:
+                continue
+
+            for path in new_paths:
+                self._scored_path_keys.add(tuple(tuple(step) for step in path))
+
+            discovered_paths += len(new_paths)
+            if runtime_session is not None:
+                runtime_session.log(
+                    f"Stage {stage_idx}: +{len(new_paths)} complete path(s) discovered "
+                    f"({len(self._scored_path_keys)} total discovered)"
+                )
+
+            self._enqueue_scoring_batch(new_paths)
+
+            # Discovery chunk was full; likely more paths remain for this anchor.
+            if len(new_paths) >= chunk_size:
+                self._queue_score_anchor(stage_idx, input_tuple, output_tuple)
+
+        return discovered_paths
 
     def _drain_scoring_results(self, runtime_session=None) -> int:
         """Drain finished LLVM-MCA batches and merge them into engine state."""
@@ -1174,10 +1253,11 @@ class WaveEngine:
         return completed_paths
 
     def _wait_for_pending_scoring(self, runtime_session=None) -> None:
-        """Wait for queued LLVM-MCA work before shutdown/checkpoint handoff."""
-        while self._mca_pending_paths > 0:
+        """Wait for queued path discovery + LLVM-MCA work before shutdown."""
+        while self._mca_pending_paths > 0 or len(self._pending_score_anchors) > 0:
+            discovered = self._drain_score_anchor_queue(runtime_session, max_anchors=4)
             drained = self._drain_scoring_results(runtime_session)
-            if drained == 0:
+            if discovered == 0 and drained == 0:
                 time.sleep(0.05)
 
     def _score_new_paths_for_transition(
@@ -1187,30 +1267,12 @@ class WaveEngine:
         output_tuple: tuple,
         runtime_session=None,
     ) -> None:
-        """Queue complete paths formed by a new transition at the last stage."""
-        paths = self.tt.trace_paths_ending_with(stage_idx, input_tuple, output_tuple)
-        if not paths:
-            return
+        """Queue complete-path discovery for one newly found last-stage transition."""
+        self._queue_score_anchor(stage_idx, input_tuple, output_tuple)
 
-        # Filter already discovered path keys
-        new_paths = []
-        for path in paths:
-            key = tuple(tuple(step) for step in path)
-            if key in self._scored_path_keys:
-                continue
-            self._scored_path_keys.add(key)
-            new_paths.append(path)
-
-        if not new_paths:
-            return
-
-        if runtime_session is not None:
-            runtime_session.log(
-                f"Stage {stage_idx}: +{len(new_paths)} complete path(s) discovered "
-                f"({len(self._scored_path_keys)} total discovered)"
-            )
-
-        self._enqueue_scoring_batch(new_paths)
+        # Do a tiny amount of discovery immediately so the UI reflects progress
+        # as soon as transitions are found, then continue incrementally.
+        self._drain_score_anchor_queue(runtime_session, max_anchors=1)
 
     def _score_complete_paths(self, paths: list[list[tuple]]) -> list[dict]:
         """Score the given complete paths with LLVM-MCA.
@@ -1730,6 +1792,7 @@ class WaveEngine:
                     discovered_total = len(self._scored_path_keys)
                     scored_total = len(self._all_scored_paths)
                     pending_total = self._mca_pending_paths
+                    pending_discovery = len(self._pending_score_anchors)
                     unprod = self.tt.stages[target].unproductive_waves
                     unprod_str = f" | unproductive x{unprod}" if unprod > 0 else ""
                     runtime_session.log(
@@ -1743,6 +1806,11 @@ class WaveEngine:
                         + (
                             f", {pending_total} pending LLVM-MCA"
                             if pending_total > 0
+                            else ""
+                        )
+                        + (
+                            f", {pending_discovery} pending discovery"
+                            if pending_discovery > 0
                             else ""
                         )
                         + unprod_str

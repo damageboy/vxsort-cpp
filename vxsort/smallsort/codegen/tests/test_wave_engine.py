@@ -161,6 +161,18 @@ class TestWaveEngineInit:
         assert status is not None
         assert "Paths: 1 discovered, 1 scored, 2 pending LLVM-MCA" in status
 
+    def test_runtime_status_text_includes_pending_discovery_queue(self):
+        config = _fast_config()
+        engine = WaveEngine(config)
+
+        anchor = (0, ((1,), (2,)), ((1,), (2,)))
+        engine._pending_score_anchors.append(anchor)
+
+        status = engine._runtime_status_text()
+
+        assert status is not None
+        assert "1 pending discovery" in status
+
 
 def test_wave_engine_emits_stage_updates_without_mutating_selected_stage():
     config = _fast_config()

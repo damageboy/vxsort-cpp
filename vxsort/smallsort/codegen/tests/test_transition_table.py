@@ -806,6 +806,52 @@ class TestTracePathsEndingWith:
         first_inputs = {p[0][1] for p in paths}
         assert first_inputs == {s0a.as_tuple(), s0b.as_tuple()}
 
+    def test_max_paths_limits_backward_trace(self):
+        """max_paths bounds trace_paths_ending_with results."""
+        tt = TransitionTable(num_stages=2)
+        s0a = _vs([3, 2, 1, 0], [7, 6, 5, 4])
+        s0b = _vs([1, 0, 3, 2], [5, 4, 7, 6])
+        s1 = _vs([0, 2, 1, 3], [4, 6, 5, 7])
+        s2 = _vs([0, 1, 2, 3], [4, 5, 6, 7])
+
+        tt.add_transition(0, s0a, s1, _make_gadget(top_args={"ctrl": 1}))
+        tt.add_transition(0, s0b, s1, _make_gadget(top_args={"ctrl": 2}))
+        tt.add_transition(1, s1, s2, _make_gadget(top_args={"ctrl": 3}))
+
+        paths = tt.trace_paths_ending_with(
+            1,
+            s1.as_tuple(),
+            s2.as_tuple(),
+            max_paths=1,
+        )
+
+        assert len(paths) == 1
+
+    def test_exclude_paths_filters_backward_trace(self):
+        """exclude_paths removes already-known complete paths from results."""
+        tt = TransitionTable(num_stages=2)
+        s0a = _vs([3, 2, 1, 0], [7, 6, 5, 4])
+        s0b = _vs([1, 0, 3, 2], [5, 4, 7, 6])
+        s1 = _vs([0, 2, 1, 3], [4, 6, 5, 7])
+        s2 = _vs([0, 1, 2, 3], [4, 5, 6, 7])
+
+        tt.add_transition(0, s0a, s1, _make_gadget(top_args={"ctrl": 1}))
+        tt.add_transition(0, s0b, s1, _make_gadget(top_args={"ctrl": 2}))
+        tt.add_transition(1, s1, s2, _make_gadget(top_args={"ctrl": 3}))
+
+        all_paths = tt.trace_paths_ending_with(1, s1.as_tuple(), s2.as_tuple())
+        assert len(all_paths) == 2
+
+        filtered = tt.trace_paths_ending_with(
+            1,
+            s1.as_tuple(),
+            s2.as_tuple(),
+            exclude_paths={tuple(all_paths[0])},
+        )
+
+        assert len(filtered) == 1
+        assert tuple(filtered[0]) != tuple(all_paths[0])
+
     def test_3stage_linear(self):
         """3-stage linear chain returns one complete path of 3 steps."""
         tt = TransitionTable(num_stages=3)
