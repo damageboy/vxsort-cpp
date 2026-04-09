@@ -9,6 +9,7 @@ last-stage transitions form complete paths.
 
 from __future__ import annotations
 
+import logging
 import os
 import queue as queue_mod
 import signal
@@ -43,6 +44,7 @@ try:
     from .transition_table import TransitionTable
     from .util.enums import primitive_type, vector_machine, width_dict
     from .wave_checkpoint import WaveCheckpoint, WaveMasterConfig
+    from .runtime_logging import log_event
 except ImportError:
     from bitonic_sorter import BitonicSorter  # type: ignore[no-redef]
     from bitonic_types import (  # type: ignore[no-redef]
@@ -65,6 +67,7 @@ except ImportError:
     from transition_table import TransitionTable  # type: ignore[no-redef]
     from util.enums import primitive_type, vector_machine, width_dict  # type: ignore[no-redef]
     from wave_checkpoint import WaveCheckpoint, WaveMasterConfig  # type: ignore[no-redef]
+    from runtime_logging import log_event  # type: ignore[no-redef]
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +191,14 @@ class WaveConfig:
     runtime_ui: str = "auto"
     runtime_session_factory: Callable[[int], object] | None = None
 
+    # Runtime logging / observability
+    log_file: str | None = None
+    log_level: str = "INFO"
+    log_format: str = "text"
+    log_max_mb: int = 0
+    log_backups: int = 3
+    log_heartbeat_seconds: float = 2.0
+
 
 # ---------------------------------------------------------------------------
 # WaveEngine
@@ -207,6 +218,10 @@ class WaveEngine:
 
     def __init__(self, config: WaveConfig) -> None:
         self.config = config
+
+        # Runtime logger (configured by bitonic_compiler when --log-file is used)
+        self.logger = logging.getLogger("vxsort.runtime.wave")
+        self._last_heartbeat_at = 0.0
 
         # Compute element counts
         self.elements_per_vector = width_dict[config.vm] // int(
@@ -835,6 +850,36 @@ class WaveEngine:
         uncovered_pct = max(0.0, 100.0 * (1.0 - (covered_inputs / total_inputs)))
         return covered_inputs, total_inputs, uncovered_pct
 
+    def _log_runtime_event(self, level: int | str, event: str, **fields) -> None:
+        """Emit one structured runtime event if logging is enabled."""
+        payload = {
+            "wave": self.wave_count,
+            "pending_discovery": len(self._pending_score_anchors),
+            "pending_mca": self._mca_pending_paths,
+            "scored_total": len(self._all_scored_paths),
+        }
+        payload.update(fields)
+        log_event(self.logger, level, event, **payload)
+
+    def _maybe_emit_heartbeat(self) -> None:
+        """Emit periodic heartbeat logs even when UI appears static."""
+        interval = max(0.0, float(self.config.log_heartbeat_seconds))
+        if interval <= 0.0:
+            return
+
+        now = time.monotonic()
+        if now - self._last_heartbeat_at < interval:
+            return
+
+        self._last_heartbeat_at = now
+        self._log_runtime_event(
+            "DEBUG",
+            "heartbeat",
+            in_flight_total=sum(self._in_flight),
+            pending_jobs_total=sum(len(jobs) for jobs in self._pending_jobs),
+            discovered_total=len(self._scored_path_keys),
+        )
+
     def _runtime_status_text(self) -> str | None:
         """Build footer status text for path discovery/scoring + best LLVM-MCA."""
         parts = [f"Menu instructions: {self._menu_instruction_count}"]
@@ -871,6 +916,7 @@ class WaveEngine:
             snapshot.format() if snapshot is not None else "Memory: unavailable"
         )
         runtime_session.set_status(self._runtime_status_text())
+        self._maybe_emit_heartbeat()
 
     # ------------------------------------------------------------------
     # Job generation and enqueueing
@@ -1029,6 +1075,13 @@ class WaveEngine:
                 total_in_flight += 1
                 submitted += 1
 
+        if submitted > 0:
+            self._log_runtime_event(
+                "DEBUG",
+                "submit_jobs",
+                submitted=submitted,
+                in_flight_total=total_in_flight,
+            )
         return submitted
 
     def _drain_results(
@@ -1113,6 +1166,13 @@ class WaveEngine:
         mca_count = self._drain_scoring_results(runtime_session)
 
         if count > 0 or discovered_count > 0 or mca_count > 0:
+            self._log_runtime_event(
+                "DEBUG",
+                "drain_results",
+                drained_results=count,
+                discovered_paths=discovered_count,
+                scored_paths=mca_count,
+            )
             self._sync_runtime_session(runtime_session)
 
         return count
@@ -1137,6 +1197,12 @@ class WaveEngine:
             return
         self._queued_score_anchors.add(anchor)
         self._pending_score_anchors.append(anchor)
+        self._log_runtime_event(
+            "DEBUG",
+            "discovery_anchor_queued",
+            stage=stage_idx,
+            discovery_queue_len=len(self._pending_score_anchors),
+        )
 
     def _enqueue_scoring_batch(self, paths: list[list[tuple]]) -> None:
         """Queue complete paths on the dedicated LLVM-MCA lane in small batches."""
@@ -1148,12 +1214,23 @@ class WaveEngine:
             batch = paths[start : start + chunk_size]
             if self._mca_executor is None:
                 self._integrate_scored_paths(self._score_complete_paths(batch))
+                self._log_runtime_event(
+                    "DEBUG",
+                    "scoring_batch_completed_sync",
+                    batch_size=len(batch),
+                )
                 continue
 
             future = self._mca_executor.submit(self._score_complete_paths, batch)
             self._mca_future_sizes[future] = len(batch)
             self._mca_pending_paths += len(batch)
             future.add_done_callback(lambda done: self._mca_result_queue.put(done))
+            self._log_runtime_event(
+                "DEBUG",
+                "scoring_batch_submitted",
+                batch_size=len(batch),
+                mca_pending=self._mca_pending_paths,
+            )
 
     def _integrate_scored_paths(self, scored: list[dict]) -> None:
         """Merge scored paths and update per-CPU best-score summary."""
@@ -1220,6 +1297,14 @@ class WaveEngine:
             if len(new_paths) >= chunk_size:
                 self._queue_score_anchor(stage_idx, input_tuple, output_tuple)
 
+        if discovered_paths > 0:
+            self._log_runtime_event(
+                "INFO",
+                "discovery_chunk",
+                discovered_paths=discovered_paths,
+                anchors_processed=anchors_processed,
+            )
+
         return discovered_paths
 
     def _drain_scoring_results(self, runtime_session=None) -> int:
@@ -1244,11 +1329,17 @@ class WaveEngine:
             completed_paths += len(scored)
             self._integrate_scored_paths(scored)
 
-        if completed_paths > 0 and runtime_session is not None:
-            runtime_session.log(
-                f"LLVM-MCA: scored {completed_paths} complete path(s) "
-                f"({len(self._all_scored_paths)} total scored)"
+        if completed_paths > 0:
+            self._log_runtime_event(
+                "INFO",
+                "mca_scoring_completed",
+                completed_paths=completed_paths,
             )
+            if runtime_session is not None:
+                runtime_session.log(
+                    f"LLVM-MCA: scored {completed_paths} complete path(s) "
+                    f"({len(self._all_scored_paths)} total scored)"
+                )
 
         return completed_paths
 
@@ -1627,6 +1718,14 @@ class WaveEngine:
             maxtasksperchild=self.config.max_tasks_per_child,
         )
 
+        self._log_runtime_event(
+            "INFO",
+            "wave_engine_started",
+            num_workers=num_workers,
+            pool_target=pool_target,
+            target_cpus=",".join(self.config.target_cpus),
+        )
+
         runtime_session = self._create_runtime_session()
 
         if self.config.target_cpus:
@@ -1641,9 +1740,16 @@ class WaveEngine:
         try:
             with runtime_session:
                 if self._mca_executor is not None:
+                    mca_workers = self.config.llvm_mca_workers or max(
+                        1, min(4, num_workers)
+                    )
                     runtime_session.log(
-                        "LLVM-MCA async lane enabled "
-                        f"({self.config.llvm_mca_workers or max(1, min(4, num_workers))} worker(s))"
+                        "LLVM-MCA async lane enabled " f"({mca_workers} worker(s))"
+                    )
+                    self._log_runtime_event(
+                        "INFO",
+                        "mca_lane_enabled",
+                        mca_workers=mca_workers,
                     )
 
                 # Seed pending queues from unforwarded outputs (resume case)
@@ -1656,6 +1762,9 @@ class WaveEngine:
                     if self._interrupted:
                         self._save_checkpoint()
                         runtime_session.log("Interrupted - checkpoint saved.")
+                        self._log_runtime_event(
+                            "WARNING", "interrupted_checkpoint_saved"
+                        )
                         break
 
                     if (
@@ -1666,12 +1775,20 @@ class WaveEngine:
 
                     if len(self.exhausted_stages) >= len(self.all_stages):
                         runtime_session.log("All stages exhausted - search complete.")
+                        self._log_runtime_event("INFO", "search_exhausted")
                         break
 
                     # --- Start a new wave ---
                     target = self._select_target_stage()
                     if target is None:
+                        self._log_runtime_event("INFO", "no_wave_target_available")
                         break
+
+                    self._log_runtime_event(
+                        "INFO",
+                        "wave_started",
+                        target_stage=target,
+                    )
 
                     # Snapshot per-stage attempts so budget checks know
                     # how many attempts each stage has consumed this wave
@@ -1815,6 +1932,15 @@ class WaveEngine:
                         )
                         + unprod_str
                     )
+                    self._log_runtime_event(
+                        "INFO",
+                        "wave_completed",
+                        target_stage=target,
+                        new_outputs=new_outputs,
+                        stage_outputs=stats["distinct_outputs"],
+                        discovered_total=discovered_total,
+                        scored_total=scored_total,
+                    )
                     self._sync_runtime_session(runtime_session)
 
                     self.wave_count += 1
@@ -1823,6 +1949,7 @@ class WaveEngine:
                 self._wait_for_pending_scoring(runtime_session)
                 self._save_checkpoint()
                 self._sync_runtime_session(runtime_session)
+                self._log_runtime_event("INFO", "wave_engine_finished")
 
         finally:
             if self._mca_executor is not None:

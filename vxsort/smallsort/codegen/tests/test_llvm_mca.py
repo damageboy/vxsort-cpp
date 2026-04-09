@@ -216,19 +216,22 @@ class TestRunLlvmMcaModes:
             stderr="",
         ),
     )
-    def test_skip_timeline_analysis_when_disabled(self, mock_run):
-        result = run_llvm_mca(
-            "vmovdqa ymm1, ymm0\n",
-            "znver5",
-            "llvm-mca",
-            solution_index=1,
-            include_timeline=False,
-        )
+    def test_skip_timeline_analysis_when_disabled(self, mock_run, caplog):
+        with caplog.at_level("DEBUG", logger="vxsort.runtime.llvm_mca"):
+            result = run_llvm_mca(
+                "vmovdqa ymm1, ymm0\n",
+                "znver5",
+                "llvm-mca",
+                solution_index=1,
+                include_timeline=False,
+            )
 
         assert result.throughput == pytest.approx(3.5)
         assert result.simulated_cycles == pytest.approx(3.5)
         assert result.analysis_path == ""
         assert mock_run.call_count == 1
+        assert any(rec.getMessage() == "mca_run_started" for rec in caplog.records)
+        assert any(rec.getMessage() == "mca_run_completed" for rec in caplog.records)
 
 
 @pytest.mark.skipif(

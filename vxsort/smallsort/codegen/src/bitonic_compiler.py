@@ -29,6 +29,7 @@ try:
         load_checkpoint,
         validate_checkpoint_config,
     )
+    from .runtime_logging import RuntimeLoggingConfig, configure_runtime_logging
 
 except ImportError:
     from cost_model import CostModel, get_supported_cpus
@@ -48,6 +49,10 @@ except ImportError:
         CheckpointConfig,
         load_checkpoint,
         validate_checkpoint_config,
+    )
+    from runtime_logging import (  # type: ignore
+        RuntimeLoggingConfig,
+        configure_runtime_logging,
     )
 
 
@@ -850,6 +855,41 @@ def main():
         choices=["auto", "textual", "none"],
         help="Wave runtime UI mode. 'auto' uses Textual only on an interactive TTY (default: auto).",
     )
+    parser.add_argument(
+        "--log-file",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Write high-volume runtime events to this file.",
+    )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Runtime log level (default: INFO).",
+    )
+    parser.add_argument(
+        "--log-format",
+        type=str,
+        default="text",
+        choices=["text", "json"],
+        help="Runtime log encoding (default: text).",
+    )
+    parser.add_argument(
+        "--log-max-mb",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Rotate runtime log after N MB (0 disables rotation).",
+    )
+    parser.add_argument(
+        "--log-backups",
+        type=int,
+        default=3,
+        metavar="N",
+        help="Number of rotated runtime log files to keep (default: 3).",
+    )
 
     args = parser.parse_args()
 
@@ -860,6 +900,17 @@ def main():
     args.llvm_mca_path = getattr(args, "llvm_mca_cmd", None) or getattr(
         args, "llvm_mca_path_deprecated", None
     )
+
+    # Configure file-backed runtime logging (optional).
+    log_cfg = RuntimeLoggingConfig(
+        enabled=args.log_file is not None,
+        level=args.log_level,
+        file_path=args.log_file,
+        format=args.log_format,
+        max_bytes=max(0, args.log_max_mb) * 1024 * 1024,
+        backup_count=max(0, args.log_backups),
+    )
+    configure_runtime_logging(log_cfg)
 
     # --list-cpus mode: print supported architectures and exit
     if args.list_cpus:
@@ -968,6 +1019,11 @@ def main():
         max_waves=args.max_waves,
         top_k=args.top_k or 10,
         runtime_ui=args.runtime_ui,
+        log_file=args.log_file,
+        log_level=args.log_level,
+        log_format=args.log_format,
+        log_max_mb=args.log_max_mb,
+        log_backups=args.log_backups,
     )
 
     engine = WaveEngine(wave_config)

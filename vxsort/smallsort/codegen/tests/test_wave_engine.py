@@ -1,5 +1,6 @@
 """Tests for WaveEngine: wave-based iterative synthesis orchestrator."""
 
+import logging
 import math
 import queue
 import time
@@ -172,6 +173,15 @@ class TestWaveEngineInit:
 
         assert status is not None
         assert "1 pending discovery" in status
+
+
+def test_queue_score_anchor_emits_runtime_log(caplog):
+    engine = WaveEngine(_fast_config())
+
+    with caplog.at_level(logging.DEBUG, logger="vxsort.runtime.wave"):
+        engine._queue_score_anchor(2, ((1,), (2,)), ((3,), (4,)))
+
+    assert any(rec.getMessage() == "discovery_anchor_queued" for rec in caplog.records)
 
 
 def test_wave_engine_emits_stage_updates_without_mutating_selected_stage():

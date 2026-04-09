@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import shlex
 import shutil
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from runtime_logging import log_event
 
 
 @dataclass
@@ -106,7 +110,18 @@ def run_llvm_mca(
     Returns:
         McaResult with throughput and simulated cycle estimates.
     """
+    logger = logging.getLogger("vxsort.runtime.llvm_mca")
+    started_at = time.perf_counter()
+
     base_parts = shlex.split(llvm_mca_cmd)
+    log_event(
+        logger,
+        "DEBUG",
+        "mca_run_started",
+        solution_index=solution_index,
+        mcpu=mcpu,
+        include_timeline=include_timeline,
+    )
 
     # Save asm to file for debugging if output_dir specified
     asm_path = ""
@@ -133,6 +148,18 @@ def run_llvm_mca(
             timeout=30,
         )
         if result.returncode != 0:
+            elapsed_ms = (time.perf_counter() - started_at) * 1000.0
+            stderr_tail = result.stderr.strip()[-400:]
+            log_event(
+                logger,
+                "ERROR",
+                "mca_run_failed",
+                solution_index=solution_index,
+                mcpu=mcpu,
+                returncode=result.returncode,
+                elapsed_ms=round(elapsed_ms, 3),
+                stderr_tail=stderr_tail,
+            )
             return McaResult(
                 solution_index=solution_index,
                 asm_path=asm_path,
@@ -157,9 +184,28 @@ def run_llvm_mca(
                 mca_result.warnings,
             )
 
+        elapsed_ms = (time.perf_counter() - started_at) * 1000.0
+        log_event(
+            logger,
+            "DEBUG",
+            "mca_run_completed",
+            solution_index=solution_index,
+            mcpu=mcpu,
+            elapsed_ms=round(elapsed_ms, 3),
+            throughput=mca_result.throughput,
+            simulated_cycles=mca_result.simulated_cycles,
+        )
+
         return mca_result
 
     except FileNotFoundError:
+        log_event(
+            logger,
+            "ERROR",
+            "mca_run_missing_binary",
+            solution_index=solution_index,
+            command=base_parts[0] if base_parts else llvm_mca_cmd,
+        )
         return McaResult(
             solution_index=solution_index,
             asm_path=asm_path,
@@ -168,6 +214,13 @@ def run_llvm_mca(
             warnings=[f"llvm-mca command not found: '{base_parts[0]}'"],
         )
     except json.JSONDecodeError as e:
+        log_event(
+            logger,
+            "ERROR",
+            "mca_run_json_parse_failed",
+            solution_index=solution_index,
+            error=str(e),
+        )
         return McaResult(
             solution_index=solution_index,
             asm_path=asm_path,
@@ -176,6 +229,13 @@ def run_llvm_mca(
             warnings=[f"Failed to parse llvm-mca JSON output: {e}"],
         )
     except subprocess.TimeoutExpired:
+        log_event(
+            logger,
+            "ERROR",
+            "mca_run_timeout",
+            solution_index=solution_index,
+            timeout_seconds=30,
+        )
         return McaResult(
             solution_index=solution_index,
             asm_path=asm_path,

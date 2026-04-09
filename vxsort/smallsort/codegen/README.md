@@ -49,6 +49,37 @@ uv run python src/demo_super_vectorizer.py
 uv run python src/bitonic_compiler.py --depth-limit=3
 ```
 
+### Runtime Logging (Search/Discovery/LLVM-MCA Observability)
+
+Use file-backed runtime logging when diagnosing "stuck" synthesis/scoring runs.
+
+```bash
+uv run python src/bitonic_compiler.py \
+  --vector-machine AVX2 --datatype i64 \
+  --depth-limit 3 --gadget-depth 1 --top-k 5 \
+  --target-cpu ZEN4 \
+  --log-file /tmp/vxsort-wave.log \
+  --log-level DEBUG \
+  --log-format json
+```
+
+Flags:
+- `--log-file PATH`: enable runtime logging and write to file
+- `--log-level {DEBUG,INFO,WARNING,ERROR}`: event verbosity
+- `--log-format {text,json}`: human-readable or JSONL
+- `--log-max-mb N`: optional rotating file size (MB, 0 disables)
+- `--log-backups N`: rotated file count to keep
+
+Suggested triage commands:
+
+```bash
+# Follow everything live
+ tail -f /tmp/vxsort-wave.log
+
+# Focus on heartbeat + discovery + llvm-mca scoring completion
+ rg 'heartbeat|discovery_chunk|mca_scoring_completed|mca_run_completed' /tmp/vxsort-wave.log
+```
+
 ### uops Database Source Selection (JSON only)
 
 Runtime loading uses compact JSON only:
