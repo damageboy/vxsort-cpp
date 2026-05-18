@@ -106,3 +106,9 @@ sequential in-process execution were non-deterministic across Python invocations
 - **Removed**: `SolutionNode.best_gadget()`, `SolutionNode.cost`
 - **Removed**: `CostModel.compute_costs()`, `CostModel.calculate_path_cost()`
 - CostModel only created when PathSelector needs it
+
+## Comment Preservation During Ports
+- Preserve semantic comments by placing them next to the corresponding Rust implementation.
+- Do not create dumping-ground documentation modules for migrated comments.
+- Do not spam per-comment provenance like "Preserved from Python"; keep at most one concise module-level provenance note if needed.
+- Comments should explain behavior, operands, edge cases, signedness, masking, and canonicalization rationale.

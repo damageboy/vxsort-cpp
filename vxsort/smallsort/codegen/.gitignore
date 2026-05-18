@@ -2,3 +2,4 @@
 *.asm
 checkpoints/
 .superpowers/
+target/

@@ -1,0 +1,16 @@
+[package]
+name = "z3_avx"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+comfy-table = "7"
+z3 = "0.19"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "solve_intrinsics"
+harness = false
