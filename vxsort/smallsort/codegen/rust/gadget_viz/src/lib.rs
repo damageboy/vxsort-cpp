@@ -149,17 +149,9 @@ fn render_html_document(records: &[(usize, Value)], title: &str) -> String {
     out
 }
 
-pub fn render_record_mermaid(index: usize, record: &Value) -> String {
+pub fn render_record_mermaid(_index: usize, record: &Value) -> String {
     let mut graph = MermaidGraph::default();
     graph.line("flowchart TD");
-    graph.node(
-        "record",
-        "record #",
-        &format!("record #{index}"),
-        Shape::Rect,
-    );
-    graph.node("meta", "meta", &record_summary(record), Shape::Rect);
-    graph.edge("record", "meta", None);
 
     match record.get("kind").and_then(Value::as_str) {
         Some("template") => render_template_record(&mut graph, record),
@@ -273,14 +265,6 @@ fn render_synthesized_record(graph: &mut MermaidGraph, record: &Value) {
         ),
         Shape::Rect,
     );
-    graph.node(
-        "target",
-        "target",
-        &format!("target pairs\n{}", lane_array(record.get("target_pairs"))),
-        Shape::Rect,
-    );
-    graph.edge("meta", "target", None);
-
     let top_out_source = render_instruction_chain(
         graph,
         "top",
@@ -426,22 +410,6 @@ fn symbolic_label(value: &Value) -> String {
     format!("{role}\n{var_id}\n{bits} bits")
 }
 
-fn record_summary(record: &Value) -> String {
-    let kind = record.get("kind").and_then(Value::as_str).unwrap_or("?");
-    let arch = record.get("arch").and_then(Value::as_str).unwrap_or("?");
-    let dtype = record.get("dtype").and_then(Value::as_str).unwrap_or("?");
-    let depth = record
-        .get("gadget_depth")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let fixture = record.get("fixture").and_then(Value::as_str).unwrap_or("");
-    if fixture.is_empty() {
-        format!("{kind}\n{arch}/{dtype}\ndepth={depth}")
-    } else {
-        format!("{kind}\n{arch}/{dtype}\ndepth={depth}\nfixture={fixture}")
-    }
-}
-
 fn metadata_markdown(record: &Value) -> String {
     let mut parts = vec![format!(
         "- kind: `{}`",
@@ -454,6 +422,9 @@ fn metadata_markdown(record: &Value) -> String {
     }
     if let Some(input) = record.get("input_state") {
         parts.push(format!("- input_state: `{}`", compact_json(input)));
+    }
+    if let Some(target_pairs) = record.get("target_pairs") {
+        parts.push(format!("- target_pairs: `{}`", compact_json(target_pairs)));
     }
     if let Some(output) = record.get("output_state") {
         parts.push(format!("- output_state: `{}`", compact_json(output)));
@@ -596,13 +567,21 @@ mod tests {
     }
 
     #[test]
-    fn synthesized_mermaid_shows_lanes_and_edges() {
+    fn synthesized_mermaid_shows_only_gadget_flow_lanes_and_edges() {
         let diagram = render_record_mermaid(3, &synthesized_record());
-        assert!(diagram.contains("record #3"));
+        assert!(!diagram.contains("record #3"));
+        assert!(!diagram.contains("target pairs"));
         assert!(diagram.contains("top input"));
         assert!(diagram.contains("[0,1,2,3]"));
         assert!(diagram.contains("_mm256_shuffle_pd"));
         assert!(diagram.contains("-->|a| top_inst_1"));
+    }
+
+    #[test]
+    fn metadata_markdown_keeps_target_pairs_outside_graph() {
+        let metadata = metadata_markdown(&synthesized_record());
+        assert!(metadata.contains("target_pairs"));
+        assert!(metadata.contains("[[0,4],[1,5],[2,6],[3,7]]"));
     }
 
     #[test]
