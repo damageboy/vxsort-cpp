@@ -49,11 +49,11 @@
   - Compares canonical JSONL dumps.
   - Reports missing/extra/different records grouped by stable keys.
 
-- `gadget_synth/src/bin/dump_gadget_synth.rs`
+- `rust/gadget_synth/src/bin/dump_gadget_synth.rs`
   - Rust dumper matching Python schema.
   - Modes: `templates`, `synthesized`.
 
-- `gadget_synth/tests/dump_schema.rs`
+- `rust/gadget_synth/tests/dump_schema.rs`
   - Rust-side schema/normalization tests.
 
 - `tests/test_gadget_synth_dump.py`
@@ -61,23 +61,23 @@
 
 ### Likely modified files
 
-- `gadget_synth/src/types.rs`
+- `rust/gadget_synth/src/types.rs`
   - Add recursive graph node model.
   - Add `MuxNode` and mux pruning enum.
   - Add serialization-friendly normalization helpers if appropriate.
 
-- `gadget_synth/src/intrinsics.rs`
+- `rust/gadget_synth/src/intrinsics.rs`
   - Expand Rust intrinsic dispatch coverage.
   - Keep intrinsic template enumeration aligned with Python `src/intrinsics/*.py`.
 
-- `gadget_synth/src/synthesizer.rs`
+- `rust/gadget_synth/src/synthesizer.rs`
   - Add recursive evaluation.
   - Add mux constraints.
   - Add topological concretization.
   - Add K-per-wiring synthesis algorithm.
   - Add depth-2/shared-prefix graph generation.
 
-- `gadget_synth/Cargo.toml`
+- `rust/gadget_synth/Cargo.toml`
   - Add CLI deps if needed, e.g. `serde`, `serde_json`, `clap`.
 
 - Root `Cargo.toml`
@@ -267,9 +267,9 @@ git commit -m "test: add Python gadget synth template dumper"
 ## Task 2: Rust template dumper
 
 **Files:**
-- Create: `gadget_synth/src/bin/dump_gadget_synth.rs`
-- Create/modify: `gadget_synth/tests/dump_schema.rs`
-- Modify: `gadget_synth/Cargo.toml`
+- Create: `rust/gadget_synth/src/bin/dump_gadget_synth.rs`
+- Create/modify: `rust/gadget_synth/tests/dump_schema.rs`
+- Modify: `rust/gadget_synth/Cargo.toml`
 
 - [ ] **Step 1: Write Rust dump schema tests**
 
@@ -382,7 +382,7 @@ git commit -m "test: add gadget synth dump comparer"
 
 **Files:**
 - Modify: `tests/test_gadget_synth_dump.py`
-- Modify as needed: `gadget_synth/src/synthesizer.rs`, `gadget_synth/src/intrinsics.rs`, `gadget_synth/src/types.rs`
+- Modify as needed: `rust/gadget_synth/src/synthesizer.rs`, `rust/gadget_synth/src/intrinsics.rs`, `rust/gadget_synth/src/types.rs`
 
 - [ ] **Step 1: Add integration test for AVX2 i64 depth 1 template parity**
 
@@ -476,9 +476,9 @@ git commit -m "test: add Python gadget synth synthesized dumper"
 ## Task 6: Rust synthesized dumper mode
 
 **Files:**
-- Modify: `gadget_synth/src/bin/dump_gadget_synth.rs`
-- Modify: `gadget_synth/tests/dump_schema.rs`
-- Modify as needed: `gadget_synth/src/synthesizer.rs`, `gadget_synth/src/types.rs`
+- Modify: `rust/gadget_synth/src/bin/dump_gadget_synth.rs`
+- Modify: `rust/gadget_synth/tests/dump_schema.rs`
+- Modify as needed: `rust/gadget_synth/src/synthesizer.rs`, `rust/gadget_synth/src/types.rs`
 
 - [ ] **Step 1: Add Rust tests for synthesized mode**
 
@@ -523,8 +523,8 @@ git commit -m "test: add Rust gadget synth synthesized dumper"
 ## Task 7: AVX2 i64 depth-1 synthesis parity
 
 **Files:**
-- Modify: `gadget_synth/src/intrinsics.rs`
-- Modify: `gadget_synth/src/synthesizer.rs` if dispatch shape requires it
+- Modify: `rust/gadget_synth/src/intrinsics.rs`
+- Modify: `rust/gadget_synth/src/synthesizer.rs` if dispatch shape requires it
 - Modify: `tests/test_gadget_synth_dump.py`
 
 - [ ] **Step 1: Add failing parity test**
@@ -576,7 +576,7 @@ git commit -m "feat: match AVX2 i64 depth-1 gadget synthesis"
 ## Task 8: AVX2 i32 depth-1 synthesis parity
 
 **Files:**
-- Modify: `gadget_synth/src/intrinsics.rs`
+- Modify: `rust/gadget_synth/src/intrinsics.rs`
 - Modify: `tests/test_gadget_synth_dump.py`
 
 - [ ] **Step 1: Add failing parity test for AVX2 i32 depth 1**
@@ -614,11 +614,11 @@ git commit -m "feat: match AVX2 i32 depth-1 gadget synthesis"
 ## Task 9: Recursive graph model in Rust
 
 **Files:**
-- Modify: `gadget_synth/src/types.rs`
-- Modify: `gadget_synth/src/intrinsics.rs`
-- Modify: `gadget_synth/src/synthesizer.rs`
-- Modify: `gadget_synth/src/bin/dump_gadget_synth.rs`
-- Modify: `gadget_synth/tests/dump_schema.rs`
+- Modify: `rust/gadget_synth/src/types.rs`
+- Modify: `rust/gadget_synth/src/intrinsics.rs`
+- Modify: `rust/gadget_synth/src/synthesizer.rs`
+- Modify: `rust/gadget_synth/src/bin/dump_gadget_synth.rs`
+- Modify: `rust/gadget_synth/tests/dump_schema.rs`
 
 - [ ] **Step 1: Add tests for nested graph normalization**
 
@@ -674,7 +674,7 @@ git commit -m "refactor: support recursive gadget graph nodes in Rust"
 ## Task 10: Depth-2 graph shape parity
 
 **Files:**
-- Modify: `gadget_synth/src/synthesizer.rs`
+- Modify: `rust/gadget_synth/src/synthesizer.rs`
 - Modify: `tests/test_gadget_synth_dump.py`
 
 - [ ] **Step 1: Add failing template parity test for AVX2 i64 depth 2**
@@ -728,8 +728,8 @@ git commit -m "feat: match depth-2 gadget template shapes"
 > behavior while staying runnable.
 
 **Files:**
-- Modify: `gadget_synth/src/synthesizer.rs`
-- Modify: `gadget_synth/src/types.rs`
+- Modify: `rust/gadget_synth/src/synthesizer.rs`
+- Modify: `rust/gadget_synth/src/types.rs`
 - Modify: `tests/test_gadget_synth_dump.py`
 
 - [ ] **Step 1: Add failing synthesized parity test for AVX2 i64 depth 2 excluding shared-prefix if needed**
@@ -781,7 +781,7 @@ git commit -m "feat: match muxed depth-2 gadget synthesis"
 ## Task 12: Shared-prefix graph parity
 
 **Files:**
-- Modify: `gadget_synth/src/synthesizer.rs`
+- Modify: `rust/gadget_synth/src/synthesizer.rs`
 - Modify: `tests/test_gadget_synth_dump.py`
 
 - [ ] **Step 1: Add failing template parity test for shared-prefix depth 2**
@@ -810,7 +810,7 @@ git commit -m "feat: match shared-prefix gadget graphs"
 ## Task 13: AVX512 unmasked synthesis parity
 
 **Files:**
-- Modify: `gadget_synth/src/intrinsics.rs`
+- Modify: `rust/gadget_synth/src/intrinsics.rs`
 - Modify: `tests/test_gadget_synth_dump.py`
 
 - [ ] **Step 1: Add AVX512 unmasked parity tests with masked intrinsics excluded**
@@ -858,8 +858,8 @@ git commit -m "feat: match AVX512 unmasked gadget synthesis"
 ## Task 14: AVX512 masked synthesis parity
 
 **Files:**
-- Modify: `gadget_synth/src/intrinsics.rs`
-- Modify: `gadget_synth/src/synthesizer.rs` if mask canonicalization requires it
+- Modify: `rust/gadget_synth/src/intrinsics.rs`
+- Modify: `rust/gadget_synth/src/synthesizer.rs` if mask canonicalization requires it
 - Modify: `tests/test_gadget_synth_dump.py`
 
 - [ ] **Step 1: Add masked AVX512 parity tests with explicit masked-intrinsic selection**

@@ -1,5 +1,5 @@
 [workspace]
-members = ["z3_avx", "gadget_synth"]
+members = ["rust/z3_avx", "rust/gadget_synth"]
 resolver = "3"
 
 [workspace.package]

@@ -14,13 +14,13 @@
 
 **Files:**
 - Create: `Cargo.toml`
-- Create: `z3_avx/Cargo.toml`
-- Create: `z3_avx/src/lib.rs`
-- Create: `z3_avx/src/registers.rs`
-- Create: `z3_avx/src/control.rs`
-- Create: `z3_avx/src/lanes.rs`
-- Create: `z3_avx/src/permute.rs`
-- Create: `z3_avx/tests/registers.rs`
+- Create: `rust/z3_avx/Cargo.toml`
+- Create: `rust/z3_avx/src/lib.rs`
+- Create: `rust/z3_avx/src/registers.rs`
+- Create: `rust/z3_avx/src/control.rs`
+- Create: `rust/z3_avx/src/lanes.rs`
+- Create: `rust/z3_avx/src/permute.rs`
+- Create: `rust/z3_avx/tests/registers.rs`
 
 - [ ] **Step 1: Create Cargo workspace skeleton**
 
@@ -49,9 +49,9 @@ Expected: PASS.
 ### Task 2: Port Register Construction Utilities
 
 **Files:**
-- Modify: `z3_avx/src/registers.rs`
-- Modify: `z3_avx/src/lanes.rs`
-- Modify: `z3_avx/tests/registers.rs`
+- Modify: `rust/z3_avx/src/registers.rs`
+- Modify: `rust/z3_avx/src/lanes.rs`
+- Modify: `rust/z3_avx/tests/registers.rs`
 
 - [ ] **Step 1: Write failing concrete lane packing test**
 
@@ -90,8 +90,8 @@ Expected: PASS.
 ### Task 3: Port Control Utilities
 
 **Files:**
-- Modify: `z3_avx/src/control.rs`
-- Create: `z3_avx/tests/control.rs`
+- Modify: `rust/z3_avx/src/control.rs`
+- Create: `rust/z3_avx/tests/control.rs`
 
 - [ ] **Step 1: Write failing `_MM_SHUFFLE` round-trip tests**
 
@@ -116,9 +116,9 @@ Expected: PASS.
 ### Task 4: Port `_mm*_permute_ps`
 
 **Files:**
-- Modify: `z3_avx/src/lanes.rs`
-- Modify: `z3_avx/src/permute.rs`
-- Create: `z3_avx/tests/permute_ps.rs`
+- Modify: `rust/z3_avx/src/lanes.rs`
+- Modify: `rust/z3_avx/src/permute.rs`
+- Create: `rust/z3_avx/tests/permute_ps.rs`
 
 - [ ] **Step 1: Write failing literal identity tests**
 

@@ -38,11 +38,11 @@ The per-family report files are maintained under `docs/z3-avx-rust-port/intrinsi
 ### Task 0: Shared canonicalization and parity tracking
 
 **Files:**
-- Create: `z3_avx/src/canonical.rs`
-- Create: `z3_avx/src/mask.rs`
-- Modify: `z3_avx/src/lib.rs`
-- Modify: `z3_avx/tests/control.rs`
-- Modify: `z3_avx/tests/permute_ps.rs`
+- Create: `rust/z3_avx/src/canonical.rs`
+- Create: `rust/z3_avx/src/mask.rs`
+- Modify: `rust/z3_avx/src/lib.rs`
+- Modify: `rust/z3_avx/tests/control.rs`
+- Modify: `rust/z3_avx/tests/permute_ps.rs`
 - Modify: `docs/z3-avx-rust-port/intrinsics/control.md`
 - Modify: `docs/z3-avx-rust-port/intrinsics/permute_ps.md`
 
@@ -57,10 +57,10 @@ The per-family report files are maintained under `docs/z3-avx-rust-port/intrinsi
 ### Task 1: Static immediate permutes and shuffles
 
 **Files:**
-- Create: `z3_avx/src/permute_pd.rs`
-- Create: `z3_avx/src/shuffle_ps.rs`
-- Create: `z3_avx/src/shuffle_pd.rs`
-- Create: `z3_avx/src/permute4x64.rs`
+- Create: `rust/z3_avx/src/permute_pd.rs`
+- Create: `rust/z3_avx/src/shuffle_ps.rs`
+- Create: `rust/z3_avx/src/shuffle_pd.rs`
+- Create: `rust/z3_avx/src/permute4x64.rs`
 - Create/modify tests and reports listed in `docs/z3-avx-rust-port/port-plan.md`.
 
 - [ ] Port tests for `permute_pd`, including masked and canonicalization cases.
@@ -74,8 +74,8 @@ The per-family report files are maintained under `docs/z3-avx-rust-port/intrinsi
 ### Task 2: Lane-level immediate operations
 
 **Files:**
-- Create: `z3_avx/src/permute2x128.rs`
-- Create: `z3_avx/src/shuffle_i32x4.rs`
+- Create: `rust/z3_avx/src/permute2x128.rs`
+- Create: `rust/z3_avx/src/shuffle_i32x4.rs`
 - Create/modify tests and reports listed in `docs/z3-avx-rust-port/port-plan.md`.
 
 - [ ] Port all `permute2x128` tests, including zero-lane and canonicalization cases.
@@ -88,8 +88,8 @@ The per-family report files are maintained under `docs/z3-avx-rust-port/intrinsi
 ### Task 3: Cross-lane variable permutes
 
 **Files:**
-- Create: `z3_avx/src/permutexvar.rs`
-- Create: `z3_avx/src/permutex2var.rs`
+- Create: `rust/z3_avx/src/permutexvar.rs`
+- Create: `rust/z3_avx/src/permutex2var.rs`
 - Create/modify tests and reports listed in `docs/z3-avx-rust-port/port-plan.md`.
 
 - [ ] Port all `permutexvar_epi32` and `permutexvar_epi64` tests.
@@ -104,7 +104,7 @@ The per-family report files are maintained under `docs/z3-avx-rust-port/intrinsi
 ### Task 4: Within-lane variable permutes
 
 **Files:**
-- Create: `z3_avx/src/permutevar.rs`
+- Create: `rust/z3_avx/src/permutevar.rs`
 - Create/modify tests and reports listed in `docs/z3-avx-rust-port/port-plan.md`.
 
 - [ ] Port all `permutevar_ps` and `permutevar_pd` tests.
@@ -118,8 +118,8 @@ The per-family report files are maintained under `docs/z3-avx-rust-port/intrinsi
 ### Task 5: Unpack and blend
 
 **Files:**
-- Create: `z3_avx/src/unpack.rs`
-- Create: `z3_avx/src/blend.rs`
+- Create: `rust/z3_avx/src/unpack.rs`
+- Create: `rust/z3_avx/src/blend.rs`
 - Create/modify tests and reports listed in `docs/z3-avx-rust-port/port-plan.md`.
 
 - [ ] Port all unpack epi32 tests and masked tests.
@@ -133,8 +133,8 @@ The per-family report files are maintained under `docs/z3-avx-rust-port/intrinsi
 ### Task 6: Align and signed min/max
 
 **Files:**
-- Create: `z3_avx/src/alignr.rs`
-- Create: `z3_avx/src/minmax.rs`
+- Create: `rust/z3_avx/src/alignr.rs`
+- Create: `rust/z3_avx/src/minmax.rs`
 - Create/modify tests and reports listed in `docs/z3-avx-rust-port/port-plan.md`.
 
 - [x] Port all alignr epi8, epi32, and epi64 tests.

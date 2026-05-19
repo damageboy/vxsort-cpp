@@ -1,8 +1,8 @@
 # shuffle_ps Report
 
 Python source: `tests/test_z3_avx.py`
-Planned Rust source: `z3_avx/src/shuffle_ps.rs`
-Planned Rust tests: `z3_avx/tests/shuffle_ps.rs`
+Planned Rust source: `rust/z3_avx/src/shuffle_ps.rs`
+Planned Rust tests: `rust/z3_avx/tests/shuffle_ps.rs`
 
 Intrinsics:
 - `_mm256_shuffle_ps`
@@ -17,16 +17,16 @@ Canonicalization:
 
 | Python test | Planned Rust test | Status |
 |---|---|---|
-| `tests/test_z3_avx.py:1184::TestShufflePs::test_mm256_shuffle_ps_null_permute_works` | `z3_avx/tests/shuffle_ps.rs::test_mm256_shuffle_ps_null_permute_works` | Ported |
-| `tests/test_z3_avx.py:1197::TestShufflePs::test_mm256_shuffle_ps_null_permute_found` | `z3_avx/tests/shuffle_ps.rs::test_mm256_shuffle_ps_null_permute_found` | Ported |
-| `tests/test_z3_avx.py:1214::TestShufflePs::test_mm256_shuffle_ps_null_permute_2vec_works` | `z3_avx/tests/shuffle_ps.rs::test_mm256_shuffle_ps_null_permute_2vec_works` | Ported |
-| `tests/test_z3_avx.py:1242::TestShufflePs::test_mm256_shuffle_ps_null_permute_2vec_found` | `z3_avx/tests/shuffle_ps.rs::test_mm256_shuffle_ps_null_permute_2vec_found` | Ported |
-| `tests/test_z3_avx.py:1274::TestShufflePs::test_mm512_shuffle_ps_null_permute_works` | `z3_avx/tests/shuffle_ps.rs::test_mm512_shuffle_ps_null_permute_works` | Ported |
-| `tests/test_z3_avx.py:1311::TestShufflePs::test_mm512_shuffle_ps_null_permute_found` | `z3_avx/tests/shuffle_ps.rs::test_mm512_shuffle_ps_null_permute_found` | Ported |
-| `tests/test_z3_avx.py:1350::TestShufflePs::test_mm512_shuffle_ps_null_permute_2vec_works` | `z3_avx/tests/shuffle_ps.rs::test_mm512_shuffle_ps_null_permute_2vec_works` | Ported |
-| `tests/test_z3_avx.py:1386::TestShufflePs::test_mm512_shuffle_ps_null_permute_2vec_found` | `z3_avx/tests/shuffle_ps.rs::test_mm512_shuffle_ps_null_permute_2vec_found` | Ported |
-| `tests/test_z3_avx.py:1426::TestShufflePs::test_mm256_shuffle_ps_bitonic_stage_masks` | `z3_avx/tests/shuffle_ps.rs::test_mm256_shuffle_ps_bitonic_stage_masks` | Ported |
-| `tests/test_z3_avx.py:1500::TestShufflePs::test_mm256_shuffle_ps_bitonic_stage_masks_literal` | `z3_avx/tests/shuffle_ps.rs::test_mm256_shuffle_ps_bitonic_stage_masks_literal` | Ported |
-| `tests/test_z3_avx.py:3315::TestMaskShufflePs::test_mm512_mask_shuffle_ps_mask_all_zeros` | `z3_avx/tests/shuffle_ps.rs::test_mm512_mask_shuffle_ps_mask_all_zeros` | Ported |
-| `tests/test_z3_avx.py:3332::TestMaskShufflePs::test_mm512_mask_shuffle_ps_mask_all_ones` | `z3_avx/tests/shuffle_ps.rs::test_mm512_mask_shuffle_ps_mask_all_ones` | Ported |
-| `tests/test_z3_avx.py:3352::TestMaskShufflePs::test_mm512_mask_shuffle_ps_partial_mask` | `z3_avx/tests/shuffle_ps.rs::test_mm512_mask_shuffle_ps_partial_mask` | Ported |
+| `tests/test_z3_avx.py:1184::TestShufflePs::test_mm256_shuffle_ps_null_permute_works` | `rust/z3_avx/tests/shuffle_ps.rs::test_mm256_shuffle_ps_null_permute_works` | Ported |
+| `tests/test_z3_avx.py:1197::TestShufflePs::test_mm256_shuffle_ps_null_permute_found` | `rust/z3_avx/tests/shuffle_ps.rs::test_mm256_shuffle_ps_null_permute_found` | Ported |
+| `tests/test_z3_avx.py:1214::TestShufflePs::test_mm256_shuffle_ps_null_permute_2vec_works` | `rust/z3_avx/tests/shuffle_ps.rs::test_mm256_shuffle_ps_null_permute_2vec_works` | Ported |
+| `tests/test_z3_avx.py:1242::TestShufflePs::test_mm256_shuffle_ps_null_permute_2vec_found` | `rust/z3_avx/tests/shuffle_ps.rs::test_mm256_shuffle_ps_null_permute_2vec_found` | Ported |
+| `tests/test_z3_avx.py:1274::TestShufflePs::test_mm512_shuffle_ps_null_permute_works` | `rust/z3_avx/tests/shuffle_ps.rs::test_mm512_shuffle_ps_null_permute_works` | Ported |
+| `tests/test_z3_avx.py:1311::TestShufflePs::test_mm512_shuffle_ps_null_permute_found` | `rust/z3_avx/tests/shuffle_ps.rs::test_mm512_shuffle_ps_null_permute_found` | Ported |
+| `tests/test_z3_avx.py:1350::TestShufflePs::test_mm512_shuffle_ps_null_permute_2vec_works` | `rust/z3_avx/tests/shuffle_ps.rs::test_mm512_shuffle_ps_null_permute_2vec_works` | Ported |
+| `tests/test_z3_avx.py:1386::TestShufflePs::test_mm512_shuffle_ps_null_permute_2vec_found` | `rust/z3_avx/tests/shuffle_ps.rs::test_mm512_shuffle_ps_null_permute_2vec_found` | Ported |
+| `tests/test_z3_avx.py:1426::TestShufflePs::test_mm256_shuffle_ps_bitonic_stage_masks` | `rust/z3_avx/tests/shuffle_ps.rs::test_mm256_shuffle_ps_bitonic_stage_masks` | Ported |
+| `tests/test_z3_avx.py:1500::TestShufflePs::test_mm256_shuffle_ps_bitonic_stage_masks_literal` | `rust/z3_avx/tests/shuffle_ps.rs::test_mm256_shuffle_ps_bitonic_stage_masks_literal` | Ported |
+| `tests/test_z3_avx.py:3315::TestMaskShufflePs::test_mm512_mask_shuffle_ps_mask_all_zeros` | `rust/z3_avx/tests/shuffle_ps.rs::test_mm512_mask_shuffle_ps_mask_all_zeros` | Ported |
+| `tests/test_z3_avx.py:3332::TestMaskShufflePs::test_mm512_mask_shuffle_ps_mask_all_ones` | `rust/z3_avx/tests/shuffle_ps.rs::test_mm512_mask_shuffle_ps_mask_all_ones` | Ported |
+| `tests/test_z3_avx.py:3352::TestMaskShufflePs::test_mm512_mask_shuffle_ps_partial_mask` | `rust/z3_avx/tests/shuffle_ps.rs::test_mm512_mask_shuffle_ps_partial_mask` | Ported |
