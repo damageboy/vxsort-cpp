@@ -14,14 +14,14 @@ fn gadget_viz_bin() -> String {
 }
 
 #[test]
-fn cli_writes_html_for_selected_record() {
+fn cli_writes_html_for_selected_template_record() {
     let dir = std::env::temp_dir().join(format!("gadget_viz_cli_{}_html", std::process::id()));
     fs::create_dir_all(&dir).expect("temp dir");
     let input = dir.join("records.jsonl");
     let output = dir.join("record.html");
     fs::write(
         &input,
-        r#"{"kind":"synthesized","arch":"avx2","dtype":"i64","gadget_depth":1,"fixture":"identity_pairs","input_state":{"top":[0,1,2,3],"bottom":[4,5,6,7]},"target_pairs":[[0,4],[1,5],[2,6],[3,7]],"output_state":{"top":[0,1,2,3],"bottom":[4,5,6,7]},"top_instructions":[{"name":"_mm256_permute_pd","args":{"a":"top","imm8":0}}],"bottom_instructions":[]}
+        r#"{"kind":"template","arch":"avx2","dtype":"i64","gadget_depth":1,"tier":"shallow","graph":{"top":{"kind":"intrinsic","name":"_mm256_permute_pd","isomorphic_order":true,"operands":{"a":{"kind":"input","name":"top"},"imm8":{"kind":"symbolic","role":"imm8","bits":8,"var_id":"v0"}}},"bottom":null}}
 "#,
     )
     .expect("write input");
@@ -44,5 +44,39 @@ fn cli_writes_html_for_selected_record() {
     let html = fs::read_to_string(output).expect("html output");
     assert!(html.contains("mermaid"));
     assert!(html.contains("_mm256_permute_pd"));
-    assert!(html.contains("[0,1,2,3]"));
+    assert!(html.contains("top input"));
+}
+
+#[test]
+fn cli_rejects_synthesized_records() {
+    let dir = std::env::temp_dir().join(format!(
+        "gadget_viz_cli_{}_reject_synthesized",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).expect("temp dir");
+    let input = dir.join("records.jsonl");
+    let output = dir.join("record.html");
+    fs::write(
+        &input,
+        r#"{"kind":"synthesized"}
+"#,
+    )
+    .expect("write input");
+
+    let output_result = Command::new(gadget_viz_bin())
+        .args([
+            "--input",
+            input.to_str().unwrap(),
+            "--format",
+            "html",
+            "--output",
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .expect("gadget_viz should run");
+
+    assert!(!output_result.status.success());
+    let stderr = String::from_utf8_lossy(&output_result.stderr);
+    assert!(stderr.contains("only renders template records"), "{stderr}");
+    assert!(!output.exists());
 }

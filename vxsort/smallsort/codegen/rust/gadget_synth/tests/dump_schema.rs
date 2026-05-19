@@ -38,32 +38,6 @@ fn run_template_dump(output: &std::path::Path, intrinsic_filter: Option<&str>) {
     assert!(status.success(), "dump_gadget_synth exited with {status}");
 }
 
-fn run_synthesized_dump(output: &std::path::Path, intrinsic_filter: Option<&str>) {
-    let mut command = Command::new(dump_gadget_synth_bin());
-    command
-        .args([
-            "synthesized",
-            "--arch",
-            "avx2",
-            "--dtype",
-            "i64",
-            "--gadget-depth",
-            "1",
-            "--fixture",
-            "identity_pairs",
-            "--max-unique-outputs",
-            "3",
-            "--output",
-        ])
-        .arg(output);
-    if let Some(intrinsic_filter) = intrinsic_filter {
-        command.args(["--intrinsic-filter", intrinsic_filter]);
-    }
-    let status = command.status().expect("dump_gadget_synth should run");
-
-    assert!(status.success(), "dump_gadget_synth exited with {status}");
-}
-
 fn read_jsonl(path: &std::path::Path) -> Vec<Value> {
     fs::read_to_string(path)
         .expect("dump should be readable")
@@ -429,112 +403,34 @@ fn dump_templates_accepts_intrinsic_filter_and_filters_avx2_i64_depth1() {
 }
 
 #[test]
-fn dump_schema_avx2_i64_depth1_synthesized_filter_is_stable_and_normalized() {
+fn dump_rejects_synthesized_mode() {
     let temp_dir = std::env::temp_dir().join(format!(
         "gadget_synth_dump_schema_{}_{}",
         std::process::id(),
-        "avx2_i64_depth1_synthesized_filter"
+        "reject_synthesized"
     ));
     fs::create_dir_all(&temp_dir).expect("temp dir should be creatable");
-    let first = temp_dir.join("first.jsonl");
-    let second = temp_dir.join("second.jsonl");
+    let output_path = temp_dir.join("synthesized.jsonl");
 
-    run_synthesized_dump(&first, Some("_mm256_permute_pd"));
-    run_synthesized_dump(&second, Some("_mm256_permute_pd"));
+    let output = Command::new(dump_gadget_synth_bin())
+        .args([
+            "synthesized",
+            "--arch",
+            "avx2",
+            "--dtype",
+            "i64",
+            "--gadget-depth",
+            "1",
+            "--fixture",
+            "identity_pairs",
+            "--output",
+        ])
+        .arg(&output_path)
+        .output()
+        .expect("dump_gadget_synth should run");
 
-    let first_text = fs::read_to_string(&first).expect("first dump should be readable");
-    let second_text = fs::read_to_string(&second).expect("second dump should be readable");
-    assert_eq!(first_text, second_text, "synthesized dump should be stable");
-    assert!(!first_text.contains("object at"));
-    assert!(!first_text.contains("imm8_permute"));
-    assert!(!first_text.contains("ctrl_permutexvar"));
-
-    let lines: Vec<&str> = first_text.lines().filter(|line| !line.is_empty()).collect();
-    let mut sorted_lines = lines.clone();
-    sorted_lines.sort_unstable();
-    assert_eq!(lines, sorted_lines, "JSONL records should be sorted");
-    let unique_lines: HashSet<&str> = lines.iter().copied().collect();
-    assert_eq!(unique_lines.len(), lines.len(), "records should be unique");
-
-    let records = read_jsonl(&first);
-    assert!(
-        !records.is_empty(),
-        "filtered synthesized dump should not be empty"
-    );
-    for record in &records {
-        assert_eq!(record["kind"], "synthesized");
-        assert_eq!(record["arch"], "avx2");
-        assert_eq!(record["dtype"], "i64");
-        assert_eq!(record["gadget_depth"], 1);
-        assert_eq!(record["fixture"], "identity_pairs");
-        assert_eq!(
-            record["input_state"],
-            json!({"top": [0, 1, 2, 3], "bottom": [4, 5, 6, 7]})
-        );
-        assert_eq!(
-            record["target_pairs"],
-            json!([[0, 4], [1, 5], [2, 6], [3, 7]])
-        );
-        assert!(record.get("graph").is_none());
-        assert!(record.get("intrinsic_filter").is_none());
-
-        let output_top = record["output_state"]["top"]
-            .as_array()
-            .expect("output_state.top should be an array");
-        let output_bottom = record["output_state"]["bottom"]
-            .as_array()
-            .expect("output_state.bottom should be an array");
-        assert_eq!(output_top.len(), 4);
-        assert_eq!(output_bottom.len(), 4);
-
-        for (field, register_name) in [
-            ("top_instructions", "top"),
-            ("bottom_instructions", "bottom"),
-        ] {
-            let instructions = record[field]
-                .as_array()
-                .expect("instruction fields should be arrays");
-            for instruction in instructions {
-                assert_eq!(instruction["name"], "_mm256_permute_pd");
-                let args = instruction["args"]
-                    .as_object()
-                    .expect("instruction args should be an object");
-                assert_eq!(args.get("a").and_then(Value::as_str), Some(register_name));
-                let imm8 = args
-                    .get("imm8")
-                    .and_then(Value::as_u64)
-                    .expect("imm8 should be a JSON integer");
-                assert!(imm8 <= u8::MAX.into());
-            }
-        }
-    }
-}
-
-#[test]
-fn dump_synthesized_accepts_unfiltered_avx2_i64_depth1() {
-    let temp_dir = std::env::temp_dir().join(format!(
-        "gadget_synth_dump_schema_{}_{}",
-        std::process::id(),
-        "synthesized_unfiltered"
-    ));
-    fs::create_dir_all(&temp_dir).expect("temp dir should be creatable");
-    let output_path = temp_dir.join("unfiltered.jsonl");
-
-    run_synthesized_dump(&output_path, None);
-
-    let records = read_jsonl(&output_path);
-    assert!(
-        !records.is_empty(),
-        "unfiltered synthesized dump should not be empty"
-    );
-    assert!(
-        records.iter().any(|record| {
-            ["top_instructions", "bottom_instructions"]
-                .iter()
-                .filter_map(|field| record[*field].as_array())
-                .flatten()
-                .any(|instruction| instruction["name"] != "_mm256_permute_pd")
-        }),
-        "unfiltered synthesized dump should include newly dispatched intrinsics"
-    );
+    assert!(!output.status.success(), "synthesized mode should fail");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("templates"), "unexpected stderr: {stderr}");
+    assert!(!output_path.exists());
 }

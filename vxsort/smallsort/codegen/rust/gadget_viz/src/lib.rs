@@ -22,6 +22,10 @@ pub enum VizError {
         index: usize,
         len: usize,
     },
+    NonTemplateRecord {
+        index: usize,
+        kind: String,
+    },
 }
 
 impl std::fmt::Display for VizError {
@@ -31,6 +35,12 @@ impl std::fmt::Display for VizError {
             Self::Json { line, source } => write!(f, "invalid JSON on line {line}: {source}"),
             Self::IndexOutOfRange { index, len } => {
                 write!(f, "record index {index} is out of range for {len} records")
+            }
+            Self::NonTemplateRecord { index, kind } => {
+                write!(
+                    f,
+                    "record {index} has kind '{kind}', but gadget_viz only renders template records"
+                )
             }
         }
     }
@@ -74,12 +84,33 @@ pub fn select_records(records: &[Value], index: Option<usize>) -> Result<Vec<(us
     }
 }
 
-pub fn render_records(records: &[(usize, Value)], format: OutputFormat, title: &str) -> String {
-    match format {
+pub fn render_records(
+    records: &[(usize, Value)],
+    format: OutputFormat,
+    title: &str,
+) -> Result<String> {
+    ensure_template_records(records)?;
+    Ok(match format {
         OutputFormat::Mermaid => render_mermaid_document(records),
         OutputFormat::Markdown => render_markdown_document(records, title),
         OutputFormat::Html => render_html_document(records, title),
+    })
+}
+
+fn ensure_template_records(records: &[(usize, Value)]) -> Result<()> {
+    for (index, record) in records {
+        let kind = record
+            .get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or("<missing>");
+        if kind != "template" {
+            return Err(VizError::NonTemplateRecord {
+                index: *index,
+                kind: kind.to_owned(),
+            });
+        }
     }
+    Ok(())
 }
 
 fn render_mermaid_document(records: &[(usize, Value)]) -> String {
@@ -152,13 +183,7 @@ fn render_html_document(records: &[(usize, Value)], title: &str) -> String {
 pub fn render_record_mermaid(_index: usize, record: &Value) -> String {
     let mut graph = MermaidGraph::default();
     graph.line("flowchart TD");
-
-    match record.get("kind").and_then(Value::as_str) {
-        Some("template") => render_template_record(&mut graph, record),
-        Some("synthesized") => render_synthesized_record(&mut graph, record),
-        _ => graph.node("unknown", "unknown", "unknown record kind", Shape::Rect),
-    }
-
+    render_template_record(&mut graph, record);
     graph.finish()
 }
 
@@ -246,163 +271,6 @@ fn render_template_node(graph: &mut MermaidGraph, value: &Value, hint: &str) -> 
     }
 }
 
-fn render_synthesized_record(graph: &mut MermaidGraph, record: &Value) {
-    graph.node(
-        "top_in",
-        "top input",
-        &format!(
-            "top input\n{}",
-            lane_array(record.pointer("/input_state/top"))
-        ),
-        Shape::Rect,
-    );
-    graph.node(
-        "bottom_in",
-        "bottom input",
-        &format!(
-            "bottom input\n{}",
-            lane_array(record.pointer("/input_state/bottom"))
-        ),
-        Shape::Rect,
-    );
-    let top_out_source = render_instruction_chain(
-        graph,
-        "top",
-        record.get("top_instructions").and_then(Value::as_array),
-    );
-    let bottom_out_source = render_instruction_chain(
-        graph,
-        "bottom",
-        record.get("bottom_instructions").and_then(Value::as_array),
-    );
-
-    graph.node(
-        "top_out",
-        "top output",
-        &format!(
-            "top output\n{}",
-            lane_array(record.pointer("/output_state/top"))
-        ),
-        Shape::Rect,
-    );
-    graph.node(
-        "bottom_out",
-        "bottom output",
-        &format!(
-            "bottom output\n{}",
-            lane_array(record.pointer("/output_state/bottom"))
-        ),
-        Shape::Rect,
-    );
-    graph.edge(&top_out_source, "top_out", None);
-    graph.edge(&bottom_out_source, "bottom_out", None);
-}
-
-fn render_instruction_chain(
-    graph: &mut MermaidGraph,
-    side: &str,
-    instructions: Option<&Vec<Value>>,
-) -> String {
-    let input_id = if side == "bottom" {
-        "bottom_in"
-    } else {
-        "top_in"
-    };
-    let Some(instructions) = instructions else {
-        return input_id.to_owned();
-    };
-    if instructions.is_empty() {
-        return input_id.to_owned();
-    }
-
-    let mut instruction_ids = Vec::new();
-    for (idx, instruction) in instructions.iter().enumerate() {
-        let id = format!("{side}_inst_{idx}");
-        graph.node(&id, &id, &instruction_label(instruction), Shape::Rect);
-        instruction_ids.push(id.clone());
-
-        let mut saw_register_edge = false;
-        if let Some(args) = instruction.get("args").and_then(Value::as_object) {
-            for (key, value) in args {
-                if let Some(src) = value
-                    .as_str()
-                    .and_then(|s| resolve_register_ref(s, input_id, &instruction_ids, idx))
-                {
-                    graph.edge(&src, &id, Some(key));
-                    saw_register_edge = true;
-                }
-            }
-        }
-        if !saw_register_edge {
-            let src = if idx == 0 {
-                input_id.to_owned()
-            } else {
-                instruction_ids[idx - 1].clone()
-            };
-            graph.edge(&src, &id, None);
-        }
-    }
-
-    instruction_ids
-        .last()
-        .cloned()
-        .unwrap_or_else(|| input_id.to_owned())
-}
-
-fn resolve_register_ref(
-    value: &str,
-    current_input: &str,
-    instruction_ids: &[String],
-    current_idx: usize,
-) -> Option<String> {
-    match value {
-        "top" => Some("top_in".to_owned()),
-        "bottom" => Some("bottom_in".to_owned()),
-        "prev" => Some(if current_idx == 0 {
-            current_input.to_owned()
-        } else {
-            instruction_ids[current_idx - 1].clone()
-        }),
-        _ if value.starts_with("result_") => value[7..]
-            .parse::<usize>()
-            .ok()
-            .and_then(|idx| instruction_ids.get(idx).cloned()),
-        _ => None,
-    }
-}
-
-fn instruction_label(instruction: &Value) -> String {
-    let name = instruction
-        .get("name")
-        .and_then(Value::as_str)
-        .unwrap_or("instruction");
-    let mut lines = vec![name.to_owned()];
-    if let Some(args) = instruction.get("args").and_then(Value::as_object) {
-        for (key, value) in args {
-            lines.push(format!("{key}={}", arg_label(value)));
-        }
-    }
-    lines.join("\n")
-}
-
-fn arg_label(value: &Value) -> String {
-    if let Some(s) = value.as_str() {
-        return s.to_owned();
-    }
-    if let Some(n) = value.as_i64() {
-        return n.to_string();
-    }
-    if let Some(n) = value.as_u64() {
-        return n.to_string();
-    }
-    if value.get("kind").and_then(Value::as_str) == Some("bitvec") {
-        let bits = value.get("bits").and_then(Value::as_u64).unwrap_or(0);
-        let hex = value.get("hex").and_then(Value::as_str).unwrap_or("0x");
-        return format!("{}b:{}", bits, shorten_hex(hex));
-    }
-    short_json(value)
-}
-
 fn symbolic_label(value: &Value) -> String {
     let role = value.get("role").and_then(Value::as_str).unwrap_or("sym");
     let var_id = value.get("var_id").and_then(Value::as_str).unwrap_or("v?");
@@ -419,15 +287,6 @@ fn metadata_markdown(record: &Value) -> String {
         if let Some(value) = record.get(key) {
             parts.push(format!("- {key}: `{}`", scalar_to_string(value)));
         }
-    }
-    if let Some(input) = record.get("input_state") {
-        parts.push(format!("- input_state: `{}`", compact_json(input)));
-    }
-    if let Some(target_pairs) = record.get("target_pairs") {
-        parts.push(format!("- target_pairs: `{}`", compact_json(target_pairs)));
-    }
-    if let Some(output) = record.get("output_state") {
-        parts.push(format!("- output_state: `{}`", compact_json(output)));
     }
     parts.join("\n")
 }
@@ -447,10 +306,6 @@ fn scalar_to_string(value: &Value) -> String {
         .unwrap_or_else(|| value.to_string())
 }
 
-fn lane_array(value: Option<&Value>) -> String {
-    value.map(compact_json).unwrap_or_else(|| "[]".to_owned())
-}
-
 fn compact_json(value: &Value) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "?".to_owned())
 }
@@ -461,14 +316,6 @@ fn short_json(value: &Value) -> String {
         format!("{}…", &text[..80])
     } else {
         text
-    }
-}
-
-fn shorten_hex(hex: &str) -> String {
-    if hex.len() <= 18 {
-        hex.to_owned()
-    } else {
-        format!("{}…{}", &hex[..10], &hex[hex.len() - 6..])
     }
 }
 
@@ -548,45 +395,55 @@ fn escape_html(value: &str) -> String {
 mod tests {
     use super::*;
 
-    fn synthesized_record() -> Value {
+    fn template_record() -> Value {
         serde_json::json!({
-            "kind": "synthesized",
+            "kind": "template",
             "arch": "avx2",
             "dtype": "i64",
             "gadget_depth": 2,
-            "fixture": "identity_pairs",
-            "input_state": {"top": [0,1,2,3], "bottom": [4,5,6,7]},
-            "target_pairs": [[0,4],[1,5],[2,6],[3,7]],
-            "output_state": {"top": [0,1,2,3], "bottom": [4,5,6,7]},
-            "top_instructions": [
-                {"name":"_mm256_permute_pd", "args":{"a":"top", "imm8": 0}},
-                {"name":"_mm256_shuffle_pd", "args":{"a":"prev", "b":"bottom", "imm8": 0}}
-            ],
-            "bottom_instructions": []
+            "tier": "deep",
+            "graph": {
+                "top": {
+                    "kind": "intrinsic",
+                    "name": "_mm256_shuffle_pd",
+                    "isomorphic_order": true,
+                    "operands": {
+                        "a": {"kind": "input", "name": "top"},
+                        "b": {"kind": "input", "name": "bottom"},
+                        "imm8": {"kind": "symbolic", "role": "imm8", "bits": 8, "var_id": "v0"}
+                    }
+                },
+                "bottom": null
+            }
         })
     }
 
-    #[test]
-    fn synthesized_mermaid_shows_only_gadget_flow_lanes_and_edges() {
-        let diagram = render_record_mermaid(3, &synthesized_record());
-        assert!(!diagram.contains("record #3"));
-        assert!(!diagram.contains("target pairs"));
-        assert!(diagram.contains("top input"));
-        assert!(diagram.contains("[0,1,2,3]"));
-        assert!(diagram.contains("_mm256_shuffle_pd"));
-        assert!(diagram.contains("-->|a| top_inst_1"));
+    fn synthesized_record() -> Value {
+        serde_json::json!({"kind": "synthesized"})
     }
 
     #[test]
-    fn metadata_markdown_keeps_target_pairs_outside_graph() {
-        let metadata = metadata_markdown(&synthesized_record());
-        assert!(metadata.contains("target_pairs"));
-        assert!(metadata.contains("[[0,4],[1,5],[2,6],[3,7]]"));
+    fn template_mermaid_shows_only_template_graph() {
+        let diagram = render_record_mermaid(3, &template_record());
+        assert!(!diagram.contains("record #3"));
+        assert!(diagram.contains("top input"));
+        assert!(diagram.contains("bottom input"));
+        assert!(diagram.contains("_mm256_shuffle_pd"));
+        assert!(diagram.contains("imm8"));
+    }
+
+    #[test]
+    fn render_records_rejects_synthesized_records() {
+        let records = vec![(7, synthesized_record())];
+        assert!(matches!(
+            render_records(&records, OutputFormat::Mermaid, "demo"),
+            Err(VizError::NonTemplateRecord { index: 7, .. })
+        ));
     }
 
     #[test]
     fn index_selection_is_checked() {
-        let records = vec![synthesized_record()];
+        let records = vec![template_record()];
         assert_eq!(select_records(&records, None).unwrap().len(), 1);
         assert_eq!(select_records(&records, Some(0)).unwrap().len(), 1);
         assert!(matches!(

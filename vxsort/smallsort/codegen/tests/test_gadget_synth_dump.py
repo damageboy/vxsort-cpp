@@ -23,8 +23,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DUMPER = _REPO_ROOT / "tools" / "dump_gadget_synth.py"
 _COMPARER = _REPO_ROOT / "tools" / "compare_gadget_synth_dumps.py"
 _OBJECT_ID_RE = re.compile(r"0x[0-9a-fA-F]+|<[^>]+ object at")
-_OBJECT_AT_RE = re.compile(r"<[^>]+ object at")
-_REGISTER_ARG_RE = re.compile(r"^(?:top|bottom|prev|result_\d+)$")
 _AVX512_UNMASKED_INTRINSICS = {
     "i32": (
         "_mm512_permutexvar_epi32",
@@ -101,56 +99,6 @@ def _write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
     path.write_text("".join(f"{json.dumps(record)}\n" for record in records))
 
 
-def _assert_saw_single_to_dual_mux_record(
-    records: list[dict[str, Any]],
-    *,
-    single_intrinsic: str,
-    dual_intrinsic: str,
-) -> None:
-    for record in records:
-        for instruction_list_name in ["top_instructions", "bottom_instructions"]:
-            instructions = record[instruction_list_name]
-            if (
-                len(instructions) == 2
-                and instructions[0]["name"] == single_intrinsic
-                and instructions[1]["name"] == dual_intrinsic
-                and any(value == "prev" for value in instructions[1]["args"].values())
-            ):
-                return
-
-    raise AssertionError(
-        f"did not find synthesized single→dual mux record for "
-        f"{single_intrinsic}→{dual_intrinsic}"
-    )
-
-
-def _assert_saw_shared_prefix_record(
-    records: list[dict[str, Any]],
-    *,
-    prefix_intrinsic: str,
-    tail_intrinsic: str,
-) -> None:
-    for record in records:
-        top_instructions = record["top_instructions"]
-        bottom_instructions = record["bottom_instructions"]
-        if len(top_instructions) != 3 or len(bottom_instructions) != 3:
-            continue
-        if (
-            top_instructions[0]["name"] == prefix_intrinsic
-            and top_instructions[1]["name"] == prefix_intrinsic
-            and top_instructions[2]["name"] == tail_intrinsic
-            and bottom_instructions[0]["name"] == prefix_intrinsic
-            and bottom_instructions[1]["name"] == prefix_intrinsic
-            and bottom_instructions[2]["name"] == tail_intrinsic
-        ):
-            return
-
-    raise AssertionError(
-        f"did not find synthesized shared-prefix record for "
-        f"{prefix_intrinsic}→{tail_intrinsic}"
-    )
-
-
 def _run_comparer(
     expected: Path,
     actual: Path,
@@ -212,27 +160,6 @@ def _collect_symbolics(value: Any) -> list[dict[str, Any]]:
     ]
 
 
-def _assert_allowed_concrete_arg(value: Any) -> bool:
-    """Assert a synthesized instruction arg is a concrete portable value."""
-    if isinstance(value, str):
-        assert _REGISTER_ARG_RE.fullmatch(value)
-        return False
-    if isinstance(value, bool):
-        raise AssertionError("booleans are not valid concrete gadget args")
-    if isinstance(value, int):
-        return False
-    if isinstance(value, dict):
-        assert set(value) == {"kind", "bits", "hex"}
-        assert value["kind"] == "bitvec"
-        assert value["bits"] in {256, 512}
-        assert isinstance(value["hex"], str)
-        assert value["hex"].startswith("0x")
-        assert len(value["hex"]) == 2 + value["bits"] // 4
-        assert int(value["hex"], 16) < (1 << value["bits"])
-        return True
-    raise AssertionError(f"unexpected concrete gadget arg type: {type(value)}")
-
-
 def _assert_records_exclude_masked_intrinsics(records: list[dict[str, Any]]) -> None:
     for record in records:
         for item in _walk_json(record):
@@ -266,20 +193,6 @@ def _assert_records_include_masked_intrinsics(records: list[dict[str, Any]]) -> 
             if _is_intrinsic_name_record(item) and "_mask_" in item["name"]:
                 return
     raise AssertionError("did not find any masked intrinsic record")
-
-
-def _assert_saw_synthesized_instruction(
-    records: list[dict[str, Any]], intrinsic_name: str
-) -> None:
-    for record in records:
-        for instruction_list_name in ["top_instructions", "bottom_instructions"]:
-            if any(
-                instruction["name"] == intrinsic_name
-                for instruction in record[instruction_list_name]
-            ):
-                return
-
-    raise AssertionError(f"did not find synthesized {intrinsic_name} record")
 
 
 def test_templates_cli_dumps_stable_jsonl(tmp_path: Path) -> None:
@@ -324,10 +237,10 @@ def test_templates_cli_dumps_stable_jsonl(tmp_path: Path) -> None:
             assert isinstance(symbolic["bits"], int)
 
 
-def test_synthesized_cli_dumps_identity_pairs_schema(tmp_path: Path) -> None:
+def test_python_dumper_rejects_synthesized_mode(tmp_path: Path) -> None:
     output = tmp_path / "synthesized.jsonl"
 
-    subprocess.run(
+    result = subprocess.run(
         [
             sys.executable,
             str(_DUMPER),
@@ -340,62 +253,54 @@ def test_synthesized_cli_dumps_identity_pairs_schema(tmp_path: Path) -> None:
             "1",
             "--fixture",
             "identity_pairs",
-            "--max-unique-outputs",
-            "3",
             "--output",
             str(output),
         ],
         cwd=_REPO_ROOT,
-        check=True,
+        text=True,
+        capture_output=True,
+        check=False,
     )
 
-    records = _read_jsonl(output)
-    assert records
-    assert records == sorted(
-        records, key=lambda record: json.dumps(record, sort_keys=True)
+    assert result.returncode != 0
+    assert "invalid choice" in result.stderr or "templates" in result.stderr
+    assert not output.exists()
+
+
+def test_rust_dumper_rejects_synthesized_mode(tmp_path: Path) -> None:
+    output = tmp_path / "synthesized.jsonl"
+
+    result = subprocess.run(
+        [
+            "cargo",
+            "run",
+            "-q",
+            "-p",
+            "gadget_synth",
+            "--bin",
+            "dump_gadget_synth",
+            "--",
+            "synthesized",
+            "--arch",
+            "avx2",
+            "--dtype",
+            "i64",
+            "--gadget-depth",
+            "1",
+            "--fixture",
+            "identity_pairs",
+            "--output",
+            str(output),
+        ],
+        cwd=_REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
     )
 
-    required_fields = {
-        "kind",
-        "arch",
-        "dtype",
-        "gadget_depth",
-        "fixture",
-        "input_state",
-        "target_pairs",
-        "output_state",
-        "top_instructions",
-        "bottom_instructions",
-    }
-    expected_input_state = {"top": [0, 1, 2, 3], "bottom": [4, 5, 6, 7]}
-    expected_target_pairs = [[0, 4], [1, 5], [2, 6], [3, 7]]
-    saw_bitvec = False
-
-    for record in records:
-        assert required_fields <= set(record)
-        assert record["kind"] == "synthesized"
-        assert record["arch"] == "avx2"
-        assert record["dtype"] == "i64"
-        assert record["gadget_depth"] == 1
-        assert record["fixture"] == "identity_pairs"
-        assert record["input_state"] == expected_input_state
-        assert record["target_pairs"] == expected_target_pairs
-        assert set(record["output_state"]) == {"top", "bottom"}
-        assert len(record["output_state"]["top"]) == 4
-        assert len(record["output_state"]["bottom"]) == 4
-        assert not _OBJECT_AT_RE.search(json.dumps(record, sort_keys=True))
-
-        for instruction_list_name in ["top_instructions", "bottom_instructions"]:
-            instruction_list = record[instruction_list_name]
-            assert isinstance(instruction_list, list)
-            for instruction in instruction_list:
-                assert set(instruction) == {"name", "args"}
-                assert isinstance(instruction["name"], str)
-                assert isinstance(instruction["args"], dict)
-                for value in instruction["args"].values():
-                    saw_bitvec = _assert_allowed_concrete_arg(value) or saw_bitvec
-
-    assert saw_bitvec
+    assert result.returncode != 0
+    assert "templates" in result.stderr
+    assert not output.exists()
 
 
 def test_python_and_rust_template_dumps_match_depth1(tmp_path: Path) -> None:
@@ -710,601 +615,6 @@ def test_python_and_rust_template_dumps_match_avx512_masked_depth1(
     assert result.returncode == 0, (
         f"template dumps differ for avx512/{datatype} depth=1 "
         f"with masked --intrinsic-filter={intrinsic_filter}\n"
-        f"{_combined_output(result)}"
-    )
-
-
-@pytest.mark.slow
-@pytest.mark.parametrize(
-    ("datatype", "intrinsic_filter", "expected_intrinsics"),
-    [
-        pytest.param(
-            "i64",
-            "_mm512_permute_pd,_mm512_permutevar_pd,"
-            "_mm512_permutexvar_epi64,_mm512_shuffle_pd",
-            (
-                "_mm512_permute_pd",
-                "_mm512_permutevar_pd",
-                "_mm512_permutexvar_epi64",
-                "_mm512_shuffle_pd",
-            ),
-            id="i64-control-and-shuffle",
-        ),
-        pytest.param(
-            "i64",
-            "_mm512_permutex2var_epi64,_mm512_alignr_epi64,"
-            "_mm512_unpacklo_epi64,_mm512_unpackhi_epi64",
-            ("_mm512_permutex2var_epi64", "_mm512_alignr_epi64"),
-            id="i64-two-source-avx512",
-        ),
-        pytest.param(
-            "i32",
-            "_mm512_permutexvar_epi32,_mm512_shuffle_i32x4",
-            ("_mm512_permutexvar_epi32", "_mm512_shuffle_i32x4"),
-            id="i32-avx512-specific",
-        ),
-    ],
-)
-def test_python_and_rust_synthesized_dumps_match_avx512_depth1_unmasked_filtered(
-    tmp_path: Path,
-    datatype: str,
-    intrinsic_filter: str,
-    expected_intrinsics: tuple[str, ...],
-) -> None:
-    """Representative AVX512 unmasked synthesized parity.
-
-    Full AVX512 i32 unmasked depth-1 parity is deferred because the Python
-    reference dump exceeded 120s locally. These filters explicitly exclude
-    masked intrinsics on both Python and Rust dumpers while exercising i64 and
-    i32 AVX512-specific dispatch.
-    """
-    python_output = tmp_path / "python-synthesized.jsonl"
-    rust_output = tmp_path / "rust-synthesized.jsonl"
-    common_args = [
-        "--gadget-depth",
-        "1",
-        "--fixture",
-        "identity_pairs",
-        "--max-unique-outputs",
-        "1",
-        "--intrinsic-filter",
-        intrinsic_filter,
-    ]
-
-    _dump_python(
-        "synthesized",
-        python_output,
-        "--vector-machine",
-        "AVX512",
-        "--datatype",
-        datatype,
-        *common_args,
-    )
-    _dump_rust(
-        "synthesized",
-        rust_output,
-        "--arch",
-        "avx512",
-        "--dtype",
-        datatype,
-        *common_args,
-    )
-
-    python_records = _read_jsonl(python_output)
-    rust_records = _read_jsonl(rust_output)
-    assert python_records
-    assert rust_records
-    _assert_records_exclude_masked_intrinsics(python_records)
-    _assert_records_exclude_masked_intrinsics(rust_records)
-    for intrinsic_name in expected_intrinsics:
-        _assert_saw_synthesized_instruction(python_records, intrinsic_name)
-
-    result = _run_comparer(python_output, rust_output, "--max-diffs", "10")
-    assert result.returncode == 0, (
-        f"synthesized dumps differ for avx512/{datatype} depth=1 "
-        f"with unmasked --intrinsic-filter={intrinsic_filter}\n"
-        f"{_combined_output(result)}"
-    )
-
-
-@pytest.mark.slow
-@pytest.mark.parametrize(
-    ("datatype", "intrinsic_filter", "expected_intrinsics"),
-    [
-        pytest.param(
-            "i64",
-            "_mm512_mask_permute_pd,_mm512_mask_permutevar_pd,"
-            "_mm512_mask_permutexvar_epi64,_mm512_mask_shuffle_pd",
-            (
-                "_mm512_mask_permute_pd",
-                "_mm512_mask_permutevar_pd",
-                "_mm512_mask_permutexvar_epi64",
-                "_mm512_mask_shuffle_pd",
-            ),
-            id="i64-masked-control-and-shuffle",
-        ),
-        pytest.param(
-            "i64",
-            "_mm512_mask_permutex2var_epi64,_mm512_mask_alignr_epi64,"
-            "_mm512_mask_unpacklo_epi64,_mm512_mask_unpackhi_epi64,"
-            "_mm512_mask_shuffle_i32x4",
-            (
-                "_mm512_mask_permutex2var_epi64",
-                "_mm512_mask_alignr_epi64",
-                "_mm512_mask_unpacklo_epi64",
-                "_mm512_mask_unpackhi_epi64",
-                "_mm512_mask_shuffle_i32x4",
-            ),
-            id="i64-masked-two-source-avx512",
-        ),
-        pytest.param(
-            "i32",
-            "_mm512_mask_permute_ps,_mm512_mask_permutevar_ps,"
-            "_mm512_mask_permutexvar_epi32,_mm512_mask_shuffle_ps",
-            (
-                "_mm512_mask_permute_ps",
-                "_mm512_mask_permutevar_ps",
-                "_mm512_mask_permutexvar_epi32",
-                "_mm512_mask_shuffle_ps",
-            ),
-            id="i32-masked-control-and-shuffle",
-        ),
-        pytest.param(
-            "i32",
-            "_mm512_mask_permutex2var_epi32,_mm512_mask_alignr_epi32,"
-            "_mm512_mask_unpacklo_epi32,_mm512_mask_unpackhi_epi32,"
-            "_mm512_mask_shuffle_i32x4",
-            (
-                "_mm512_mask_permutex2var_epi32",
-                "_mm512_mask_alignr_epi32",
-                "_mm512_mask_unpacklo_epi32",
-                "_mm512_mask_unpackhi_epi32",
-                "_mm512_mask_shuffle_i32x4",
-            ),
-            id="i32-masked-two-source-avx512",
-        ),
-    ],
-)
-def test_python_and_rust_synthesized_dumps_match_avx512_depth1_masked_filtered(
-    tmp_path: Path,
-    datatype: str,
-    intrinsic_filter: str,
-    expected_intrinsics: tuple[str, ...],
-) -> None:
-    """Representative AVX512 masked synthesized parity.
-
-    Full unfiltered AVX512 masked depth-1 parity is deferred because the
-    candidate menu is expensive, especially for i32. These filters are exact
-    masked-intrinsic allowlists passed to both dumpers, so failures localize to
-    masked dispatch/semantics and canonicalized concrete arguments.
-    """
-    python_output = tmp_path / "python-synthesized-masked.jsonl"
-    rust_output = tmp_path / "rust-synthesized-masked.jsonl"
-    common_args = [
-        "--gadget-depth",
-        "1",
-        "--fixture",
-        "identity_pairs",
-        "--max-unique-outputs",
-        "1",
-        "--intrinsic-filter",
-        intrinsic_filter,
-    ]
-
-    _dump_python(
-        "synthesized",
-        python_output,
-        "--vector-machine",
-        "AVX512",
-        "--datatype",
-        datatype,
-        *common_args,
-    )
-    _dump_rust(
-        "synthesized",
-        rust_output,
-        "--arch",
-        "avx512",
-        "--dtype",
-        datatype,
-        *common_args,
-    )
-
-    allowed = set(intrinsic_filter.split(","))
-    python_records = _read_jsonl(python_output)
-    rust_records = _read_jsonl(rust_output)
-    assert python_records
-    assert rust_records
-    _assert_records_use_only_intrinsics(python_records, allowed)
-    _assert_records_use_only_intrinsics(rust_records, allowed)
-    _assert_records_include_masked_intrinsics(python_records)
-    _assert_records_include_masked_intrinsics(rust_records)
-    for intrinsic_name in expected_intrinsics:
-        _assert_saw_synthesized_instruction(python_records, intrinsic_name)
-
-    result = _run_comparer(python_output, rust_output, "--max-diffs", "10")
-    assert result.returncode == 0, (
-        f"synthesized dumps differ for avx512/{datatype} depth=1 "
-        f"with masked --intrinsic-filter={intrinsic_filter}\n"
-        f"{_combined_output(result)}"
-    )
-
-
-@pytest.mark.slow
-def test_python_and_rust_synthesized_dumps_match_avx512_i64_depth2_non_shared_filtered(
-    tmp_path: Path,
-) -> None:
-    """Representative AVX512 depth-2 parity for single→dual mux paths.
-
-    Full AVX512 unmasked depth-2 synthesized parity is deferred because it is
-    too expensive for routine tests. This filtered case explicitly excludes
-    masked intrinsics and keeps a runnable depth-2 ratchet.
-    """
-    intrinsic_filter = "_mm512_permute_pd,_mm512_shuffle_i32x4"
-    python_output = tmp_path / "python-synthesized-depth2.jsonl"
-    rust_output = tmp_path / "rust-synthesized-depth2.jsonl"
-    common_args = [
-        "--gadget-depth",
-        "2",
-        "--exclude-shared-prefix",
-        "--fixture",
-        "identity_pairs",
-        "--max-unique-outputs",
-        "1",
-        "--intrinsic-filter",
-        intrinsic_filter,
-    ]
-
-    _dump_python(
-        "synthesized",
-        python_output,
-        "--vector-machine",
-        "AVX512",
-        "--datatype",
-        "i64",
-        *common_args,
-    )
-    _dump_rust(
-        "synthesized",
-        rust_output,
-        "--arch",
-        "avx512",
-        "--dtype",
-        "i64",
-        *common_args,
-    )
-
-    python_records = _read_jsonl(python_output)
-    rust_records = _read_jsonl(rust_output)
-    assert python_records
-    assert rust_records
-    _assert_records_exclude_masked_intrinsics(python_records)
-    _assert_records_exclude_masked_intrinsics(rust_records)
-    _assert_saw_single_to_dual_mux_record(
-        python_records,
-        single_intrinsic="_mm512_permute_pd",
-        dual_intrinsic="_mm512_shuffle_i32x4",
-    )
-
-    result = _run_comparer(python_output, rust_output, "--max-diffs", "10")
-    assert result.returncode == 0, (
-        "synthesized dumps differ for avx512/i64 depth=2 identity_pairs "
-        "excluding shared-prefix with unmasked "
-        f"--intrinsic-filter={intrinsic_filter}\n{_combined_output(result)}"
-    )
-
-
-def test_python_and_rust_synthesized_dumps_match_avx2_i64_depth1(
-    tmp_path: Path,
-) -> None:
-    python_output = tmp_path / "python-synthesized.jsonl"
-    rust_output = tmp_path / "rust-synthesized.jsonl"
-
-    subprocess.run(
-        [
-            sys.executable,
-            str(_DUMPER),
-            "synthesized",
-            "--vector-machine",
-            "AVX2",
-            "--datatype",
-            "i64",
-            "--gadget-depth",
-            "1",
-            "--fixture",
-            "identity_pairs",
-            "--max-unique-outputs",
-            "3",
-            "--output",
-            str(python_output),
-        ],
-        cwd=_REPO_ROOT,
-        check=True,
-    )
-    subprocess.run(
-        [
-            "cargo",
-            "run",
-            "-q",
-            "-p",
-            "gadget_synth",
-            "--bin",
-            "dump_gadget_synth",
-            "--",
-            "synthesized",
-            "--arch",
-            "avx2",
-            "--dtype",
-            "i64",
-            "--gadget-depth",
-            "1",
-            "--fixture",
-            "identity_pairs",
-            "--max-unique-outputs",
-            "3",
-            "--output",
-            str(rust_output),
-        ],
-        cwd=_REPO_ROOT,
-        check=True,
-    )
-
-    result = _run_comparer(python_output, rust_output, "--max-diffs", "10")
-    assert result.returncode == 0, (
-        "synthesized dumps differ for avx2/i64 depth=1 identity_pairs\n"
-        f"{_combined_output(result)}"
-    )
-
-
-@pytest.mark.slow
-@pytest.mark.parametrize(
-    ("intrinsic_filter", "single_intrinsic"),
-    [
-        pytest.param(
-            "_mm256_permute_pd,_mm256_shuffle_pd",
-            "_mm256_permute_pd",
-            id="permute_pd-shuffle_pd",
-        ),
-        pytest.param(
-            "_mm256_permutexvar_epi64,_mm256_shuffle_pd",
-            "_mm256_permutexvar_epi64",
-            id="permutexvar_epi64-shuffle_pd",
-        ),
-    ],
-)
-def test_python_and_rust_synthesized_dumps_match_avx2_i64_depth2_non_shared_filtered_mux(
-    tmp_path: Path,
-    intrinsic_filter: str,
-    single_intrinsic: str,
-) -> None:
-    """Representative Task 11 depth-2 parity for mux/K-per-wiring paths.
-
-    Full unfiltered AVX2 i64 depth-2 synthesized parity is deferred because the
-    Python reference dump currently times out. This filtered ratchet keeps the
-    non-shared depth-2 single→dual mux path runnable.
-
-    Run explicitly with:
-
-    uv run pytest tests/test_gadget_synth_dump.py -q -m slow \
-      -k synthesized_dumps_match_avx2_i64_depth2_non_shared_filtered_mux
-    """
-    python_output = tmp_path / "python-synthesized-depth2.jsonl"
-    rust_output = tmp_path / "rust-synthesized-depth2.jsonl"
-
-    subprocess.run(
-        [
-            sys.executable,
-            str(_DUMPER),
-            "synthesized",
-            "--vector-machine",
-            "AVX2",
-            "--datatype",
-            "i64",
-            "--gadget-depth",
-            "2",
-            "--exclude-shared-prefix",
-            "--fixture",
-            "identity_pairs",
-            "--max-unique-outputs",
-            "3",
-            "--intrinsic-filter",
-            intrinsic_filter,
-            "--output",
-            str(python_output),
-        ],
-        cwd=_REPO_ROOT,
-        check=True,
-    )
-    subprocess.run(
-        [
-            "cargo",
-            "run",
-            "-q",
-            "-p",
-            "gadget_synth",
-            "--bin",
-            "dump_gadget_synth",
-            "--",
-            "synthesized",
-            "--arch",
-            "avx2",
-            "--dtype",
-            "i64",
-            "--gadget-depth",
-            "2",
-            "--exclude-shared-prefix",
-            "--fixture",
-            "identity_pairs",
-            "--max-unique-outputs",
-            "3",
-            "--intrinsic-filter",
-            intrinsic_filter,
-            "--output",
-            str(rust_output),
-        ],
-        cwd=_REPO_ROOT,
-        check=True,
-    )
-
-    _assert_saw_single_to_dual_mux_record(
-        _read_jsonl(python_output),
-        single_intrinsic=single_intrinsic,
-        dual_intrinsic="_mm256_shuffle_pd",
-    )
-
-    result = _run_comparer(python_output, rust_output, "--max-diffs", "10")
-    assert result.returncode == 0, (
-        "synthesized dumps differ for avx2/i64 depth=2 identity_pairs "
-        "excluding shared-prefix with "
-        f"--intrinsic-filter={intrinsic_filter}\n{_combined_output(result)}"
-    )
-
-
-@pytest.mark.slow
-def test_python_and_rust_synthesized_dumps_match_avx2_i64_depth2_shared_prefix_filtered(
-    tmp_path: Path,
-) -> None:
-    """Representative shared-prefix depth-2 parity.
-
-    Full unfiltered AVX2 i64 depth-2 synthesized parity remains deferred because
-    the Python reference dump is too slow. This filtered case keeps a runnable
-    ratchet for shared-prefix synthesis.
-
-    Run explicitly with:
-
-    uv run pytest tests/test_gadget_synth_dump.py -q -m slow \
-      -k synthesized_dumps_match_avx2_i64_depth2_shared_prefix_filtered
-    """
-    intrinsic_filter = "_mm256_permute_pd,_mm256_permute2x128_si256"
-    python_output = tmp_path / "python-synthesized-depth2-shared.jsonl"
-    rust_output = tmp_path / "rust-synthesized-depth2-shared.jsonl"
-
-    subprocess.run(
-        [
-            sys.executable,
-            str(_DUMPER),
-            "synthesized",
-            "--vector-machine",
-            "AVX2",
-            "--datatype",
-            "i64",
-            "--gadget-depth",
-            "2",
-            "--fixture",
-            "identity_pairs",
-            "--max-unique-outputs",
-            "1",
-            "--intrinsic-filter",
-            intrinsic_filter,
-            "--output",
-            str(python_output),
-        ],
-        cwd=_REPO_ROOT,
-        check=True,
-    )
-    subprocess.run(
-        [
-            "cargo",
-            "run",
-            "-q",
-            "-p",
-            "gadget_synth",
-            "--bin",
-            "dump_gadget_synth",
-            "--",
-            "synthesized",
-            "--arch",
-            "avx2",
-            "--dtype",
-            "i64",
-            "--gadget-depth",
-            "2",
-            "--fixture",
-            "identity_pairs",
-            "--max-unique-outputs",
-            "1",
-            "--intrinsic-filter",
-            intrinsic_filter,
-            "--output",
-            str(rust_output),
-        ],
-        cwd=_REPO_ROOT,
-        check=True,
-    )
-
-    _assert_saw_shared_prefix_record(
-        _read_jsonl(python_output),
-        prefix_intrinsic="_mm256_permute_pd",
-        tail_intrinsic="_mm256_permute2x128_si256",
-    )
-
-    result = _run_comparer(python_output, rust_output, "--max-diffs", "10")
-    assert result.returncode == 0, (
-        "synthesized dumps differ for avx2/i64 depth=2 identity_pairs "
-        f"with shared-prefix and --intrinsic-filter={intrinsic_filter}\n"
-        f"{_combined_output(result)}"
-    )
-
-
-@pytest.mark.slow
-def test_python_and_rust_synthesized_dumps_match_avx2_i32_depth1(
-    tmp_path: Path,
-) -> None:
-    python_output = tmp_path / "python-synthesized.jsonl"
-    rust_output = tmp_path / "rust-synthesized.jsonl"
-
-    subprocess.run(
-        [
-            sys.executable,
-            str(_DUMPER),
-            "synthesized",
-            "--vector-machine",
-            "AVX2",
-            "--datatype",
-            "i32",
-            "--gadget-depth",
-            "1",
-            "--fixture",
-            "identity_pairs",
-            "--max-unique-outputs",
-            "3",
-            "--output",
-            str(python_output),
-        ],
-        cwd=_REPO_ROOT,
-        check=True,
-    )
-    subprocess.run(
-        [
-            "cargo",
-            "run",
-            "-q",
-            "-p",
-            "gadget_synth",
-            "--bin",
-            "dump_gadget_synth",
-            "--",
-            "synthesized",
-            "--arch",
-            "avx2",
-            "--dtype",
-            "i32",
-            "--gadget-depth",
-            "1",
-            "--fixture",
-            "identity_pairs",
-            "--max-unique-outputs",
-            "3",
-            "--output",
-            str(rust_output),
-        ],
-        cwd=_REPO_ROOT,
-        check=True,
-    )
-
-    result = _run_comparer(python_output, rust_output, "--max-diffs", "10")
-    assert result.returncode == 0, (
-        "synthesized dumps differ for avx2/i32 depth=1 identity_pairs\n"
         f"{_combined_output(result)}"
     )
 

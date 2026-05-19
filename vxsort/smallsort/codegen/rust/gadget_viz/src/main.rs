@@ -45,7 +45,14 @@ impl From<FormatArg> for OutputFormat {
     }
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() {
+    if let Err(error) = run() {
+        eprintln!("error: {error}");
+        std::process::exit(2);
+    }
+}
+
+fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let records = read_jsonl(&args.input)?;
     let selected = select_records(&records, args.index)?;
@@ -56,7 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             format!("{} ({} records)", args.input.display(), selected.len())
         }
     });
-    let rendered = render_records(&selected, args.format.into(), &title);
+    let rendered = render_records(&selected, args.format.into(), &title)?;
 
     if let Some(output) = args.output {
         if let Some(parent) = output.parent() {
