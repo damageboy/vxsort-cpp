@@ -38,6 +38,30 @@ fn zmm_reg_pair_with_unique_values(prefix: &str, solver: &Solver) -> (BV, BV) {
 }
 
 #[test]
+fn test_mm256_shuffle_ps_operand_swap_cannot_reproduce_exact_order() {
+    // This is the property needed by `isomorphic_order=True`: for a fixed
+    // output of inst(a, b, imm), there must be some imm' such that
+    // inst(b, a, imm') produces the exact same vector lane order.
+    //
+    // VSHUFPS does not have that property. With imm=0x44, one 128-bit lane is:
+    //
+    //   shuffle(a, b, 0x44)  = [a0, a1, b0, b1]
+    //   shuffle(b, a, imm')  = [some b, some b, some a, some a]
+    //
+    // The first output lane of the swapped form must come from b, so it cannot
+    // equal a0 for arbitrary/disjoint inputs. Z3 proves no imm' exists.
+    let solver = Solver::new();
+    let (a, b) = ymm_reg_pair_with_unique_values("shuffle_ps_not_order_isomorphic", &solver);
+    let swapped_imm8 = BV::new_const("shuffle_ps_swapped_imm8", 8);
+
+    let output = mm256_shuffle_ps(&a, &b, Imm8::Literal(NULL_SHUFFLE_PS_2VEC_IMM8));
+    let swapped_output = mm256_shuffle_ps(&b, &a, Imm8::Expr(swapped_imm8));
+
+    solver.assert(output.eq(swapped_output));
+    assert_eq!(solver.check(), SatResult::Unsat);
+}
+
+#[test]
 fn test_mm256_shuffle_ps_null_permute_works() {
     let solver = Solver::new();
     let input = ymm_reg("ymm0");
