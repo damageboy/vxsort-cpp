@@ -26,9 +26,18 @@ ctest -J $(nproc)
 
 ```bash
 uv sync                                    # Install dependencies
-uv run pytest                              # Run tests
+uv run pytest                              # Run Python tests
 uv run ruff check .                        # Lint
 uv run python src/bitonic_compiler.py --depth-limit=3 --gadget-depth 1 # Full synthesis (limited depth for speed)
+```
+
+### Rust Codegen crates (in vxsort/smallsort/codegen/)
+
+**Run Rust tests in release mode by default.** Z3-heavy debug builds are slow enough to waste iteration time.
+
+```bash
+cargo fmt --all --check                    # Format check
+cargo test --release -q                    # Run Rust tests in optimized/release mode
 ```
 
 ### Quick integration testing during development
@@ -46,8 +55,9 @@ uv run python src/bitonic_compiler.py --vector-machine AVX2 --datatype i64 \
 
 When you finish working on any given feature please ensure that you don't report success to the user before:
 
-- Running tests with `uv run pytest` and fixing test failures when needed
-- In general, and specifically if tests are added, it is important to ensure the test suite
+- Running Python tests with `uv run pytest` and fixing test failures when needed
+- Running Rust tests with `cargo test --release -q` when Rust code is touched; use release mode by default
+- In general, and specifically if tests are added, it is important to ensure the relevant test suite
   doesn't run for more than 1 minute of wall clock
 - Running `uv run ruff check .` and fixing ruff failures
 - Running `uv run vulture` and inspecting the output, removing dead code that may have resulted from the work
