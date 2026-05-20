@@ -36,6 +36,53 @@ use z3_avx::unpack::{
 
 use crate::types::{Arch, DType, GadgetNode, InputRef, IntrinsicNode, Symbolic, SynthesisError};
 
+// Dual-input intrinsic table summary.
+//
+// `iso` is the exact ordered-output operand-order isomorphism flag carried by
+// IntrinsicNode::isomorphic_order. `Y` means the template generator can use one
+// operand ordering; `N` means it must keep both inst(a,b,...) and inst(b,a,...).
+//
+// +--------+-------+----------------------------------+------+----------+-------+
+// | arch   | dtype | intrinsic                        | iso  | operands | ctrl  |
+// +--------+-------+----------------------------------+------+----------+-------+
+// | AVX2   | i32   | _mm256_shuffle_ps                | N    | a,b      | imm8  |
+// | AVX2   | i32   | _mm256_unpacklo_epi32            | N    | a,b      | none  |
+// | AVX2   | i32   | _mm256_unpackhi_epi32            | N    | a,b      | none  |
+// | AVX2   | i32   | _mm256_permute2x128_si256        | Y    | a,b      | imm8  |
+// | AVX2   | i32   | _mm256_blend_ps                  | Y    | a,b      | imm8  |
+// | AVX2   | i32   | _mm256_alignr_epi8               | N    | a,b      | imm8  |
+// | AVX2   | i64   | _mm256_shuffle_pd                | N    | a,b      | imm8  |
+// | AVX2   | i64   | _mm256_unpacklo_epi64            | N    | a,b      | none  |
+// | AVX2   | i64   | _mm256_unpackhi_epi64            | N    | a,b      | none  |
+// | AVX2   | i64   | _mm256_permute2x128_si256        | Y    | a,b      | imm8  |
+// | AVX2   | i64   | _mm256_blend_pd                  | Y    | a,b      | imm8  |
+// | AVX2   | i64   | _mm256_alignr_epi8               | N    | a,b      | imm8  |
+// | AVX512 | i32   | _mm512_permutex2var_epi32        | Y    | a,b      | opidx |
+// | AVX512 | i32   | _mm512_shuffle_ps                | N    | a,b      | imm8  |
+// | AVX512 | i32   | _mm512_unpacklo_epi32            | N    | a,b      | none  |
+// | AVX512 | i32   | _mm512_unpackhi_epi32            | N    | a,b      | none  |
+// | AVX512 | i32   | _mm512_shuffle_i32x4             | N    | a,b      | imm8  |
+// | AVX512 | i32   | _mm512_alignr_epi32              | N    | a,b      | imm8  |
+// | AVX512 | i32   | _mm512_mask_permutex2var_epi32   | Y    | a,b,k    | opidx |
+// | AVX512 | i32   | _mm512_mask_shuffle_ps           | N    | a,b,k    | imm8  |
+// | AVX512 | i32   | _mm512_mask_unpacklo_epi32       | N    | a,b,k    | none  |
+// | AVX512 | i32   | _mm512_mask_unpackhi_epi32       | N    | a,b,k    | none  |
+// | AVX512 | i32   | _mm512_mask_shuffle_i32x4        | N    | a,b,k    | imm8  |
+// | AVX512 | i32   | _mm512_mask_alignr_epi32         | N    | a,b,k    | imm8  |
+// | AVX512 | i64   | _mm512_permutex2var_epi64        | Y    | a,b      | opidx |
+// | AVX512 | i64   | _mm512_shuffle_pd                | N    | a,b      | imm8  |
+// | AVX512 | i64   | _mm512_unpacklo_epi64            | N    | a,b      | none  |
+// | AVX512 | i64   | _mm512_unpackhi_epi64            | N    | a,b      | none  |
+// | AVX512 | i64   | _mm512_shuffle_i32x4             | N    | a,b      | imm8  |
+// | AVX512 | i64   | _mm512_alignr_epi64              | N    | a,b      | imm8  |
+// | AVX512 | i64   | _mm512_mask_permutex2var_epi64   | Y    | a,b,k    | opidx |
+// | AVX512 | i64   | _mm512_mask_shuffle_pd           | N    | a,b,k    | imm8  |
+// | AVX512 | i64   | _mm512_mask_unpacklo_epi64       | N    | a,b,k    | none  |
+// | AVX512 | i64   | _mm512_mask_unpackhi_epi64       | N    | a,b,k    | none  |
+// | AVX512 | i64   | _mm512_mask_shuffle_i32x4        | N    | a,b,k    | imm8  |
+// | AVX512 | i64   | _mm512_mask_alignr_epi64         | N    | a,b,k    | imm8  |
+// +--------+-------+----------------------------------+------+----------+-------+
+
 pub fn single_input_nodes(
     arch: Arch,
     dtype: DType,
