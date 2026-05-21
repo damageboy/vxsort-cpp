@@ -2,6 +2,10 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use mermaid_rs_renderer::render as render_mermaid_to_svg;
+use rayon::prelude::*;
 use serde_json::Value;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -26,6 +30,9 @@ pub enum VizError {
         index: usize,
         kind: String,
     },
+    MermaidRender {
+        source: String,
+    },
 }
 
 impl std::fmt::Display for VizError {
@@ -42,6 +49,7 @@ impl std::fmt::Display for VizError {
                     "record {index} has kind '{kind}', but gadget_viz only renders template records"
                 )
             }
+            Self::MermaidRender { source } => write!(f, "failed to render Mermaid SVG: {source}"),
         }
     }
 }
@@ -90,11 +98,11 @@ pub fn render_records(
     title: &str,
 ) -> Result<String> {
     ensure_template_records(records)?;
-    Ok(match format {
-        OutputFormat::Mermaid => render_mermaid_document(records),
-        OutputFormat::Markdown => render_markdown_document(records, title),
+    match format {
+        OutputFormat::Mermaid => Ok(render_mermaid_document(records)),
+        OutputFormat::Markdown => Ok(render_markdown_document(records, title)),
         OutputFormat::Html => render_html_document(records, title),
-    })
+    }
 }
 
 fn ensure_template_records(records: &[(usize, Value)]) -> Result<()> {
@@ -137,7 +145,7 @@ fn render_markdown_document(records: &[(usize, Value)], title: &str) -> String {
     out
 }
 
-fn render_html_document(records: &[(usize, Value)], title: &str) -> String {
+fn render_html_document(records: &[(usize, Value)], title: &str) -> Result<String> {
     let mut out = String::new();
     writeln!(out, "<!doctype html>").unwrap();
     writeln!(out, "<html><head><meta charset=\"utf-8\">").unwrap();
@@ -147,25 +155,39 @@ fn render_html_document(records: &[(usize, Value)], title: &str) -> String {
         "<style>body{{font-family:-apple-system,BlinkMacSystemFont,sans-serif;margin:2rem;}}\
          section{{border:1px solid #ddd;border-radius:8px;padding:1rem;margin:1rem 0;}}\
          .meta{{color:#333;font-size:0.9rem;line-height:1.35;}}\
+         .diagram img{{max-width:100%;height:auto;}}\
          pre{{background:#f7f7f7;padding:0.75rem;overflow:auto;}}\
          summary{{cursor:pointer;}}</style>"
     )
     .unwrap();
-    writeln!(
-        out,
-        "<script type=\"module\">import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'; mermaid.initialize({{startOnLoad:true,securityLevel:'loose'}});</script>"
-    )
-    .unwrap();
     writeln!(out, "</head><body>").unwrap();
     writeln!(out, "<h1>{}</h1>", escape_html(title)).unwrap();
-    for (index, record) in records {
+
+    let rendered_diagrams = records
+        .par_iter()
+        .map(|(index, record)| {
+            let mermaid = render_record_mermaid(*index, record);
+            let svg_base64 = render_mermaid_svg_base64(&mermaid)?;
+            Ok((*index, mermaid, svg_base64))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    for ((index, record), (diagram_index, mermaid, svg_base64)) in
+        records.iter().zip(rendered_diagrams)
+    {
+        debug_assert_eq!(*index, diagram_index);
         writeln!(out, "<section>").unwrap();
         writeln!(out, "<h2>Record {index}</h2>").unwrap();
         writeln!(out, "<div class=\"meta\">{}</div>", metadata_html(record)).unwrap();
         writeln!(
             out,
-            "<pre class=\"mermaid\">{}</pre>",
-            escape_html(&render_record_mermaid(*index, record))
+            "<div class=\"diagram\"><img src=\"data:image/svg+xml;base64,{svg_base64}\" alt=\"Record {index} gadget diagram\"></div>"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "<details><summary>Mermaid source</summary><pre>{}</pre></details>",
+            escape_html(&mermaid)
         )
         .unwrap();
         writeln!(
@@ -177,7 +199,14 @@ fn render_html_document(records: &[(usize, Value)], title: &str) -> String {
         writeln!(out, "</section>").unwrap();
     }
     writeln!(out, "</body></html>").unwrap();
-    out
+    Ok(out)
+}
+
+fn render_mermaid_svg_base64(mermaid: &str) -> Result<String> {
+    let svg = render_mermaid_to_svg(mermaid).map_err(|source| VizError::MermaidRender {
+        source: source.to_string(),
+    })?;
+    Ok(BASE64_STANDARD.encode(svg.as_bytes()))
 }
 
 pub fn render_record_mermaid(_index: usize, record: &Value) -> String {

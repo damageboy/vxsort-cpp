@@ -42,9 +42,10 @@ fn cli_writes_html_for_selected_template_record() {
     assert!(status.success());
 
     let html = fs::read_to_string(output).expect("html output");
-    assert!(html.contains("mermaid"));
-    assert!(html.contains("_mm256_permute_pd"));
-    assert!(html.contains("top input"));
+    assert!(html.contains("data:image/svg+xml;base64,"));
+    assert!(html.contains("PHN2Zy"));
+    assert!(!html.contains("cdn.jsdelivr.net/npm/mermaid"));
+    assert!(!html.contains("class=\"mermaid\""));
 }
 
 #[test]

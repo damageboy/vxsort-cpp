@@ -124,7 +124,7 @@ cargo run -q -p gadget_viz -- \
   --output /tmp/gadget-template-0.html
 ```
 
-Open `/tmp/gadget-template-0.html` in a browser. HTML output uses Mermaid from a CDN.
+Open `/tmp/gadget-template-0.html` in a browser. HTML output uses the `mermaid-rs-renderer` library in-process, embeds rendered SVGs as base64 data URIs, and does not load Mermaid in the browser.
 
 ### Render all records to an HTML gallery
 
@@ -149,7 +149,7 @@ Supported formats:
 
 - `mermaid`: raw Mermaid flowchart text.
 - `markdown`: metadata plus fenced Mermaid diagrams.
-- `html`: standalone browser-viewable Mermaid page.
+- `html`: standalone browser-viewable page with pre-rendered inline SVG diagrams.
 
 If `--index N` is omitted, all JSONL records are rendered. `--index` is zero-based. Full depth-2 dumps can contain thousands of records, so prefer `--index` while inspecting individual templates.
 
