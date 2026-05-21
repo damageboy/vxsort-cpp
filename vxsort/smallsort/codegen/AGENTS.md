@@ -53,14 +53,20 @@ uv run python src/bitonic_compiler.py --vector-machine AVX2 --datatype i64 \
 
 ### Post work-item checklist
 
-When you finish working on any given feature please ensure that you don't report success to the user before:
+When you finish working on any given feature, scope verification to the files and languages touched.
+Do not run the full Python test/lint/dead-code toolchain for Rust-only changes, and do not run the
+Rust test suite for Python-only changes. Cross-language checks are only needed when a change affects
+shared behavior, generated artifacts, workspace configuration, or the bridge between the Python and
+Rust implementations.
 
-- Running Python tests with `uv run pytest` and fixing test failures when needed
-- Running Rust tests with `cargo test --release -q` when Rust code is touched; use release mode by default
+- For Python changes: run Python tests with `uv run pytest` when relevant, plus `uv run ruff check .`
+  and `uv run vulture` when Python code is touched. Fix failures or inspect reported dead code.
+- For Rust changes: run Rust tests with `cargo test --release -q` when Rust code is touched; use
+  release mode by default. Run `cargo fmt --all --check` for Rust formatting.
 - In general, and specifically if tests are added, it is important to ensure the relevant test suite
   doesn't run for more than 1 minute of wall clock
-- Running `uv run ruff check .` and fixing ruff failures
-- Running `uv run vulture` and inspecting the output, removing dead code that may have resulted from the work
+- For documentation-only changes, no test suite is required unless the documentation change includes
+  executable examples or generated files.
 
 ## Codegen Architecture
 
