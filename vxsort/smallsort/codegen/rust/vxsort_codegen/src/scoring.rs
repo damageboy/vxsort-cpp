@@ -1,6 +1,11 @@
+use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashSet};
+
 use gadget_synth::PermutationGadget;
 
 use crate::transition_table::{CompletePath, StateTuple, TransitionTable};
+
+pub type AssignedPathKey = Vec<(usize, StateTuple, StateTuple, usize)>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct GadgetCost {
@@ -126,6 +131,27 @@ impl AssignedPath {
     pub fn steps(&self) -> &[AssignedStep] {
         &self.steps
     }
+
+    pub fn as_complete_path(&self) -> CompletePath {
+        self.steps
+            .iter()
+            .map(|step| (step.stage, step.input.clone(), step.output.clone()))
+            .collect()
+    }
+
+    pub fn selection_key(&self) -> AssignedPathKey {
+        self.steps
+            .iter()
+            .map(|step| {
+                (
+                    step.stage,
+                    step.input.clone(),
+                    step.output.clone(),
+                    step.gadget_index,
+                )
+            })
+            .collect()
+    }
 }
 
 pub trait Scorer {
@@ -159,6 +185,84 @@ pub trait Scorer {
         Some(AssignedPath::new(steps))
     }
 
+    fn assign_path_gadgets_k_best(
+        &self,
+        path: &CompletePath,
+        table: &TransitionTable,
+        limit: usize,
+    ) -> Vec<AssignedPath> {
+        if limit == 0 {
+            return Vec::new();
+        }
+        if path.is_empty() {
+            return vec![AssignedPath::new(Vec::new())];
+        }
+
+        let mut choices = Vec::with_capacity(path.len());
+        for (stage, input, output) in path {
+            let Some(gadgets) = table
+                .get_all_transitions(*stage)
+                .get(&(input.clone(), output.clone()))
+            else {
+                return Vec::new();
+            };
+            let mut scored = gadgets
+                .iter()
+                .enumerate()
+                .map(|(gadget_index, gadget)| {
+                    let cost = self.score_gadget(gadget).score();
+                    (gadget_index, gadget.clone(), cost)
+                })
+                .collect::<Vec<_>>();
+            scored.sort_by(|left, right| {
+                left.2
+                    .total_cmp(&right.2)
+                    .then_with(|| left.0.cmp(&right.0))
+            });
+            if scored.is_empty() {
+                return Vec::new();
+            }
+            choices.push(scored);
+        }
+
+        let mut heap = BinaryHeap::new();
+        let mut seen = HashSet::new();
+        let initial = vec![0; choices.len()];
+        let initial_score = assignment_score(&choices, &initial);
+        seen.insert(initial.clone());
+        heap.push(KBestEntry {
+            score: initial_score,
+            serial: 0,
+            indices: initial,
+        });
+
+        let mut next_serial = 1;
+        let mut assigned = Vec::with_capacity(limit);
+        while let Some(entry) = heap.pop() {
+            assigned.push(build_assignment(path, &choices, &entry.indices));
+            if assigned.len() >= limit {
+                break;
+            }
+
+            for dimension in 0..entry.indices.len() {
+                let mut next = entry.indices.clone();
+                next[dimension] += 1;
+                if next[dimension] >= choices[dimension].len() || !seen.insert(next.clone()) {
+                    continue;
+                }
+                let score = assignment_score(&choices, &next);
+                heap.push(KBestEntry {
+                    score,
+                    serial: next_serial,
+                    indices: next,
+                });
+                next_serial += 1;
+            }
+        }
+
+        assigned
+    }
+
     fn score_assigned_path(&self, assigned_path: &AssignedPath) -> PathCost;
 
     fn score_path(&self, path: &CompletePath, table: &TransitionTable) -> PathCost {
@@ -166,6 +270,66 @@ pub trait Scorer {
             .map(|assigned_path| self.score_assigned_path(&assigned_path))
             .unwrap_or_else(|| PathCost::new(0, f64::INFINITY, f64::INFINITY))
     }
+}
+
+#[derive(Clone, Debug)]
+struct KBestEntry {
+    score: f64,
+    serial: usize,
+    indices: Vec<usize>,
+}
+
+impl Eq for KBestEntry {}
+
+impl PartialEq for KBestEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.score.total_cmp(&other.score) == Ordering::Equal && self.serial == other.serial
+    }
+}
+
+impl Ord for KBestEntry {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other
+            .score
+            .total_cmp(&self.score)
+            .then_with(|| other.serial.cmp(&self.serial))
+    }
+}
+
+impl PartialOrd for KBestEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+fn assignment_score(choices: &[Vec<(usize, PermutationGadget, f64)>], indices: &[usize]) -> f64 {
+    indices
+        .iter()
+        .enumerate()
+        .map(|(step, choice)| choices[step][*choice].2)
+        .sum()
+}
+
+fn build_assignment(
+    path: &CompletePath,
+    choices: &[Vec<(usize, PermutationGadget, f64)>],
+    indices: &[usize],
+) -> AssignedPath {
+    let steps = path
+        .iter()
+        .enumerate()
+        .map(|(step_index, (stage, input, output))| {
+            let (gadget_index, gadget, _) = &choices[step_index][indices[step_index]];
+            AssignedStep::new(
+                *stage,
+                input.clone(),
+                output.clone(),
+                *gadget_index,
+                gadget.clone(),
+            )
+        })
+        .collect();
+    AssignedPath::new(steps)
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -191,4 +355,22 @@ impl Scorer for DummyScorer {
             .sum();
         PathCost::new(instruction_count, 10.0, 10.0)
     }
+}
+
+pub fn transition_table_from_assigned_paths(
+    num_stages: usize,
+    assigned_paths: &[AssignedPath],
+) -> TransitionTable {
+    let mut table = TransitionTable::new(num_stages);
+    for assigned_path in assigned_paths {
+        for step in assigned_path.steps() {
+            table.add_transition(
+                step.stage(),
+                &gadget_synth::VectorState::new(step.input().0.clone(), step.input().1.clone()),
+                &gadget_synth::VectorState::new(step.output().0.clone(), step.output().1.clone()),
+                step.gadget().clone(),
+            );
+        }
+    }
+    table
 }

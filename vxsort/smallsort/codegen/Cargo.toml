@@ -5,6 +5,7 @@ members = [
     "rust/gadget_viz",
     "rust/vxsort_codegen",
 ]
+exclude = ["uica"]
 resolver = "3"
 
 [workspace.package]

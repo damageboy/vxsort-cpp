@@ -9,3 +9,9 @@ clap = { version = "4", features = ["derive"] }
 crossterm = "0.29"
 gadget_synth = { path = "../gadget_synth" }
 ratatui = "0.29"
+serde_json = "1"
+uica-core = { path = "../../uica/rust/uica-core", default-features = false }
+uica-data = { path = "../../uica/rust/uica-data" }
+uica-decode-ir = { path = "../../uica/rust/uica-decode-ir" }
+uica-model = { path = "../../uica/rust/uica-model" }
+ureq = "2"

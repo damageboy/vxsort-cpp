@@ -126,7 +126,7 @@ fn test_mm256_permute2x128_si256_zero_lanes() {
     let solver = Solver::new();
     let input = ymm_reg_with_unique_values("ymm0", &solver, 128);
     let output = mm256_permute2x128_si256(&input, &input, Imm8::Literal(0x80), &solver);
-    let expected = BV::from_u64(0, 128).concat(&input.extract(127, 0));
+    let expected = BV::from_u64(0, 128).concat(input.extract(127, 0));
 
     solver.assert(output.eq(expected).not());
     assert_eq!(solver.check(), SatResult::Unsat);

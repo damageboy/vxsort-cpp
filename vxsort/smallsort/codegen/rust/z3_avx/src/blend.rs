@@ -40,10 +40,10 @@ fn generic_blend(a: &BV, b: &BV, imm8: Imm8, element_width: u32, solver: &Solver
     let total_width = 256;
     let num_elements = total_width / element_width;
 
-    if let Imm8::Expr(ref imm) = imm8 {
-        if num_elements < 8 {
-            constrain_high_bits_zero(imm, num_elements, solver);
-        }
+    if let Imm8::Expr(ref imm) = imm8
+        && num_elements < 8
+    {
+        constrain_high_bits_zero(imm, num_elements, solver);
     }
 
     let imm = imm8.to_bv();

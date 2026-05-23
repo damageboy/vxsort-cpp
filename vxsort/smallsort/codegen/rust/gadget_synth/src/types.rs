@@ -50,6 +50,9 @@ pub struct InstructionSpec {
     args: BTreeMap<&'static str, InstructionArg>,
 }
 
+pub type InstructionSortKey = (String, Vec<(String, String)>);
+pub type GadgetSortKey = (Vec<InstructionSortKey>, Vec<InstructionSortKey>);
+
 impl InstructionSpec {
     pub fn new(intrinsic_name: &'static str, args: BTreeMap<&'static str, InstructionArg>) -> Self {
         Self {
@@ -71,6 +74,38 @@ impl InstructionSpec {
 
     pub fn args(&self) -> &BTreeMap<&'static str, InstructionArg> {
         &self.args
+    }
+
+    pub fn sort_key(&self) -> InstructionSortKey {
+        (
+            self.intrinsic_name.to_owned(),
+            self.args
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), instruction_arg_sort_value(value)))
+                .collect(),
+        )
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+struct InstructionSignature {
+    intrinsic_name: &'static str,
+    args: Vec<(&'static str, ResolvedInstructionArg)>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+enum ResolvedInstructionArg {
+    Input(String),
+    U64(u64),
+    BitVec { bits: u32, hex: String },
+    Instruction(Box<InstructionSignature>),
+}
+
+fn instruction_arg_sort_value(value: &InstructionArg) -> String {
+    match value {
+        InstructionArg::Input(name) => name.clone(),
+        InstructionArg::U64(value) => value.to_string(),
+        InstructionArg::BitVec { bits, hex } => format!("bits={bits},hex={hex}"),
     }
 }
 
@@ -103,6 +138,113 @@ impl PermutationGadget {
 
     pub fn validated(&self) -> bool {
         self.validated
+    }
+
+    pub fn sort_key(&self) -> GadgetSortKey {
+        (
+            self.top_instructions
+                .iter()
+                .map(InstructionSpec::sort_key)
+                .collect(),
+            self.bottom_instructions
+                .iter()
+                .map(InstructionSpec::sort_key)
+                .collect(),
+        )
+    }
+
+    pub fn instruction_count(&self) -> usize {
+        let (unified, _, _) = self.unified_instructions();
+        unified.len()
+    }
+
+    pub fn unified_instructions(&self) -> (Vec<InstructionSpec>, isize, isize) {
+        let mut unified = Vec::new();
+        let mut signature_to_index = BTreeMap::new();
+
+        let top_indices = append_unified_chain(
+            &self.top_instructions,
+            &mut unified,
+            &mut signature_to_index,
+        );
+        let bottom_indices = append_unified_chain(
+            &self.bottom_instructions,
+            &mut unified,
+            &mut signature_to_index,
+        );
+
+        let top_output = top_indices.last().copied().map_or(-1, |idx| idx as isize);
+        let bottom_output = bottom_indices
+            .last()
+            .copied()
+            .map_or(-1, |idx| idx as isize);
+
+        (unified, top_output, bottom_output)
+    }
+}
+
+fn append_unified_chain(
+    instructions: &[InstructionSpec],
+    unified: &mut Vec<InstructionSpec>,
+    signature_to_index: &mut BTreeMap<InstructionSignature, usize>,
+) -> Vec<usize> {
+    let mut prior_signatures = Vec::new();
+    let mut indices = Vec::new();
+
+    for instruction in instructions {
+        let signature = instruction_signature(instruction, &prior_signatures);
+        prior_signatures.push(signature.clone());
+        let index = match signature_to_index.get(&signature) {
+            Some(index) => *index,
+            None => {
+                let index = unified.len();
+                signature_to_index.insert(signature, index);
+                unified.push(instruction.clone());
+                index
+            }
+        };
+        indices.push(index);
+    }
+
+    indices
+}
+
+fn instruction_signature(
+    instruction: &InstructionSpec,
+    prior_signatures: &[InstructionSignature],
+) -> InstructionSignature {
+    InstructionSignature {
+        intrinsic_name: instruction.intrinsic_name,
+        args: instruction
+            .args
+            .iter()
+            .map(|(key, value)| (*key, resolved_instruction_arg(value, prior_signatures)))
+            .collect(),
+    }
+}
+
+fn resolved_instruction_arg(
+    value: &InstructionArg,
+    prior_signatures: &[InstructionSignature],
+) -> ResolvedInstructionArg {
+    match value {
+        InstructionArg::Input(name) if name == "prev" => prior_signatures
+            .last()
+            .cloned()
+            .map(|signature| ResolvedInstructionArg::Instruction(Box::new(signature)))
+            .unwrap_or_else(|| ResolvedInstructionArg::Input(name.clone())),
+        InstructionArg::Input(name) if name.starts_with("result_") => name
+            .strip_prefix("result_")
+            .and_then(|suffix| suffix.parse::<usize>().ok())
+            .and_then(|index| prior_signatures.get(index).cloned())
+            .map(|signature| ResolvedInstructionArg::Instruction(Box::new(signature)))
+            .unwrap_or_else(|| ResolvedInstructionArg::Input(name.clone())),
+        InstructionArg::Input(name) => ResolvedInstructionArg::Input(name.clone()),
+        InstructionArg::U64(value) => ResolvedInstructionArg::U64(*value),
+        InstructionArg::BitVec { bits, hex } => ResolvedInstructionArg::BitVec {
+            bits: *bits,
+            hex: hex.clone(),
+        },
     }
 }
 

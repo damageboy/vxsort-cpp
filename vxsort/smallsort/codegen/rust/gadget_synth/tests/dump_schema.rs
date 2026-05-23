@@ -8,6 +8,7 @@ use gadget_synth::{
 };
 use serde_json::{Value, json};
 
+#[allow(dead_code)]
 #[path = "../src/bin/dump_gadget_synth.rs"]
 mod dump_gadget_synth_module;
 

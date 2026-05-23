@@ -34,6 +34,30 @@ fn snapshot_with_gadgets(
     )
 }
 
+fn snapshot_with_workers(
+    stage: usize,
+    attempts: usize,
+    outputs: usize,
+    active_workers: usize,
+    worker_capacity: usize,
+    queued_jobs: usize,
+) -> StageProgressSnapshot {
+    StageProgressSnapshot::with_worker_state(
+        stage,
+        StageStats {
+            attempts,
+            distinct_outputs: outputs,
+            success_rate: 0.0,
+            transition_count: outputs + 1,
+            total_gadgets: outputs + 2,
+        },
+        attempts.max(outputs).max(active_workers + queued_jobs),
+        active_workers,
+        worker_capacity,
+        queued_jobs,
+    )
+}
+
 #[test]
 fn tui_state_updates_wave_metadata_stage_snapshots_and_logs() {
     let mut state = TuiState::new(3);
@@ -157,8 +181,37 @@ fn render_tui_draws_readable_stage_table_headers() {
 
     assert!(rendered.contains("Attempts"));
     assert!(rendered.contains("Unique"));
+    assert!(rendered.contains("Workers"));
+    assert!(rendered.contains("Queued"));
     assert!(rendered.contains("Transitions"));
     assert!(rendered.contains("Valid"));
+}
+
+#[test]
+fn render_tui_draws_active_worker_and_queued_job_counts() {
+    let backend = ratatui::backend::TestBackend::new(150, 28);
+    let mut terminal = ratatui::Terminal::new(backend).expect("test backend should initialize");
+    let mut state = TuiState::new(2);
+
+    state.apply_event(RuntimeEvent::StageUpdated(snapshot_with_workers(
+        1, 10, 2, 3, 4, 17,
+    )));
+
+    terminal
+        .draw(|frame| render_tui(frame, &state))
+        .expect("render should succeed");
+
+    let rendered = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+
+    assert!(rendered.contains("workers 3/4 active"));
+    assert!(rendered.contains("queued 17"));
+    assert!(rendered.contains("3/4"));
 }
 
 #[test]
@@ -310,8 +363,8 @@ fn render_progress_bar_represents_partial_attempts_and_empty_tail() {
 #[test]
 fn stage_progress_bar_width_expands_with_panel_width() {
     assert_eq!(stage_progress_bar_width(50), 12);
-    assert_eq!(stage_progress_bar_width(70), 17);
-    assert_eq!(stage_progress_bar_width(100), 47);
+    assert_eq!(stage_progress_bar_width(70), 12);
+    assert_eq!(stage_progress_bar_width(100), 32);
 }
 
 #[test]

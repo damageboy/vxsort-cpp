@@ -1,23 +1,62 @@
 use std::{
     io::IsTerminal,
+    io::Write,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
     thread,
+    time::Instant,
 };
 
 use clap::Parser;
 use vxsort_codegen::{
-    CliArgs, DryRunSummary, RunConfig, RunSummary, RuntimeUiArg, build_dry_run_summary,
-    build_run_summary, build_run_summary_with_session, parse_run_config,
+    CliArgs, CliCommand, DryRunSummary, FetchUicaDataConfig, RunConfig, RunSummary, RuntimeUiArg,
+    build_dry_run_summary, build_run_summary, build_run_summary_with_session,
+    convert_solution_json_to_asm, fetch_uica_data,
+    instruction_stream::{
+        InstructionBlock, LoweringOptions, ModeledInstruction, lower_solution_paths,
+    },
+    parse_run_config, read_solution_json,
     runtime::{ChannelRuntimeSession, LineRuntimeSession},
     runtime_tui::run_tui_event_loop,
+    uica_scoring::{UiPackScorer, uops_key_for_instruction},
 };
 
 fn main() {
     let args = CliArgs::parse();
+    match &args.command {
+        CliCommand::Solve(_) => {}
+        CliCommand::FetchUicaData(fetch_args) => {
+            let report = exit_on_error(fetch_uica_data(&FetchUicaDataConfig {
+                target_cpus: split_target_cpus(&fetch_args.target_cpu),
+                data_dir: fetch_args.data_dir.clone(),
+                base_url: fetch_args.base_url.clone(),
+            }));
+            println!("fetched uiCA manifest: {}", report.manifest_path.display());
+            for arch in report.arches {
+                println!("fetched uiCA arch pack: {arch}");
+            }
+            return;
+        }
+        CliCommand::JsonToAsm(json_to_asm_args) => {
+            exit_on_error(convert_solution_json_to_asm(
+                &json_to_asm_args.input,
+                &json_to_asm_args.output,
+            ));
+            println!(
+                "wrote solution assembly: {}",
+                json_to_asm_args.output.display()
+            );
+            return;
+        }
+        CliCommand::ScoreJson(score_args) => {
+            exit_on_error(score_solution_json(score_args));
+            return;
+        }
+    }
+
     let config = exit_on_error(parse_run_config(args));
 
     if config.dry_run {
@@ -30,25 +69,127 @@ fn main() {
     print_run_summary(&config, &summary);
 }
 
+fn score_solution_json(args: &vxsort_codegen::ScoreJsonArgs) -> Result<(), String> {
+    let imported = read_solution_json(&args.input)?;
+    let stream = lower_solution_paths(
+        &imported.metadata,
+        &imported.transition_table,
+        &imported.paths,
+        LoweringOptions::default(),
+    );
+    let scorer = UiPackScorer::from_data_dir(&args.uica_data_dir, &args.target_cpu)?;
+    let path_indices = match args.path_index {
+        Some(index) => vec![index],
+        None => (0..stream.blocks.len()).collect(),
+    };
+
+    println!(
+        "score-json: {} paths imported from {}",
+        stream.blocks.len(),
+        args.input.display()
+    );
+    for path_index in path_indices {
+        let block = stream
+            .blocks
+            .get(path_index)
+            .ok_or_else(|| format!("path index {path_index} out of range"))?;
+        let block = scoring_block(block, args.prefix_len);
+        let scored_instruction_count = block
+            .instructions
+            .iter()
+            .filter(|instruction| !instruction.mnemonic.eq_ignore_ascii_case("ret"))
+            .filter(|instruction| !instruction.mnemonic.is_empty())
+            .count();
+
+        println!(
+            "path {path_index}: {} modeled instructions{}",
+            scored_instruction_count,
+            args.prefix_len
+                .map(|prefix_len| format!(" (prefix {prefix_len})"))
+                .unwrap_or_default()
+        );
+        for (instruction_index, instruction) in block
+            .instructions
+            .iter()
+            .filter(|instruction| !instruction.mnemonic.is_empty())
+            .filter(|instruction| !instruction.mnemonic.eq_ignore_ascii_case("ret"))
+            .enumerate()
+        {
+            let key =
+                uops_key_for_instruction(instruction).unwrap_or_else(|| "unsupported".to_owned());
+            println!(
+                "  {instruction_index:02}: {} {:?} -> {key}",
+                instruction.mnemonic, instruction.operands
+            );
+        }
+
+        let rough = scorer.rough_score_block(&block);
+        println!(
+            "path {path_index}: rough score {}, instructions {}",
+            rough.score(),
+            rough.instruction_count()
+        );
+        println!("path {path_index}: starting full uiCA simulation");
+        let _ = std::io::stdout().flush();
+        let started = Instant::now();
+        let full = scorer.full_score_block(&block)?;
+        println!(
+            "path {path_index}: full uiCA score {}, instructions {}, elapsed {:.3}s",
+            full.score(),
+            full.instruction_count(),
+            started.elapsed().as_secs_f64()
+        );
+    }
+
+    Ok(())
+}
+
+fn scoring_block(block: &InstructionBlock, prefix_len: Option<usize>) -> InstructionBlock {
+    let Some(prefix_len) = prefix_len else {
+        return block.clone();
+    };
+    let instructions = block
+        .instructions
+        .iter()
+        .filter(|instruction| !instruction.mnemonic.is_empty())
+        .filter(|instruction| !instruction.mnemonic.eq_ignore_ascii_case("ret"))
+        .take(prefix_len)
+        .cloned()
+        .collect::<Vec<ModeledInstruction>>();
+    InstructionBlock {
+        label: block.label.clone(),
+        instructions,
+    }
+}
+
+fn split_target_cpus(target_cpu: &str) -> Vec<String> {
+    target_cpu
+        .split(',')
+        .map(str::trim)
+        .filter(|cpu| !cpu.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
 fn run_with_runtime_ui(config: &RunConfig) -> RunSummary {
     match config.runtime_ui {
         RuntimeUiArg::None => exit_on_error(build_run_summary(config)),
         RuntimeUiArg::Textual => run_with_textual_runtime(config),
         RuntimeUiArg::Auto => {
             if std::io::stdout().is_terminal() {
-                run_with_textual_runtime(config)
+                run_with_threaded_tui(config)
             } else {
-                exit_on_error(build_run_summary(config))
+                run_with_line_runtime(config)
             }
         }
     }
 }
 
 fn run_with_textual_runtime(config: &RunConfig) -> RunSummary {
-    if std::io::stdout().is_terminal() {
-        return run_with_threaded_tui(config);
-    }
+    run_with_line_runtime(config)
+}
 
+fn run_with_line_runtime(config: &RunConfig) -> RunSummary {
     let mut session = LineRuntimeSession::stdout();
     exit_on_error(build_run_summary_with_session(config, &mut session))
 }

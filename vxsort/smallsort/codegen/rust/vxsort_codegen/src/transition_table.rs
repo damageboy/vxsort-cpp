@@ -155,9 +155,8 @@ impl TransitionTable {
         self.stages[stage]
             .transitions
             .iter()
-            .filter_map(|((input, output), gadgets)| {
-                (input == input_tuple).then(|| (output.clone(), gadgets.clone()))
-            })
+            .filter(|&((input, _), _)| input == input_tuple)
+            .map(|((_, output), gadgets)| (output.clone(), gadgets.clone()))
             .collect()
     }
 
@@ -181,10 +180,8 @@ impl TransitionTable {
         stage_data
             .unique_outputs
             .iter()
-            .filter_map(|(state_tuple, state)| {
-                (!stage_data.forwarded_outputs.contains(state_tuple))
-                    .then(|| (state_tuple.clone(), state.clone()))
-            })
+            .filter(|&(state_tuple, _)| !stage_data.forwarded_outputs.contains(state_tuple))
+            .map(|(state_tuple, state)| (state_tuple.clone(), state.clone()))
             .collect()
     }
 

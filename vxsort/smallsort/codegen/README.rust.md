@@ -8,11 +8,95 @@ This directory contains the Rust ports used by the bitonic super-optimizer work:
 
 Run commands from `vxsort/smallsort/codegen`.
 
+## Fresh checkout quick start
+
+The Rust workspace uses the in-tree `uica/` submodule for Rust uiCA crates.
+
+From a clean checkout:
+
+```bash
+cargo test --release -q -p vxsort_codegen
+
+cargo run -q -p vxsort_codegen -- \
+  fetch-uica-data \
+  --target-cpu SKL
+```
+
+`fetch-uica-data` downloads `manifest.json` and the requested `.uipack` files
+from `https://uica.houmus.org/data` into `uica-data/`. The `uica-data/`
+directory is local cache data and is intentionally ignored by git.
+
+Run a small scored solver pass:
+
+```bash
+cargo run -q -p vxsort_codegen -- \
+  solve \
+  --vector-machine AVX2 \
+  --datatype i64 \
+  --target-cpu SKL \
+  --top-k 5 \
+  --gadget-depth 1 \
+  --max-waves 1 \
+  --wave-attempts 100 \
+  --wave-outputs 5 \
+  --runtime-ui none \
+  --output-path /tmp/vxsort-solutions.json \
+  --asm-output-path /tmp/vxsort-solutions.asm
+```
+
+For scored solving, `--target-cpu` and `--top-k` are required. `--target-cpu`
+must name one or more uiCA manifest architecture keys, matched
+case-insensitively. Missing local `.uipack` data is an error; run
+`fetch-uica-data` for the same CPU first.
+
+By default, final ranking is bounded: the solver keeps the best `10 * top_k`
+rough candidates and re-ranks them with the Rust uiCA simulator.
+
+Multiple targets are comma-separated:
+
+```bash
+cargo run -q -p vxsort_codegen -- \
+  fetch-uica-data \
+  --target-cpu SKL,TGL
+
+cargo run -q -p vxsort_codegen -- \
+  solve \
+  --vector-machine AVX2 \
+  --datatype i64 \
+  --target-cpu SKL,TGL \
+  --top-k 5 \
+  --gadget-depth 1 \
+  --max-waves 1 \
+  --wave-attempts 100 \
+  --wave-outputs 5 \
+  --runtime-ui none \
+  --output-path /tmp/vxsort-solutions.json \
+  --asm-output-path /tmp/vxsort-solutions.asm
+```
+
+With multiple CPUs, outputs are suffixed by target CPU, for example
+`/tmp/vxsort-solutions.SKL.json`, `/tmp/vxsort-solutions.TGL.json`, and matching
+`.asm` files.
+
+Convert an existing exported solution JSON to assembly:
+
+```bash
+cargo run -q -p vxsort_codegen -- \
+  json-to-asm \
+  --input /tmp/vxsort-solutions.json \
+  --output /tmp/vxsort-solutions.asm
+```
+
+`json-to-asm` accepts the Rust solution JSON schema written by `--output-path`.
+It reconstructs the transition table and root-to-leaf solution paths, then uses
+the same assembly lowering/emission path as `--asm-output-path`.
+
 ## Build and test
 
 ```bash
 cargo fmt --all --check
-cargo test -q
+cargo clippy --all-targets --all-features --release -- -D warnings
+cargo test --release -q
 ```
 
 The Rust workspace is rooted at `Cargo.toml`; the crates live under `rust/`.

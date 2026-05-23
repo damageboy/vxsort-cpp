@@ -60,6 +60,28 @@ impl RuntimeSession for StopAfterStageUpdated {
     }
 }
 
+#[derive(Default)]
+struct StopAfterActiveWorkerUpdate {
+    events: Vec<RuntimeEvent>,
+    stop: bool,
+}
+
+impl RuntimeSession for StopAfterActiveWorkerUpdate {
+    fn on_event(&mut self, event: RuntimeEvent) {
+        if matches!(
+            event,
+            RuntimeEvent::StageUpdated(ref snapshot) if snapshot.active_workers() > 0
+        ) {
+            self.stop = true;
+        }
+        self.events.push(event);
+    }
+
+    fn should_stop(&self) -> bool {
+        self.stop
+    }
+}
+
 fn fast_config() -> WaveConfig {
     WaveConfig {
         num_vecs: 2,
@@ -70,6 +92,7 @@ fn fast_config() -> WaveConfig {
         retroactive_input: false,
         top_k: None,
         worker_count: 1,
+        max_unique_outputs: 3,
     }
 }
 
@@ -272,6 +295,30 @@ fn worker_run_emits_stage_progress_during_active_wave() {
     assert!(session.events.iter().any(|event| matches!(
         event,
         RuntimeEvent::StageUpdated(snapshot) if snapshot.stage() == 0 && snapshot.attempts() == 1
+    )));
+}
+
+#[test]
+fn worker_run_reports_active_worker_occupancy_before_results_apply() {
+    let mut engine = WaveEngine::new(WaveConfig {
+        worker_count: 2,
+        ..fast_config()
+    })
+    .expect("wave engine should initialize");
+    let mut session = StopAfterActiveWorkerUpdate::default();
+
+    let result = engine
+        .run_sync_with_session(Some(1), 5, 100, &mut session)
+        .expect("run should complete");
+
+    assert_eq!(result.wave_count(), 1);
+    assert!(session.events.iter().any(|event| matches!(
+        event,
+        RuntimeEvent::StageUpdated(snapshot)
+            if snapshot.stage() == 0
+                && snapshot.active_workers() > 0
+                && snapshot.worker_capacity() == 2
+                && snapshot.queued_jobs() > 0
     )));
 }
 

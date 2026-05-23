@@ -14,6 +14,27 @@ use crate::types::{
 
 const MAX_SUPPORTED_GADGET_DEPTH: u8 = 2;
 
+struct OutputEnumeration<'a> {
+    solver: &'a Solver,
+    graph: &'a GadgetGraph,
+    target_pairs: &'a [(u64, u64)],
+    options: SynthesisOptions,
+    top_output: &'a BV,
+    bottom_output: &'a BV,
+    symbolic_vars: &'a HashMap<String, BV>,
+    symbolic_order: &'a [String],
+    select_vars: &'a BTreeSet<String>,
+}
+
+struct EvaluationContext<'a> {
+    registers: &'a HashMap<&'static str, BV>,
+    solver: &'a Solver,
+    symbolic_vars: &'a mut HashMap<String, BV>,
+    symbolic_order: &'a mut Vec<String>,
+    select_vars: &'a mut BTreeSet<String>,
+    eval_cache: &'a mut HashMap<String, BV>,
+}
+
 pub struct GadgetSynthesizer {
     arch: Arch,
     dtype: DType,
@@ -96,28 +117,21 @@ impl GadgetSynthesizer {
         let mut select_vars = BTreeSet::new();
         let mut eval_cache = HashMap::new();
 
+        let mut eval_context = EvaluationContext {
+            registers: &registers,
+            solver: &solver,
+            symbolic_vars: &mut symbolic_vars,
+            symbolic_order: &mut symbolic_order,
+            select_vars: &mut select_vars,
+            eval_cache: &mut eval_cache,
+        };
+
         let top_output = match &graph.top {
-            Some(node) => self.evaluate_intrinsic_node(
-                node,
-                &registers,
-                &solver,
-                &mut symbolic_vars,
-                &mut symbolic_order,
-                &mut select_vars,
-                &mut eval_cache,
-            )?,
+            Some(node) => self.evaluate_intrinsic_node(node, &mut eval_context)?,
             None => top_reg,
         };
         let bottom_output = match &graph.bottom {
-            Some(node) => self.evaluate_intrinsic_node(
-                node,
-                &registers,
-                &solver,
-                &mut symbolic_vars,
-                &mut symbolic_order,
-                &mut select_vars,
-                &mut eval_cache,
-            )?,
+            Some(node) => self.evaluate_intrinsic_node(node, &mut eval_context)?,
             None => bottom_reg,
         };
 
@@ -129,31 +143,34 @@ impl GadgetSynthesizer {
             options.allow_any_lane_order,
         );
 
-        self.enumerate_outputs(
-            &solver,
+        self.enumerate_outputs(OutputEnumeration {
+            solver: &solver,
             graph,
             target_pairs,
             options,
-            &top_output,
-            &bottom_output,
-            &symbolic_vars,
-            &symbolic_order,
-            &select_vars,
-        )
+            top_output: &top_output,
+            bottom_output: &bottom_output,
+            symbolic_vars: &symbolic_vars,
+            symbolic_order: &symbolic_order,
+            select_vars: &select_vars,
+        })
     }
 
     fn enumerate_outputs(
         &self,
-        solver: &Solver,
-        graph: &GadgetGraph,
-        target_pairs: &[(u64, u64)],
-        options: SynthesisOptions,
-        top_output: &BV,
-        bottom_output: &BV,
-        symbolic_vars: &HashMap<String, BV>,
-        symbolic_order: &[String],
-        select_vars: &BTreeSet<String>,
+        enumeration: OutputEnumeration<'_>,
     ) -> Result<Vec<(PermutationGadget, VectorState)>, SynthesisError> {
+        let OutputEnumeration {
+            solver,
+            graph,
+            target_pairs,
+            options,
+            top_output,
+            bottom_output,
+            symbolic_vars,
+            symbolic_order,
+            select_vars,
+        } = enumeration;
         let assertions = solver.get_assertions();
         let mut results = Vec::new();
 
@@ -498,37 +515,20 @@ impl GadgetSynthesizer {
     fn evaluate_intrinsic_node(
         &self,
         node: &IntrinsicNode,
-        registers: &HashMap<&'static str, BV>,
-        solver: &Solver,
-        symbolic_vars: &mut HashMap<String, BV>,
-        symbolic_order: &mut Vec<String>,
-        select_vars: &mut BTreeSet<String>,
-        eval_cache: &mut HashMap<String, BV>,
+        context: &mut EvaluationContext<'_>,
     ) -> Result<BV, SynthesisError> {
         let cache_key = intrinsic_node_key(node);
-        if let Some(cached) = eval_cache.get(&cache_key) {
+        if let Some(cached) = context.eval_cache.get(&cache_key) {
             return Ok(cached.clone());
         }
 
         let mut args = BTreeMap::new();
         for (key, operand) in &node.operands {
-            args.insert(
-                *key,
-                self.evaluate_graph_node(
-                    operand,
-                    node.name,
-                    registers,
-                    solver,
-                    symbolic_vars,
-                    symbolic_order,
-                    select_vars,
-                    eval_cache,
-                )?,
-            );
+            args.insert(*key, self.evaluate_graph_node(operand, node.name, context)?);
         }
-        let result = dispatch_intrinsic(node.name, &args, solver)?;
-        apply_mux_pruning(node, symbolic_vars, solver)?;
-        eval_cache.insert(cache_key, result.clone());
+        let result = dispatch_intrinsic(node.name, &args, context.solver)?;
+        apply_mux_pruning(node, context.symbolic_vars, context.solver)?;
+        context.eval_cache.insert(cache_key, result.clone());
         Ok(result)
     }
 
@@ -536,16 +536,12 @@ impl GadgetSynthesizer {
         &self,
         node: &GadgetNode,
         parent_intrinsic: &'static str,
-        registers: &HashMap<&'static str, BV>,
-        solver: &Solver,
-        symbolic_vars: &mut HashMap<String, BV>,
-        symbolic_order: &mut Vec<String>,
-        select_vars: &mut BTreeSet<String>,
-        eval_cache: &mut HashMap<String, BV>,
+        context: &mut EvaluationContext<'_>,
     ) -> Result<BV, SynthesisError> {
         match node {
             GadgetNode::Input(input) => {
-                registers
+                context
+                    .registers
                     .get(input.name)
                     .cloned()
                     .ok_or(SynthesisError::MissingOperand {
@@ -553,28 +549,13 @@ impl GadgetSynthesizer {
                         operand: input.name,
                     })
             }
-            GadgetNode::Symbolic(symbolic) => {
-                Ok(symbolic_bv(symbolic, symbolic_vars, symbolic_order))
-            }
-            GadgetNode::Mux(mux) => self.evaluate_mux_node(
-                mux,
-                parent_intrinsic,
-                registers,
-                solver,
-                symbolic_vars,
-                symbolic_order,
-                select_vars,
-                eval_cache,
-            ),
-            GadgetNode::Intrinsic(child) => self.evaluate_intrinsic_node(
-                child,
-                registers,
-                solver,
-                symbolic_vars,
-                symbolic_order,
-                select_vars,
-                eval_cache,
-            ),
+            GadgetNode::Symbolic(symbolic) => Ok(symbolic_bv(
+                symbolic,
+                context.symbolic_vars,
+                context.symbolic_order,
+            )),
+            GadgetNode::Mux(mux) => self.evaluate_mux_node(mux, parent_intrinsic, context),
+            GadgetNode::Intrinsic(child) => self.evaluate_intrinsic_node(child, context),
         }
     }
 
@@ -582,36 +563,29 @@ impl GadgetSynthesizer {
         &self,
         mux: &MuxNode,
         parent_intrinsic: &'static str,
-        registers: &HashMap<&'static str, BV>,
-        solver: &Solver,
-        symbolic_vars: &mut HashMap<String, BV>,
-        symbolic_order: &mut Vec<String>,
-        select_vars: &mut BTreeSet<String>,
-        eval_cache: &mut HashMap<String, BV>,
+        context: &mut EvaluationContext<'_>,
     ) -> Result<BV, SynthesisError> {
         let select_name = mux_select_solver_name(&mux.select);
-        select_vars.insert(select_name.clone());
-        let select = symbolic_bv_named(&mux.select, select_name, symbolic_vars, symbolic_order);
+        context.select_vars.insert(select_name.clone());
+        let select = symbolic_bv_named(
+            &mux.select,
+            select_name,
+            context.symbolic_vars,
+            context.symbolic_order,
+        );
         let Some(last_source_idx) = mux.sources.len().checked_sub(1) else {
             return Err(SynthesisError::ModelMissingValue(format!(
                 "mux '{}' has no sources",
                 mux.select.name
             )));
         };
-        solver.assert(select.bvule(BV::from_u64(last_source_idx as u64, select.get_size())));
+        context
+            .solver
+            .assert(select.bvule(BV::from_u64(last_source_idx as u64, select.get_size())));
 
         let mut sources = Vec::with_capacity(mux.sources.len());
         for source in &mux.sources {
-            sources.push(self.evaluate_graph_node(
-                source,
-                parent_intrinsic,
-                registers,
-                solver,
-                symbolic_vars,
-                symbolic_order,
-                select_vars,
-                eval_cache,
-            )?);
+            sources.push(self.evaluate_graph_node(source, parent_intrinsic, context)?);
         }
 
         let mut result = sources[last_source_idx].clone();

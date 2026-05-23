@@ -30,6 +30,7 @@ fn fast_config() -> WaveConfig {
         retroactive_input: false,
         top_k: None,
         worker_count: 1,
+        max_unique_outputs: 3,
     }
 }
 
@@ -323,6 +324,31 @@ fn worker_pool_stops_applying_results_after_output_budget() {
     assert_eq!(
         parallel.transition_table().get_all_transitions(0),
         sequential.transition_table().get_all_transitions(0)
+    );
+}
+
+#[test]
+fn run_stage_sync_respects_max_unique_outputs_per_candidate() {
+    let mut one_output = WaveEngine::new(WaveConfig {
+        max_unique_outputs: 1,
+        ..fast_config()
+    })
+    .expect("wave engine should initialize");
+    let mut default_outputs =
+        WaveEngine::new(fast_config()).expect("wave engine should initialize");
+    let candidate_count =
+        one_output.shallow_candidates().len() + one_output.deep_candidates().len();
+
+    one_output
+        .run_stage_sync(0, candidate_count, usize::MAX)
+        .expect("stage run should complete with one output per candidate");
+    default_outputs
+        .run_stage_sync(0, candidate_count, usize::MAX)
+        .expect("stage run should complete with default output count");
+
+    assert!(
+        default_outputs.transition_table().unique_output_count(0)
+            > one_output.transition_table().unique_output_count(0)
     );
 }
 

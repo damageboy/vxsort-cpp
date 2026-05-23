@@ -348,11 +348,13 @@ pub fn dual_input_nodes(
                 "_mm512_mask_permutex2var_epi32",
                 a.clone(),
                 b.clone(),
-                format!("ctrl_m_permutex2var_{tag}"),
-                512,
-                format!("k_mask_permutex2var_{tag}"),
-                16,
-                true,
+                MaskedDualCtrlSpec {
+                    ctrl_name: format!("ctrl_m_permutex2var_{tag}"),
+                    ctrl_bits: 512,
+                    mask_name: format!("k_mask_permutex2var_{tag}"),
+                    mask_bits: 16,
+                    isomorphic_order: true,
+                },
             ),
             masked_dual_imm(
                 "_mm512_mask_shuffle_ps",
@@ -434,11 +436,13 @@ pub fn dual_input_nodes(
                 "_mm512_mask_permutex2var_epi64",
                 a.clone(),
                 b.clone(),
-                format!("ctrl_m_permutex2var_{tag}"),
-                512,
-                format!("k_mask_permutex2var_{tag}"),
-                8,
-                true,
+                MaskedDualCtrlSpec {
+                    ctrl_name: format!("ctrl_m_permutex2var_{tag}"),
+                    ctrl_bits: 512,
+                    mask_name: format!("k_mask_permutex2var_{tag}"),
+                    mask_bits: 8,
+                    isomorphic_order: true,
+                },
             ),
             masked_dual_imm(
                 "_mm512_mask_shuffle_pd",
@@ -1019,25 +1023,29 @@ fn masked_dual_imm(
     }
 }
 
-fn masked_dual_ctrl(
-    name: &'static str,
-    a: GadgetNode,
-    b: GadgetNode,
+struct MaskedDualCtrlSpec {
     ctrl_name: String,
     ctrl_bits: u32,
     mask_name: String,
     mask_bits: u32,
     isomorphic_order: bool,
+}
+
+fn masked_dual_ctrl(
+    name: &'static str,
+    a: GadgetNode,
+    b: GadgetNode,
+    spec: MaskedDualCtrlSpec,
 ) -> IntrinsicNode {
     IntrinsicNode {
         name,
         operands: vec![
             ("a", a),
-            ("k", symbolic(mask_name, mask_bits)),
-            ("op_idx", symbolic(ctrl_name, ctrl_bits)),
+            ("k", symbolic(spec.mask_name, spec.mask_bits)),
+            ("op_idx", symbolic(spec.ctrl_name, spec.ctrl_bits)),
             ("b", b),
         ],
-        isomorphic_order,
+        isomorphic_order: spec.isomorphic_order,
     }
 }
 
@@ -1046,7 +1054,6 @@ mod tests {
     use super::*;
 
     use z3::SatResult;
-    use z3::ast::Ast;
 
     const MASKED_AVX512_INTRINSICS: &[&str] = &[
         "_mm512_mask_permutexvar_epi32",

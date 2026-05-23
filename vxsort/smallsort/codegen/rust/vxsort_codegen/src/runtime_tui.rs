@@ -48,6 +48,7 @@ pub struct TuiState {
     search_exhausted: bool,
     scored_paths: usize,
     best_score: Option<f64>,
+    current_phase: String,
     log_lines: Vec<String>,
     cancel_requested: bool,
 }
@@ -106,6 +107,7 @@ impl TuiState {
             search_exhausted: false,
             scored_paths: 0,
             best_score: None,
+            current_phase: "starting".to_owned(),
             log_lines: Vec::new(),
             cancel_requested: false,
         }
@@ -120,7 +122,18 @@ impl TuiState {
             RuntimeEvent::RunStarted { stage_count } => {
                 *self = Self::new(stage_count);
                 self.run_started_at = Some(now);
+                self.current_phase = "rough search".to_owned();
                 self.push_log(format!("run started ({stage_count} stages)"));
+            }
+            RuntimeEvent::TargetStarted {
+                target_cpu,
+                rough_candidate_limit,
+                final_top_k,
+            } => {
+                self.current_phase = format!("rough search {target_cpu}");
+                self.push_log(format!(
+                    "target {target_cpu}: rough candidates {rough_candidate_limit}, final top-k {final_top_k}"
+                ));
             }
             RuntimeEvent::WaveStarted { wave, target_stage } => {
                 self.current_wave = Some(wave);
@@ -152,6 +165,86 @@ impl TuiState {
                     "wave {wave} finished: target stage {target_stage}, attempts {attempts}, valid {valid_outputs}, new outputs {new_outputs}, discovered paths {discovered_paths}, scored paths {scored_paths}"
                 ));
             }
+            RuntimeEvent::RoughSearchFinished {
+                target_cpu,
+                wave_count,
+                search_exhausted,
+                rough_candidate_count,
+                best_rough_score,
+            } => {
+                self.wave_count = wave_count;
+                self.search_exhausted = search_exhausted;
+                self.scored_paths = rough_candidate_count;
+                self.best_score = best_rough_score;
+                self.current_phase = format!("final scoring {target_cpu}");
+                self.push_log(format!(
+                    "rough search finished for {target_cpu}: waves {wave_count}, exhausted {search_exhausted}, candidates {rough_candidate_count}"
+                ));
+            }
+            RuntimeEvent::FullScoringStarted {
+                target_cpu,
+                candidate_count,
+                final_top_k,
+            } => {
+                self.current_phase = format!("final scoring {target_cpu}");
+                self.push_log(format!(
+                    "final scoring started for {target_cpu}: {candidate_count} candidates, keeping {final_top_k}"
+                ));
+            }
+            RuntimeEvent::FullScoringCandidateStarted {
+                target_cpu,
+                candidate_index,
+                candidate_count,
+                rough_score,
+            } => {
+                self.current_phase =
+                    format!("final scoring {target_cpu} {candidate_index}/{candidate_count}");
+                self.push_log(format!(
+                    "final scoring {target_cpu} candidate {candidate_index}/{candidate_count}, rough score {rough_score}"
+                ));
+            }
+            RuntimeEvent::FullScoringProgress {
+                target_cpu,
+                scored_count,
+                candidate_count,
+                best_score,
+            } => {
+                self.scored_paths = scored_count;
+                self.best_score = best_score;
+                self.current_phase =
+                    format!("final scoring {target_cpu} {scored_count}/{candidate_count}");
+                self.push_log(format!(
+                    "final scoring progress for {target_cpu}: {scored_count}/{candidate_count}"
+                ));
+            }
+            RuntimeEvent::FullScoringFinished {
+                target_cpu,
+                scored_count,
+                kept_count,
+                best_score,
+            } => {
+                self.scored_paths = kept_count;
+                self.best_score = best_score;
+                self.current_phase = format!("export {target_cpu}");
+                self.push_log(format!(
+                    "final scoring finished for {target_cpu}: scored {scored_count}, kept {kept_count}"
+                ));
+            }
+            RuntimeEvent::ExportStarted {
+                target_cpu,
+                kind,
+                path,
+            } => {
+                self.current_phase = format!("export {target_cpu}");
+                self.push_log(format!("writing {kind} for {target_cpu}: {path}"));
+            }
+            RuntimeEvent::ExportFinished {
+                target_cpu,
+                kind,
+                path,
+            } => {
+                self.push_log(format!("wrote {kind} for {target_cpu}: {path}"));
+            }
             RuntimeEvent::RunFinished {
                 wave_count,
                 search_exhausted,
@@ -162,6 +255,7 @@ impl TuiState {
                 self.search_exhausted = search_exhausted;
                 self.scored_paths = scored_paths;
                 self.best_score = best_score;
+                self.current_phase = "finished".to_owned();
                 self.push_log(format!(
                     "run finished: waves {wave_count}, exhausted {search_exhausted}, scored paths {scored_paths}"
                 ));
@@ -183,6 +277,27 @@ impl TuiState {
 
     pub fn total_gadget_completion_rate(&self) -> Option<f64> {
         self.total_gadget_completion_rate
+    }
+
+    pub fn active_worker_count(&self) -> usize {
+        self.stage_snapshots
+            .iter()
+            .map(StageProgressSnapshot::active_workers)
+            .sum()
+    }
+
+    pub fn worker_capacity(&self) -> usize {
+        self.stage_snapshots
+            .iter()
+            .map(StageProgressSnapshot::worker_capacity)
+            .sum()
+    }
+
+    pub fn queued_job_count(&self) -> usize {
+        self.stage_snapshots
+            .iter()
+            .map(StageProgressSnapshot::queued_jobs)
+            .sum()
     }
 
     fn refresh_total_gadget_completion_rate(&mut self, now: Instant) {
@@ -236,6 +351,10 @@ impl TuiState {
 
     pub fn best_score(&self) -> Option<f64> {
         self.best_score
+    }
+
+    pub fn current_phase(&self) -> &str {
+        &self.current_phase
     }
 
     pub fn log_lines(&self) -> &[String] {
@@ -491,9 +610,13 @@ fn render_summary(frame: &mut Frame<'_>, area: Rect, state: &TuiState) {
             Span::raw(format!(" | {target} | stages {}", state.stage_count())),
         ]),
         Line::from(format!(
-            "scored paths {} | best score {} | completed waves {} | exhausted {}",
+            "phase {} | scored paths {} | best score {} | workers {}/{} active | queued {} | completed waves {} | exhausted {}",
+            state.current_phase(),
             state.scored_paths(),
             best_score,
+            state.active_worker_count(),
+            state.worker_capacity(),
+            state.queued_job_count(),
             state.wave_count(),
             state.search_exhausted()
         )),
@@ -530,6 +653,12 @@ fn render_stage_table(frame: &mut Frame<'_>, area: Rect, state: &TuiState) {
             )),
             right_cell(snapshot.attempts().to_string()),
             right_cell(snapshot.distinct_outputs().to_string()),
+            right_cell(format!(
+                "{}/{}",
+                snapshot.active_workers(),
+                snapshot.worker_capacity()
+            )),
+            right_cell(snapshot.queued_jobs().to_string()),
             right_cell(snapshot.transition_count().to_string()),
             right_cell(snapshot.total_gadgets().to_string()),
         ])
@@ -543,6 +672,8 @@ fn render_stage_table(frame: &mut Frame<'_>, area: Rect, state: &TuiState) {
             Constraint::Min((progress_bar_width + 2) as u16),
             Constraint::Length(8),
             Constraint::Length(6),
+            Constraint::Length(7),
+            Constraint::Length(6),
             Constraint::Length(11),
             Constraint::Length(5),
         ],
@@ -554,6 +685,8 @@ fn render_stage_table(frame: &mut Frame<'_>, area: Rect, state: &TuiState) {
             Cell::new("Progress"),
             right_cell("Attempts"),
             right_cell("Unique"),
+            right_cell("Workers"),
+            right_cell("Queued"),
             right_cell("Transitions"),
             right_cell("Valid"),
         ])
@@ -580,8 +713,8 @@ fn right_cell<'a>(content: impl Into<Line<'a>>) -> Cell<'a> {
 
 pub fn stage_progress_bar_width(panel_width: u16) -> usize {
     const BORDER_WIDTH: u16 = 2;
-    const COLUMN_SPACING: u16 = 6;
-    const FIXED_COLUMNS: u16 = 5 + 8 + 8 + 6 + 11 + 5;
+    const COLUMN_SPACING: u16 = 8;
+    const FIXED_COLUMNS: u16 = 5 + 8 + 8 + 6 + 7 + 6 + 11 + 5;
     const BRACKETS: u16 = 2;
     const MIN_BAR_WIDTH: u16 = 12;
 

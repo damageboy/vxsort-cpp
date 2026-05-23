@@ -1,0 +1,3 @@
+[submodule "vxsort/smallsort/codegen/uica"]
+	path = vxsort/smallsort/codegen/uica
+	url = https://github.com/damageboy/uiCA.git

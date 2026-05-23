@@ -11,7 +11,7 @@ use gadget_synth::{
 
 use crate::bitonic_sorter::{BitonicSorter, BitonicStage};
 use crate::runtime::{NullRuntimeSession, RuntimeEvent, RuntimeSession, StageProgressSnapshot};
-use crate::scoring::{AssignedPath, DummyScorer, PathCost, Scorer};
+use crate::scoring::{AssignedPath, AssignedPathKey, DummyScorer, PathCost, Scorer};
 use crate::transition_table::{CompletePath, StateTuple, TransitionTable};
 use crate::{ArchArg, DTypeArg};
 
@@ -25,11 +25,12 @@ pub struct WaveConfig {
     pub retroactive_input: bool,
     pub top_k: Option<usize>,
     pub worker_count: usize,
+    pub max_unique_outputs: usize,
 }
 
-#[derive(Clone, Debug, PartialEq)]
 pub struct WaveEngine {
     config: WaveConfig,
+    scorer: Box<dyn Scorer>,
     elements_per_vector: usize,
     total_elements: usize,
     stages: Vec<BitonicStage>,
@@ -37,11 +38,14 @@ pub struct WaveEngine {
     deep_candidates: Vec<GadgetGraph>,
     transition_table: TransitionTable,
     stage_progress_totals: Vec<usize>,
+    active_worker_counts: Vec<usize>,
+    worker_capacities: Vec<usize>,
+    queued_job_counts: Vec<usize>,
     initial_state: VectorState,
     wave_count: usize,
     exhausted_stages: HashSet<usize>,
     stalled_stages: HashSet<usize>,
-    scored_path_keys: HashSet<CompletePath>,
+    scored_path_keys: HashSet<AssignedPathKey>,
     scored_paths: Vec<ScoredPath>,
     next_scored_path_order: usize,
 }
@@ -55,6 +59,20 @@ pub struct ScoredPath {
 }
 
 impl ScoredPath {
+    pub fn new(
+        path: CompletePath,
+        assigned_path: AssignedPath,
+        cost: PathCost,
+        discovery_order: usize,
+    ) -> Self {
+        Self {
+            path,
+            assigned_path,
+            cost,
+            discovery_order,
+        }
+    }
+
     pub fn path(&self) -> &CompletePath {
         &self.path
     }
@@ -69,6 +87,15 @@ impl ScoredPath {
 
     pub fn discovery_order(&self) -> usize {
         self.discovery_order
+    }
+
+    pub fn with_cost(&self, cost: PathCost) -> Self {
+        Self {
+            path: self.path.clone(),
+            assigned_path: self.assigned_path.clone(),
+            cost,
+            discovery_order: self.discovery_order,
+        }
     }
 }
 
@@ -255,6 +282,13 @@ impl WaveSearchResult {
 
 impl WaveEngine {
     pub fn new(config: WaveConfig) -> Result<Self, SynthesisError> {
+        Self::with_scorer(config, Box::new(DummyScorer))
+    }
+
+    pub fn with_scorer(
+        config: WaveConfig,
+        scorer: Box<dyn Scorer>,
+    ) -> Result<Self, SynthesisError> {
         let config = WaveConfig {
             worker_count: config.worker_count.max(1),
             ..config
@@ -301,6 +335,7 @@ impl WaveEngine {
 
         Ok(Self {
             config,
+            scorer,
             elements_per_vector,
             total_elements,
             stages,
@@ -308,6 +343,9 @@ impl WaveEngine {
             deep_candidates,
             transition_table,
             stage_progress_totals: vec![0; stage_count],
+            active_worker_counts: vec![0; stage_count],
+            worker_capacities: vec![0; stage_count],
+            queued_job_counts: vec![0; stage_count],
             initial_state,
             wave_count: 0,
             exhausted_stages,
@@ -393,24 +431,27 @@ impl WaveEngine {
             input_tuple,
             output_tuple,
             max_paths,
-            Some(&self.scored_path_keys),
+            None,
         );
         let mut discovered = 0;
-        let scorer = DummyScorer;
         for path in paths {
-            if !self.scored_path_keys.contains(&path) {
-                let Some(assigned_path) = scorer.assign_path_gadgets(&path, &self.transition_table)
-                else {
+            let limit = self.config.top_k.unwrap_or(1);
+            for assigned_path in
+                self.scorer
+                    .assign_path_gadgets_k_best(&path, &self.transition_table, limit)
+            {
+                let key = assigned_path.selection_key();
+                if self.scored_path_keys.contains(&key) {
                     continue;
-                };
-                let cost = scorer.score_assigned_path(&assigned_path);
-                self.scored_path_keys.insert(path.clone());
-                self.scored_paths.push(ScoredPath {
-                    path,
+                }
+                let cost = self.scorer.score_assigned_path(&assigned_path);
+                self.scored_path_keys.insert(key);
+                self.scored_paths.push(ScoredPath::new(
+                    path.clone(),
                     assigned_path,
                     cost,
-                    discovery_order: self.next_scored_path_order,
-                });
+                    self.next_scored_path_order,
+                ));
                 self.next_scored_path_order += 1;
                 self.retain_top_k_paths();
                 discovered += 1;
@@ -797,11 +838,26 @@ impl WaveEngine {
     }
 
     fn stage_progress_snapshot(&self, stage: usize) -> StageProgressSnapshot {
-        StageProgressSnapshot::with_progress_total(
+        StageProgressSnapshot::with_worker_state(
             stage,
             self.transition_table.stage_stats(stage),
             self.stage_progress_totals[stage],
+            self.active_worker_counts[stage],
+            self.worker_capacities[stage],
+            self.queued_job_counts[stage],
         )
+    }
+
+    fn set_stage_worker_state(
+        &mut self,
+        stage: usize,
+        active_workers: usize,
+        worker_capacity: usize,
+        queued_jobs: usize,
+    ) {
+        self.active_worker_counts[stage] = active_workers;
+        self.worker_capacities[stage] = worker_capacity;
+        self.queued_job_counts[stage] = queued_jobs;
     }
 
     fn search_exhausted(&self) -> bool {
@@ -863,6 +919,8 @@ impl WaveEngine {
         let jobs = self.make_jobs(stage, input_states, Some(attempt_budget));
         self.stage_progress_totals[stage] =
             self.stage_progress_totals[stage].max(attempts_at_start + jobs.len());
+        let worker_capacity = usize::from(!jobs.is_empty());
+        self.set_stage_worker_state(stage, 0, worker_capacity, jobs.len());
         self.emit_stage_update(stage, session);
         if self.config.worker_count > 1 && jobs.len() > 1 {
             return self.run_stage_worker_pool(
@@ -878,21 +936,27 @@ impl WaveEngine {
         let mut valid_outputs = 0;
         let mut new_transitions = 0;
 
-        for job in jobs {
+        let job_count = jobs.len();
+        for (job_index, job) in jobs.into_iter().enumerate() {
             if session.should_stop() {
                 break;
             }
             if attempts >= attempt_budget {
                 break;
             }
+            self.set_stage_worker_state(stage, 1, 1, job_count.saturating_sub(job_index + 1));
+            self.emit_stage_update(stage, session);
             let result = self.execute_job(&job)?;
             attempts += result.attempts();
             valid_outputs += result.valid_output_count();
             new_transitions += result.new_transition_count();
+            self.set_stage_worker_state(stage, 0, 1, job_count.saturating_sub(job_index + 1));
             self.emit_stage_update(stage, session);
 
             let new_outputs = self.transition_table.unique_output_count(stage) - outputs_at_start;
             if new_outputs >= output_budget {
+                self.set_stage_worker_state(stage, 0, 0, 0);
+                self.emit_stage_update(stage, session);
                 return Ok(StageRunResult {
                     stage,
                     attempts,
@@ -902,6 +966,8 @@ impl WaveEngine {
                 });
             }
         }
+        self.set_stage_worker_state(stage, 0, 0, 0);
+        self.emit_stage_update(stage, session);
 
         Ok(StageRunResult {
             stage,
@@ -969,6 +1035,13 @@ impl WaveEngine {
                 next_to_send += 1;
                 in_flight += 1;
             }
+            self.set_stage_worker_state(
+                stage,
+                in_flight,
+                worker_count,
+                jobs.len().saturating_sub(next_to_send),
+            );
+            self.emit_stage_update(stage, session);
             if session.should_stop() {
                 stop_sending = true;
                 stop_applying = true;
@@ -980,6 +1053,12 @@ impl WaveEngine {
                     .recv()
                     .expect("worker result channel should stay open while jobs are in flight");
                 in_flight -= 1;
+                self.set_stage_worker_state(
+                    stage,
+                    in_flight,
+                    worker_count,
+                    jobs.len().saturating_sub(next_to_send),
+                );
 
                 buffered.insert(index, result);
 
@@ -1030,11 +1109,21 @@ impl WaveEngine {
                     next_to_send += 1;
                     in_flight += 1;
                 }
+                self.set_stage_worker_state(
+                    stage,
+                    in_flight,
+                    worker_count,
+                    jobs.len().saturating_sub(next_to_send),
+                );
+                self.emit_stage_update(stage, session);
             }
 
             for _ in 0..worker_count {
                 let _ = job_sender.send(None);
             }
+
+            self.set_stage_worker_state(stage, 0, 0, 0);
+            self.emit_stage_update(stage, session);
 
             if let Some(error) = first_error {
                 return Err(error);
@@ -1129,7 +1218,7 @@ fn synthesize_worker_job(
         &worker_job.job.input_state,
         &worker_job.target_pairs,
         SynthesisOptions {
-            max_unique_outputs: 3,
+            max_unique_outputs: config.max_unique_outputs,
             allow_any_lane_order,
         },
     )?;
