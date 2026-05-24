@@ -11,7 +11,7 @@ use uica_data::{
     record_view_to_instruction_record,
 };
 use uica_decode_ir::DecodedInstruction;
-use uica_model::Invocation;
+use uica_model::{Invocation, ReportBundle};
 
 use crate::instruction_stream::{InstructionBlock, ModeledInstruction, Operand, Register};
 use crate::instruction_stream::{LoweringOptions, lower_solution_paths};
@@ -26,6 +26,14 @@ pub struct UiPackScorer {
     runtime: MappedUiPackRuntime,
     catalog: BTreeMap<String, InstructionRecord>,
     solution_metadata: Option<SolutionJsonMetadata>,
+}
+
+pub struct UiBlockSimulation {
+    pub instruction_count: usize,
+    pub throughput_cycles_per_iteration: f64,
+    pub cycles_simulated: u32,
+    pub iterations_simulated: u32,
+    pub reports: Option<ReportBundle>,
 }
 
 impl UiPackScorer {
@@ -118,7 +126,11 @@ impl UiPackScorer {
         PathCost::new(instruction_count, score, score)
     }
 
-    pub fn full_score_block(&self, block: &InstructionBlock) -> Result<PathCost, String> {
+    pub fn simulate_block(
+        &self,
+        block: &InstructionBlock,
+        include_reports: bool,
+    ) -> Result<UiBlockSimulation, String> {
         let mut decoded = Vec::new();
         let mut ip = 0u64;
         for instruction in &block.instructions {
@@ -134,7 +146,13 @@ impl UiPackScorer {
         }
 
         if decoded.is_empty() {
-            return Ok(PathCost::new(0, 0.0, 0.0));
+            return Ok(UiBlockSimulation {
+                instruction_count: 0,
+                throughput_cycles_per_iteration: 0.0,
+                cycles_simulated: 0,
+                iterations_simulated: 0,
+                reports: None,
+            });
         }
 
         let invocation = Invocation {
@@ -146,17 +164,32 @@ impl UiPackScorer {
             invocation: &invocation,
             uipack: UipackSource::Runtime(&self.runtime),
             options: SimulationOptions {
-                include_reports: false,
+                include_reports,
                 include_trace: false,
                 ..SimulationOptions::default()
             },
         })?;
-        let score = output
+        let throughput_cycles_per_iteration = output
             .result
             .summary
             .throughput_cycles_per_iteration
             .unwrap_or(f64::INFINITY);
-        Ok(PathCost::new(decoded.len() as u32, score, score))
+        Ok(UiBlockSimulation {
+            instruction_count: decoded.len(),
+            throughput_cycles_per_iteration,
+            cycles_simulated: output.result.summary.cycles_simulated,
+            iterations_simulated: output.result.summary.iterations_simulated,
+            reports: output.reports,
+        })
+    }
+
+    pub fn full_score_block(&self, block: &InstructionBlock) -> Result<PathCost, String> {
+        let simulation = self.simulate_block(block, false)?;
+        Ok(PathCost::new(
+            simulation.instruction_count as u32,
+            simulation.throughput_cycles_per_iteration,
+            simulation.throughput_cycles_per_iteration,
+        ))
     }
 
     fn decoded_instruction(

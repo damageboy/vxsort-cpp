@@ -136,6 +136,66 @@ fn uops_key_uses_register_width_kmask_immediate_and_memory_classes() {
 }
 
 #[test]
+fn uops_key_covers_compare_swap_instruction_forms() {
+    let cmpgtq = ModeledInstruction {
+        mnemonic: "vpcmpgtq".to_owned(),
+        operands: vec![
+            Operand::Register(Register::Ymm(4)),
+            Operand::Register(Register::Ymm(0)),
+            Operand::Register(Register::Ymm(1)),
+        ],
+        comment: None,
+    };
+    assert_eq!(
+        uops_key_for_instruction(&cmpgtq).as_deref(),
+        Some("VPCMPGTQ (YMM, YMM, YMM)")
+    );
+
+    let blendvpd = ModeledInstruction {
+        mnemonic: "vblendvpd".to_owned(),
+        operands: vec![
+            Operand::Register(Register::Ymm(2)),
+            Operand::Register(Register::Ymm(1)),
+            Operand::Register(Register::Ymm(0)),
+            Operand::Register(Register::Ymm(4)),
+        ],
+        comment: None,
+    };
+    assert_eq!(
+        uops_key_for_instruction(&blendvpd).as_deref(),
+        Some("VBLENDVPD (YMM, YMM, YMM, YMM)")
+    );
+
+    let minsw = ModeledInstruction {
+        mnemonic: "vpminsw".to_owned(),
+        operands: vec![
+            Operand::Register(Register::Zmm(2)),
+            Operand::Register(Register::Zmm(0)),
+            Operand::Register(Register::Zmm(1)),
+        ],
+        comment: None,
+    };
+    assert_eq!(
+        uops_key_for_instruction(&minsw).as_deref(),
+        Some("VPMINSW (ZMM, ZMM, ZMM)")
+    );
+
+    let maxsq = ModeledInstruction {
+        mnemonic: "vpmaxsq".to_owned(),
+        operands: vec![
+            Operand::Register(Register::Zmm(3)),
+            Operand::Register(Register::Zmm(0)),
+            Operand::Register(Register::Zmm(1)),
+        ],
+        comment: None,
+    };
+    assert_eq!(
+        uops_key_for_instruction(&maxsq).as_deref(),
+        Some("VPMAXSQ (ZMM, ZMM, ZMM)")
+    );
+}
+
+#[test]
 fn rough_score_uses_uipack_issue_and_port_pressure_and_ignores_ret() {
     let scorer = scorer_with_records(vec![record(
         "VPERMQ_YMMqq_YMMqq_IMMb",
@@ -217,6 +277,25 @@ fn full_score_synthetic_decoded_ir_returns_finite_uica_throughput() {
         "expected finite cost, got {cost:?}"
     );
     assert!(cost.score() > 0.0);
+}
+
+#[test]
+fn simulate_block_with_reports_renders_trace_html() {
+    let scorer = scorer_with_records(vec![record(
+        "VPERMQ_YMMqq_YMMqq_IMMb",
+        "VPERMQ (YMM, YMM, I8)",
+        &[("5", 1)],
+    )]);
+
+    let simulation = scorer
+        .simulate_block(&block(vec![vpermq_instruction()]), true)
+        .expect("uiCA report simulation should succeed");
+
+    assert!(simulation.throughput_cycles_per_iteration.is_finite());
+    assert!(simulation.reports.is_some());
+    let html = uica_core::report::render_trace_html(&simulation.reports.unwrap().trace)
+        .expect("trace html should render");
+    assert!(html.contains("Execution Trace"));
 }
 
 #[test]

@@ -2,7 +2,10 @@ use std::collections::BTreeMap;
 
 use gadget_synth::{InstructionArg, InstructionSpec, PermutationGadget, VectorState};
 use serde_json::Value;
-use vxsort_codegen::json_exporter::{SolutionJsonMetadata, solution_json_for_paths};
+use vxsort_codegen::json_exporter::{
+    SolutionJsonMetadata, solution_json_for_assigned_paths, solution_json_for_paths,
+};
+use vxsort_codegen::scoring::{AssignedPath, AssignedStep};
 use vxsort_codegen::transition_table::TransitionTable;
 use vxsort_codegen::{ArchArg, DTypeArg};
 
@@ -86,4 +89,46 @@ fn solution_json_can_represent_empty_runs() {
 
     assert_eq!(json["roots"], serde_json::json!([]));
     assert_eq!(json["nodes"], serde_json::json!({}));
+}
+
+#[test]
+fn assigned_solution_json_records_concrete_gadget_indices() {
+    let input = state(&[1, 3, 5, 7], &[2, 4, 6, 8]);
+    let output = state(&[1, 2, 5, 6], &[3, 4, 7, 8]);
+    let identity = PermutationGadget::new(Vec::new(), Vec::new());
+    let permute = PermutationGadget::new(
+        vec![inst(
+            "_mm256_permute4x64_epi64",
+            &[
+                ("a", InstructionArg::Input("top".to_owned())),
+                ("imm8", InstructionArg::U64(0x4e)),
+            ],
+        )],
+        Vec::new(),
+    );
+    let path_a = AssignedPath::new(vec![AssignedStep::new(
+        0,
+        input.as_tuple(),
+        output.as_tuple(),
+        0,
+        identity,
+    )]);
+    let path_b = AssignedPath::new(vec![AssignedStep::new(
+        0,
+        input.as_tuple(),
+        output.as_tuple(),
+        1,
+        permute,
+    )]);
+
+    let json = solution_json_for_assigned_paths(&metadata(), &[path_a, path_b]);
+
+    assert_eq!(json["nodes"]["n0"]["gadget_count"], 2);
+    assert_eq!(
+        json["paths"],
+        serde_json::json!([
+            {"steps": [{"node_id": "n0", "gadget_index": 0}]},
+            {"steps": [{"node_id": "n0", "gadget_index": 1}]}
+        ])
+    );
 }

@@ -1,15 +1,16 @@
 use std::path::{Path, PathBuf};
 
-use asm_exporter::write_solution_asm_for_paths;
+use asm_exporter::{write_solution_asm_for_assigned_paths, write_solution_asm_for_paths};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use instruction_stream::{LoweringOptions, lower_solution_paths};
-use json_exporter::{SolutionJsonMetadata, write_solution_json_for_paths};
+use json_exporter::{SolutionJsonMetadata, write_solution_json_for_assigned_paths};
 pub use json_importer::{ImportedSolutionJson, read_solution_json, solution_json_from_value};
 use runtime::{NullRuntimeSession, RuntimeEvent, RuntimeSession};
 use scoring::{PathCost, transition_table_from_assigned_paths};
 pub use uica_data_fetch::{
     FetchUicaDataConfig, FetchUicaDataReport, default_uica_data_base_url, fetch_uica_data,
 };
+pub use uica_estimator::{EstimateOptions, EstimateReport, EstimateResult, estimate_solution_json};
 use uica_scoring::UiPackScorer;
 use wave_engine::{ScoredPath, WaveConfig, WaveEngine};
 
@@ -23,7 +24,9 @@ pub mod runtime_tui;
 pub mod scoring;
 pub mod transition_table;
 pub mod uica_data_fetch;
+pub mod uica_estimator;
 pub mod uica_scoring;
+pub mod verifier;
 pub mod wave_engine;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -34,8 +37,14 @@ pub enum ArchArg {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub enum DTypeArg {
+    I16,
+    U16,
     I32,
+    U32,
+    F32,
     I64,
+    U64,
+    F64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -57,9 +66,27 @@ impl ArchArg {
 impl DTypeArg {
     pub fn cli_name(self) -> &'static str {
         match self {
+            DTypeArg::I16 => "i16",
+            DTypeArg::U16 => "u16",
             DTypeArg::I32 => "i32",
+            DTypeArg::U32 => "u32",
+            DTypeArg::F32 => "f32",
             DTypeArg::I64 => "i64",
+            DTypeArg::U64 => "u64",
+            DTypeArg::F64 => "f64",
         }
+    }
+
+    pub fn element_bits(self) -> usize {
+        match self {
+            DTypeArg::I16 | DTypeArg::U16 => 16,
+            DTypeArg::I32 | DTypeArg::U32 | DTypeArg::F32 => 32,
+            DTypeArg::I64 | DTypeArg::U64 | DTypeArg::F64 => 64,
+        }
+    }
+
+    pub fn is_synthesis_supported(self) -> bool {
+        matches!(self, DTypeArg::I32 | DTypeArg::I64)
     }
 }
 
@@ -132,9 +159,6 @@ pub struct SolveArgs {
     #[arg(long = "output-path")]
     pub output_path: Option<PathBuf>,
 
-    #[arg(long = "asm-output-path")]
-    pub asm_output_path: Option<PathBuf>,
-
     #[arg(long = "uica-data-dir", default_value = "uica-data")]
     pub uica_data_dir: PathBuf,
 
@@ -157,9 +181,44 @@ pub struct SolveArgs {
     pub dry_run: bool,
 }
 
+#[derive(Debug, Args)]
+pub struct VerifyJsonArgs {
+    #[arg(long = "input")]
+    pub input: PathBuf,
+
+    #[arg(long = "top-k")]
+    pub top_k: Option<usize>,
+
+    #[arg(long = "workers", default_value_t = 0)]
+    pub workers: usize,
+}
+
+#[derive(Debug, Args)]
+pub struct EstimateJsonArgs {
+    #[arg(long = "input")]
+    pub input: PathBuf,
+
+    #[arg(long = "target-cpu")]
+    pub target_cpu: String,
+
+    #[arg(long = "uica-data-dir", default_value = "uica-data")]
+    pub uica_data_dir: PathBuf,
+
+    #[arg(long = "top-k")]
+    pub top_k: Option<usize>,
+
+    #[arg(long = "output-dir")]
+    pub output_dir: Option<PathBuf>,
+
+    #[arg(long = "no-traces")]
+    pub no_traces: bool,
+}
+
 #[derive(Debug, Subcommand)]
 pub enum CliCommand {
     Solve(SolveArgs),
+    Verify(VerifyJsonArgs),
+    Estimate(EstimateJsonArgs),
     FetchUicaData(FetchUicaDataArgs),
     JsonToAsm(JsonToAsmArgs),
     ScoreJson(ScoreJsonArgs),
@@ -218,7 +277,6 @@ pub struct RunConfig {
     pub target_cpus: Vec<String>,
     pub estimate: bool,
     pub output_path: Option<PathBuf>,
-    pub asm_output_path: Option<PathBuf>,
     pub uica_data_dir: PathBuf,
     pub max_waves: Option<usize>,
     pub wave_attempts: usize,
@@ -278,6 +336,12 @@ pub fn parse_run_config(args: CliArgs) -> Result<RunConfig, String> {
     let dtype = solve_args
         .dtype
         .ok_or_else(|| "--datatype is required".to_owned())?;
+    if !dtype.is_synthesis_supported() {
+        return Err(format!(
+            "Rust solve currently supports only i32 and i64; {} is supported for JSON/ASM export only",
+            dtype.cli_name()
+        ));
+    }
 
     let target_cpus: Vec<String> = solve_args
         .target_cpu
@@ -309,7 +373,6 @@ pub fn parse_run_config(args: CliArgs) -> Result<RunConfig, String> {
         target_cpus,
         estimate: solve_args.estimate,
         output_path: solve_args.output_path,
-        asm_output_path: solve_args.asm_output_path,
         uica_data_dir: solve_args.uica_data_dir,
         max_waves: solve_args.max_waves,
         wave_attempts: solve_args.wave_attempts,
@@ -341,19 +404,47 @@ pub fn convert_solution_json_to_asm(
     output_path: impl AsRef<Path>,
 ) -> Result<(), String> {
     let imported = read_solution_json(input_path)?;
-    write_solution_asm_for_paths(
-        output_path,
-        &imported.metadata,
-        &imported.transition_table,
-        &imported.paths,
-    )
-    .map_err(|error| format!("failed to write solution assembly: {error}"))
+    if imported.assigned_paths.is_empty() {
+        write_solution_asm_for_paths(
+            output_path,
+            &imported.metadata,
+            &imported.transition_table,
+            &imported.paths,
+        )
+        .map_err(|error| format!("failed to write solution assembly: {error}"))
+    } else {
+        write_solution_asm_for_assigned_paths(
+            output_path,
+            &imported.metadata,
+            &imported.assigned_paths,
+        )
+        .map_err(|error| format!("failed to write solution assembly: {error}"))
+    }
+}
+
+pub fn verify_solution_json(
+    input_path: impl AsRef<Path>,
+    top_k: Option<usize>,
+    workers: usize,
+) -> Result<verifier::VerificationReport, String> {
+    let report =
+        verifier::verify_solution_json(input_path, verifier::VerifyJsonOptions { top_k, workers })?;
+    if report.failure_count() > 0 {
+        return Err(verifier::format_verification_failures(&report));
+    }
+    Ok(report)
 }
 
 pub fn build_run_summary_with_session(
     config: &RunConfig,
     session: &mut impl RuntimeSession,
 ) -> Result<RunSummary, String> {
+    if !config.dtype.is_synthesis_supported() {
+        return Err(format!(
+            "Rust solve currently supports only i32 and i64; {} is supported for JSON/ASM export only",
+            config.dtype.cli_name()
+        ));
+    }
     let metadata = SolutionJsonMetadata {
         natural_order: config.natural_order,
         arch: config.arch,
@@ -423,14 +514,6 @@ pub fn build_run_summary_with_session(
             .iter()
             .map(|scored_path| scored_path.assigned_path().clone())
             .collect::<Vec<_>>();
-        let export_table = transition_table_from_assigned_paths(
-            engine.transition_table().stages().len(),
-            &assigned_paths,
-        );
-        let complete_paths = assigned_paths
-            .iter()
-            .map(|assigned_path| assigned_path.as_complete_path())
-            .collect::<Vec<_>>();
 
         if let Some(output_path) = &config.output_path {
             let output_path = output_path_for_target(output_path, target_cpu, multi_target);
@@ -439,27 +522,11 @@ pub fn build_run_summary_with_session(
                 kind: "JSON".to_owned(),
                 path: output_path.display().to_string(),
             });
-            write_solution_json_for_paths(&output_path, &metadata, &export_table, &complete_paths)
+            write_solution_json_for_assigned_paths(&output_path, &metadata, &assigned_paths)
                 .map_err(|error| format!("failed to write solution JSON: {error}"))?;
             session.on_event(RuntimeEvent::ExportFinished {
                 target_cpu: target_cpu.clone(),
                 kind: "JSON".to_owned(),
-                path: output_path.display().to_string(),
-            });
-        }
-
-        if let Some(output_path) = &config.asm_output_path {
-            let output_path = output_path_for_target(output_path, target_cpu, multi_target);
-            session.on_event(RuntimeEvent::ExportStarted {
-                target_cpu: target_cpu.clone(),
-                kind: "ASM".to_owned(),
-                path: output_path.display().to_string(),
-            });
-            write_solution_asm_for_paths(&output_path, &metadata, &export_table, &complete_paths)
-                .map_err(|error| format!("failed to write solution assembly: {error}"))?;
-            session.on_event(RuntimeEvent::ExportFinished {
-                target_cpu: target_cpu.clone(),
-                kind: "ASM".to_owned(),
                 path: output_path.display().to_string(),
             });
         }

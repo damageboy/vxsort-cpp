@@ -1641,6 +1641,8 @@ dependencies = [
  "uica-decode-ir",
  "uica-model",
  "ureq",
+ "z3",
+ "z3_avx",
 ]
 
 [[package]]

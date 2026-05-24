@@ -16,9 +16,10 @@ use std::path::Path;
 
 use crate::instruction_stream::{
     ConstantData, ConstantKey, InstructionStream, LoweringOptions, ModeledInstruction, Operand,
-    control_vector_elements, lower_solution_paths,
+    control_vector_elements, lower_assigned_paths, lower_solution_paths,
 };
 use crate::json_exporter::SolutionJsonMetadata;
+use crate::scoring::AssignedPath;
 use crate::transition_table::{CompletePath, TransitionTable};
 
 // ---------------------------------------------------------------------------
@@ -34,6 +35,15 @@ pub fn write_solution_asm_for_paths(
 ) -> Result<(), io::Error> {
     let mut file = File::create(output_path)?;
     file.write_all(generate_solution_asm_for_paths(metadata, table, paths).as_bytes())
+}
+
+pub fn write_solution_asm_for_assigned_paths(
+    output_path: impl AsRef<Path>,
+    metadata: &SolutionJsonMetadata,
+    paths: &[AssignedPath],
+) -> Result<(), io::Error> {
+    let mut file = File::create(output_path)?;
+    file.write_all(generate_solution_asm_for_assigned_paths(metadata, paths).as_bytes())
 }
 
 /// Generate NASM/Intel-syntax assembly for `paths` and return it as a
@@ -52,6 +62,14 @@ pub fn generate_solution_asm_for_paths(
     paths: &[CompletePath],
 ) -> String {
     let stream = lower_solution_paths(metadata, table, paths, LoweringOptions::default());
+    render_asm(&stream, metadata)
+}
+
+pub fn generate_solution_asm_for_assigned_paths(
+    metadata: &SolutionJsonMetadata,
+    paths: &[AssignedPath],
+) -> String {
+    let stream = lower_assigned_paths(metadata, paths, LoweringOptions::default());
     render_asm(&stream, metadata)
 }
 

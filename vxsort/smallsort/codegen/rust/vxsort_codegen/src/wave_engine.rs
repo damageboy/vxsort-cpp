@@ -1284,10 +1284,7 @@ fn register_bits(arch: ArchArg) -> usize {
 }
 
 fn dtype_bits(dtype: DTypeArg) -> usize {
-    match dtype {
-        DTypeArg::I32 => 32,
-        DTypeArg::I64 => 64,
-    }
+    dtype.element_bits()
 }
 
 fn to_synth_arch(arch: ArchArg) -> SynthArch {
@@ -1301,5 +1298,8 @@ fn to_synth_dtype(dtype: DTypeArg) -> SynthDType {
     match dtype {
         DTypeArg::I32 => SynthDType::I32,
         DTypeArg::I64 => SynthDType::I64,
+        _ => unreachable!(
+            "unsupported synthesis dtype should be rejected before constructing WaveEngine"
+        ),
     }
 }

@@ -2,7 +2,7 @@ use clap::Parser;
 use std::fs;
 use std::process::Command;
 use vxsort_codegen::{
-    ArchArg, CliArgs, DTypeArg, FetchUicaDataConfig, RunConfig, RuntimeUiArg,
+    ArchArg, CliArgs, CliCommand, DTypeArg, FetchUicaDataConfig, RunConfig, RuntimeUiArg,
     build_dry_run_summary, build_run_summary, fetch_uica_data, parse_run_config,
 };
 
@@ -58,7 +58,6 @@ fn parses_python_compatible_solve_flags() {
             target_cpus: vec!["ZEN4".to_owned(), "ADL-P".to_owned()],
             estimate: true,
             output_path: None,
-            asm_output_path: None,
             uica_data_dir: std::path::PathBuf::from("uica-data"),
             max_waves: Some(1),
             wave_attempts: 100,
@@ -68,6 +67,165 @@ fn parses_python_compatible_solve_flags() {
             dry_run: false,
         }
     );
+}
+
+#[test]
+fn verify_parses_json_input_top_k_and_workers() {
+    let args = CliArgs::try_parse_from([
+        "vxsort-codegen",
+        "verify",
+        "--input",
+        "fixture.json",
+        "--top-k",
+        "1",
+        "--workers",
+        "1",
+    ])
+    .expect("verify flags should parse");
+
+    let CliCommand::Verify(verify_args) = args.command else {
+        panic!("expected verify command");
+    };
+
+    assert_eq!(verify_args.input, std::path::PathBuf::from("fixture.json"));
+    assert_eq!(verify_args.top_k, Some(1));
+    assert_eq!(verify_args.workers, 1);
+}
+
+#[test]
+fn verify_defaults_workers_to_zero() {
+    let args = CliArgs::try_parse_from(["vxsort-codegen", "verify", "--input", "fixture.json"])
+        .expect("verify input should parse");
+
+    let CliCommand::Verify(verify_args) = args.command else {
+        panic!("expected verify command");
+    };
+
+    assert_eq!(verify_args.top_k, None);
+    assert_eq!(verify_args.workers, 0);
+}
+
+#[test]
+fn estimate_parses_json_input_target_top_k_and_output_dir() {
+    let args = CliArgs::try_parse_from([
+        "vxsort-codegen",
+        "estimate",
+        "--input",
+        "solutions.json",
+        "--target-cpu",
+        "SKL",
+        "--top-k",
+        "5",
+        "--output-dir",
+        "/tmp/vxsort-uica-estimate",
+    ])
+    .expect("estimate flags should parse");
+
+    let CliCommand::Estimate(estimate_args) = args.command else {
+        panic!("expected estimate command");
+    };
+
+    assert_eq!(
+        estimate_args.input,
+        std::path::PathBuf::from("solutions.json")
+    );
+    assert_eq!(estimate_args.target_cpu, "SKL");
+    assert_eq!(
+        estimate_args.uica_data_dir,
+        std::path::PathBuf::from("uica-data")
+    );
+    assert_eq!(estimate_args.top_k, Some(5));
+    assert_eq!(
+        estimate_args.output_dir,
+        Some(std::path::PathBuf::from("/tmp/vxsort-uica-estimate"))
+    );
+    assert!(!estimate_args.no_traces);
+}
+
+#[test]
+fn binary_verify_requires_input() {
+    let output = Command::new(env!("CARGO_BIN_EXE_vxsort_codegen"))
+        .arg("verify")
+        .output()
+        .expect("binary should run");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
+    assert!(stderr.contains("--input"), "stderr was:\n{stderr}");
+}
+
+#[test]
+fn binary_verify_succeeds_for_unique_gadget_json() {
+    let input_path = write_unique_first_gadget_fixture("fixture_2xAVX2_i64.json");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_vxsort_codegen"))
+        .args([
+            "verify",
+            "--input",
+            input_path.to_str().expect("fixture path should be utf-8"),
+            "--top-k",
+            "1",
+            "--workers",
+            "1",
+        ])
+        .output()
+        .expect("binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("All 1 paths verified correct."));
+
+    let _ = fs::remove_file(input_path);
+}
+
+#[test]
+fn binary_verify_fails_for_incomplete_json_path() {
+    let input_path = temp_named_output_path("verify-incomplete", "json");
+    fs::write(&input_path, incomplete_sort_json()).expect("fixture should be written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_vxsort_codegen"))
+        .args([
+            "verify",
+            "--input",
+            input_path.to_str().expect("fixture path should be utf-8"),
+            "--top-k",
+            "1",
+            "--workers",
+            "1",
+        ])
+        .output()
+        .expect("binary should run");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
+    assert!(
+        stderr.contains("VERIFICATION FAILED"),
+        "stderr was:\n{stderr}"
+    );
+    assert!(stderr.contains("Path 1"), "stderr was:\n{stderr}");
+
+    let _ = fs::remove_file(input_path);
+}
+
+#[test]
+fn solve_rejects_export_only_primitive_aliases() {
+    let args = CliArgs::try_parse_from([
+        "vxsort-codegen",
+        "solve",
+        "--vector-machine",
+        "AVX2",
+        "--datatype",
+        "u64",
+        "--gadget-depth",
+        "1",
+        "--dry-run",
+    ])
+    .expect("u64 should be accepted by CLI metadata parser");
+
+    let error = parse_run_config(args).expect_err("u64 solve is not supported yet");
+
+    assert!(error.contains("supports only i32 and i64"));
+    assert!(error.contains("u64"));
 }
 
 #[test]
@@ -261,13 +419,13 @@ fn binary_writes_python_compatible_json_to_output_path() {
     assert_eq!(json["num_vecs"], 2);
     assert_eq!(json["roots"], serde_json::json!([]));
     assert_eq!(json["nodes"], serde_json::json!({}));
+    assert_eq!(json["paths"], serde_json::json!([]));
 
     let _ = fs::remove_file(output_path);
 }
 
 #[test]
-fn binary_writes_rust_assembly_to_asm_output_path() {
-    let data_dir = fixture_uica_data_dir("asm-output");
+fn binary_solve_rejects_direct_asm_output_path() {
     let output_path = temp_output_path("asm");
     let _ = fs::remove_file(&output_path);
 
@@ -282,26 +440,18 @@ fn binary_writes_rust_assembly_to_asm_output_path() {
             "SKL",
             "--top-k",
             "1",
-            "--uica-data-dir",
-            data_dir.to_str().expect("fixture path should be utf-8"),
-            "--max-waves",
-            "1",
-            "--wave-attempts",
-            "0",
-            "--wave-outputs",
-            "1",
-            "--runtime-ui",
-            "none",
             "--asm-output-path",
             output_path.to_str().expect("temp path should be utf-8"),
         ])
         .output()
         .expect("binary should run");
 
-    assert!(output.status.success());
-    let contents = fs::read_to_string(&output_path).expect("output asm should be written");
-    assert!(contents.contains("section .text"));
-    assert!(contents.contains("; no complete solutions exported"));
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
+    assert!(
+        stderr.contains("--asm-output-path"),
+        "stderr was:\n{stderr}"
+    );
 
     let _ = fs::remove_file(output_path);
 }
@@ -327,6 +477,13 @@ fn binary_converts_solution_json_to_assembly() {
       "output_state": {"top": [1, 2, 5, 6], "bottom": [3, 4, 7, 8]},
       "gadgets": [
         {
+          "top_instructions": [],
+          "bottom_instructions": [],
+          "unified_instructions": [],
+          "top_output_index": -1,
+          "bottom_output_index": -1
+        },
+        {
           "top_instructions": [
             {
               "name": "_mm256_permute4x64_epi64",
@@ -344,10 +501,17 @@ fn binary_converts_solution_json_to_assembly() {
           "bottom_output_index": -1
         }
       ],
-      "gadget_count": 1,
+      "gadget_count": 2,
       "children": []
     }
-  }
+  },
+  "paths": [
+    {
+      "steps": [
+        {"node_id": "n0", "gadget_index": 1}
+      ]
+    }
+  ]
 }"#,
     )
     .expect("input JSON should be written");
@@ -374,21 +538,63 @@ fn binary_converts_solution_json_to_assembly() {
 }
 
 #[test]
+fn binary_estimate_prints_ranked_table_and_writes_trace() {
+    let input_path = temp_named_output_path("estimate-input", "json");
+    let output_dir =
+        std::env::temp_dir().join(format!("vxsort-estimate-output-{}", std::process::id()));
+    let data_dir = fixture_uica_data_dir_with_vpermq("estimate");
+    let _ = fs::remove_file(&input_path);
+    let _ = fs::remove_dir_all(&output_dir);
+    fs::write(&input_path, estimate_vpermq_json()).expect("estimate JSON should be written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_vxsort_codegen"))
+        .args([
+            "estimate",
+            "--input",
+            input_path.to_str().expect("input path should be utf-8"),
+            "--target-cpu",
+            "SKL",
+            "--uica-data-dir",
+            data_dir.to_str().expect("fixture path should be utf-8"),
+            "--output-dir",
+            output_dir.to_str().expect("output path should be utf-8"),
+        ])
+        .output()
+        .expect("binary should run");
+
+    assert!(
+        output.status.success(),
+        "stderr was:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("uiCA estimate"), "stdout was:\n{stdout}");
+    assert!(stdout.contains("target cpu: SKL"), "stdout was:\n{stdout}");
+    assert!(stdout.contains("output dir:"), "stdout was:\n{stdout}");
+    assert!(stdout.contains("Rank"), "stdout was:\n{stdout}");
+    assert!(stdout.contains("TP"), "stdout was:\n{stdout}");
+    assert!(stdout.contains("Trace"), "stdout was:\n{stdout}");
+    assert!(
+        stdout.contains("solution_000_trace.html"),
+        "stdout was:\n{stdout}"
+    );
+    assert!(output_dir.join("solution_000_trace.html").is_file());
+
+    let _ = fs::remove_file(input_path);
+    let _ = fs::remove_dir_all(output_dir);
+    let _ = fs::remove_dir_all(data_dir);
+}
+
+#[test]
 fn binary_multi_target_writes_cpu_suffixed_outputs() {
     let data_dir = fixture_uica_data_dir_with_arches("multi-target-output", &["SKL", "TGL"]);
     let json_path = temp_named_output_path("multi-target", "json");
-    let asm_path = temp_named_output_path("multi-target", "asm");
     let expected_json = [
         suffixed_output_path(&json_path, "SKL"),
         suffixed_output_path(&json_path, "TGL"),
     ];
-    let expected_asm = [
-        suffixed_output_path(&asm_path, "SKL"),
-        suffixed_output_path(&asm_path, "TGL"),
-    ];
     let _ = fs::remove_file(&json_path);
-    let _ = fs::remove_file(&asm_path);
-    for path in expected_json.iter().chain(expected_asm.iter()) {
+    for path in &expected_json {
         let _ = fs::remove_file(path);
     }
 
@@ -415,16 +621,13 @@ fn binary_multi_target_writes_cpu_suffixed_outputs() {
             "none",
             "--output-path",
             json_path.to_str().expect("json path should be utf-8"),
-            "--asm-output-path",
-            asm_path.to_str().expect("asm path should be utf-8"),
         ])
         .output()
         .expect("binary should run");
 
     assert!(output.status.success());
     assert!(!json_path.exists());
-    assert!(!asm_path.exists());
-    for path in expected_json.iter().chain(expected_asm.iter()) {
+    for path in &expected_json {
         assert!(path.exists(), "expected suffixed output {}", path.display());
         let _ = fs::remove_file(path);
     }
@@ -486,6 +689,98 @@ fn suffixed_output_path(path: &std::path::Path, target_cpu: &str) -> std::path::
         .and_then(|extension| extension.to_str())
         .expect("test path should have a utf-8 extension");
     path.with_file_name(format!("{stem}.{target_cpu}.{extension}"))
+}
+
+fn python_fixture_path(name: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests")
+        .join(name)
+}
+
+fn write_unique_first_gadget_fixture(name: &str) -> std::path::PathBuf {
+    let mut json: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(python_fixture_path(name)).expect("python fixture should be readable"),
+    )
+    .expect("python fixture should be JSON");
+    for node in json["nodes"]
+        .as_object_mut()
+        .expect("nodes should be an object")
+        .values_mut()
+    {
+        let gadgets = node["gadgets"]
+            .as_array_mut()
+            .expect("gadgets should be an array");
+        gadgets.truncate(1);
+        node["gadget_count"] = serde_json::json!(gadgets.len());
+    }
+
+    let input_path = temp_named_output_path(name.trim_end_matches(".json"), "json");
+    fs::write(
+        &input_path,
+        serde_json::to_string_pretty(&json).expect("fixture should serialize"),
+    )
+    .expect("fixture should be written");
+    input_path
+}
+
+fn incomplete_sort_json() -> &'static str {
+    r#"{
+  "natural_order": false,
+  "vector_machine": "AVX2",
+  "primitive_type": "i64",
+  "num_vecs": 2,
+  "roots": ["n0"],
+  "nodes": {
+    "n0": {
+      "stage": 0,
+      "input_state": {"top": [1, 3, 5, 7], "bottom": [2, 4, 6, 8]},
+      "output_state": {"top": [1, 3, 5, 7], "bottom": [2, 4, 6, 8]},
+      "gadgets": [
+        {"top_instructions": [], "bottom_instructions": []}
+      ],
+      "gadget_count": 1,
+      "children": []
+    }
+  }
+}"#
+}
+
+fn estimate_vpermq_json() -> &'static str {
+    r#"{
+  "natural_order": true,
+  "vector_machine": "AVX2",
+  "primitive_type": "i64",
+  "num_vecs": 2,
+  "roots": ["n0"],
+  "nodes": {
+    "n0": {
+      "stage": 0,
+      "input_state": {"top": [1, 3, 5, 7], "bottom": [2, 4, 6, 8]},
+      "output_state": {"top": [1, 3, 5, 7], "bottom": [2, 4, 6, 8]},
+      "gadgets": [
+        {
+          "top_instructions": [
+            {
+              "name": "_mm256_permute4x64_epi64",
+              "args": {"a": "top", "imm8": 78}
+            }
+          ],
+          "bottom_instructions": [],
+          "unified_instructions": [
+            {
+              "name": "_mm256_permute4x64_epi64",
+              "args": {"a": "top", "imm8": 78}
+            }
+          ],
+          "top_output_index": 0,
+          "bottom_output_index": -1
+        }
+      ],
+      "gadget_count": 1,
+      "children": []
+    }
+  }
+}"#
 }
 
 #[test]
@@ -600,6 +895,92 @@ fn fetch_uica_data_copies_manifest_and_requested_arch_pack_from_base_url() {
 
 fn fixture_uica_data_dir(name: &str) -> std::path::PathBuf {
     fixture_uica_data_dir_with_arches(name, &["SKL"])
+}
+
+fn fixture_uica_data_dir_with_vpermq(name: &str) -> std::path::PathBuf {
+    use std::collections::BTreeMap;
+    use uica_data::{
+        DATAPACK_MANIFEST_SCHEMA_VERSION, DATAPACK_SCHEMA_VERSION, DataPack, InstructionRecord,
+        PerfRecord, UIPACK_VERSION, encode_uipack, read_uipack_header,
+    };
+
+    let dir = std::env::temp_dir().join(format!(
+        "vxsort-uica-data-{name}-vpermq-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("arch")).expect("fixture arch dir should be created");
+    let ports = vec![
+        "0".to_owned(),
+        "1".to_owned(),
+        "5".to_owned(),
+        "6".to_owned(),
+    ];
+    let pack = DataPack {
+        schema_version: DATAPACK_SCHEMA_VERSION.to_owned(),
+        all_ports: ports.clone(),
+        alu_ports: ports.clone(),
+        instructions: vec![InstructionRecord {
+            arch: "SKL".to_owned(),
+            iform: "VPERMQ_YMMqq_YMMqq_IMMb".to_owned(),
+            string: "VPERMQ (YMM, YMM, I8)".to_owned(),
+            all_ports: ports.clone(),
+            alu_ports: ports,
+            locked: false,
+            xml_attrs: BTreeMap::new(),
+            imm_zero: false,
+            perf: PerfRecord {
+                operands: vec![],
+                latencies: vec![],
+                uops: 1,
+                retire_slots: 1,
+                uops_mite: 1,
+                uops_ms: 0,
+                tp: Some(1.0),
+                ports: BTreeMap::from([("5".to_owned(), 1)]),
+                variants: BTreeMap::new(),
+                div_cycles: 0,
+                may_be_eliminated: false,
+                complex_decoder: false,
+                n_available_simple_decoders: 0,
+                lcp_stall: false,
+                implicit_rsp_change: 0,
+                can_be_used_by_lsd: true,
+                cannot_be_in_dsb_due_to_jcc_erratum: false,
+                no_micro_fusion: false,
+                no_macro_fusion: false,
+                macro_fusible_with: vec![],
+            },
+        }],
+    };
+    let bytes = encode_uipack(&pack, "SKL").expect("fixture uipack should encode");
+    let header = read_uipack_header(&bytes).expect("fixture uipack header should decode");
+    fs::write(dir.join("arch/SKL.uipack"), &bytes).expect("fixture pack should be written");
+    fs::write(
+        dir.join("manifest.json"),
+        format!(
+            r#"{{
+  "schema_version": "{}",
+  "uipack_version": {},
+  "architectures": {{
+    "SKL": {{
+      "path": "arch/SKL.uipack",
+      "size": {},
+      "checksum_kind": "fnv1a64",
+      "checksum": "{:016x}",
+      "record_count": {}
+    }}
+  }}
+}}"#,
+            DATAPACK_MANIFEST_SCHEMA_VERSION,
+            UIPACK_VERSION,
+            header.file_len,
+            header.checksum,
+            header.records_count
+        ),
+    )
+    .expect("fixture manifest should be written");
+    dir
 }
 
 fn fixture_uica_data_dir_with_arches(name: &str, arches: &[&str]) -> std::path::PathBuf {

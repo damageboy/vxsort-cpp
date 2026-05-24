@@ -72,10 +72,46 @@ fn emits_nasm_style_solution_with_gadget_and_compare_swap() {
     assert!(asm.contains("; stage 0"));
     assert!(asm.contains("vpermq"));
     assert!(asm.contains("ymm0, ymm0, 0x4e"));
-    assert!(asm.contains("0b01001110"));
+    assert!(asm.contains("_MM_SHUFFLE(1, 0, 3, 2)"));
     assert!(asm.contains("vpcmpgtq"));
     assert!(asm.contains("vblendvpd"));
     assert!(asm.contains("ret"));
+}
+
+#[test]
+fn imm8_comments_follow_python_intrinsic_metadata() {
+    let input = state(&[1, 3, 5, 7], &[2, 4, 6, 8]);
+    let output = state(&[1, 2, 5, 6], &[3, 4, 7, 8]);
+    let gadget = PermutationGadget::new(
+        vec![
+            inst(
+                "_mm256_shuffle_pd",
+                &[
+                    ("a", InstructionArg::Input("top".to_owned())),
+                    ("b", InstructionArg::Input("bottom".to_owned())),
+                    ("imm8", InstructionArg::U64(0x0a)),
+                ],
+            ),
+            inst(
+                "_mm256_blend_pd",
+                &[
+                    ("a", InstructionArg::Input("prev".to_owned())),
+                    ("b", InstructionArg::Input("bottom".to_owned())),
+                    ("imm8", InstructionArg::U64(0x05)),
+                ],
+            ),
+        ],
+        Vec::new(),
+    );
+    let mut table = TransitionTable::new(1);
+    table.add_transition(0, &input, &output, gadget);
+    let path = vec![(0, input.as_tuple(), output.as_tuple())];
+
+    let asm = generate_solution_asm_for_paths(&metadata(), &table, &[path]);
+
+    assert!(asm.contains("_MM_SHUFFLE2(2, 2)"));
+    assert!(asm.contains("0b00000101"));
+    assert!(!asm.contains("imm8=0b00001010"));
 }
 
 #[test]
@@ -90,14 +126,37 @@ fn emits_python_parity_stage_state_register_and_compare_swap_comments() {
     let asm = generate_solution_asm_for_paths(&metadata(), &table, &[path]);
 
     assert!(asm.contains("; Initial Input State:"));
-    assert!(asm.contains("; top: [1, 3, 5, 7]"));
-    assert!(asm.contains("; bottom: [2, 4, 6, 8]"));
+    assert!(asm.contains("; ╭────────┬─────┬─────┬─────┬─────╮"));
+    assert!(asm.contains("; │        │   0 │   1 │   2 │   3 │"));
+    assert!(asm.contains("; │ Top    │   1 │   3 │   5 │   7 │"));
+    assert!(asm.contains("; │ Bottom │   2 │   4 │   6 │   8 │"));
+    assert!(asm.contains("; ╰────────┴─────┴─────┴─────┴─────╯"));
     assert!(asm.contains("; Stage 0"));
-    assert!(asm.contains("; Registers: ymm0 = top, ymm1 = bottom"));
-    assert!(asm.contains("; Compare-swap: min"));
+    assert!(!asm.contains("; Registers:"));
+    assert!(!asm.contains("; Compare-swap:"));
     assert!(asm.contains("; Output State:"));
-    assert!(asm.contains("; top: [1, 2, 5, 6]"));
-    assert!(asm.contains("; bottom: [3, 4, 7, 8]"));
+    assert!(asm.contains("; │ Top    │   1 │   2 │   5 │   6 │"));
+    assert!(asm.contains("; │ Bottom │   3 │   4 │   7 │   8 │"));
+}
+
+#[test]
+fn emits_current_top_bottom_register_comment_at_each_stage() {
+    let input0 = state(&[1, 3, 5, 7], &[2, 4, 6, 8]);
+    let output0 = state(&[1, 2, 5, 6], &[3, 4, 7, 8]);
+    let output1 = state(&[1, 2, 3, 4], &[5, 6, 7, 8]);
+    let gadget = PermutationGadget::new(Vec::new(), Vec::new());
+    let mut table = TransitionTable::new(2);
+    table.add_transition(0, &input0, &output0, gadget.clone());
+    table.add_transition(1, &output0, &output1, gadget);
+    let path = vec![
+        (0, input0.as_tuple(), output0.as_tuple()),
+        (1, output0.as_tuple(), output1.as_tuple()),
+    ];
+
+    let asm = generate_solution_asm_for_paths(&metadata(), &table, &[path]);
+
+    assert!(asm.contains("; Stage 0\n    ; Current registers: ymm0 = top, ymm1 = bottom"));
+    assert!(asm.contains("; Stage 1\n    ; Current registers: ymm2 = top, ymm3 = bottom"));
 }
 
 #[test]
@@ -125,6 +184,26 @@ fn avx2_i32_compare_swap_uses_minmax_sd() {
 }
 
 #[test]
+fn avx2_i16_compare_swap_uses_minmax_sw() {
+    let asm = compare_swap_asm_for(ArchArg::Avx2, DTypeArg::I16);
+
+    assert_mnemonic_count(&asm, "vpminsw", 1);
+    assert_mnemonic_count(&asm, "vpmaxsw", 1);
+    assert_mnemonic_count(&asm, "vpcmpgtq", 0);
+    assert_mnemonic_count(&asm, "vblendvpd", 0);
+}
+
+#[test]
+fn avx2_u64_compare_swap_matches_python_alias_emulation() {
+    let asm = compare_swap_asm_for(ArchArg::Avx2, DTypeArg::U64);
+
+    assert_mnemonic_count(&asm, "vpcmpgtq", 1);
+    assert_mnemonic_count(&asm, "vblendvpd", 2);
+    assert_mnemonic_count(&asm, "vpminsq", 0);
+    assert_mnemonic_count(&asm, "vpmaxsq", 0);
+}
+
+#[test]
 fn avx512_i64_compare_swap_uses_minmax_sq() {
     let asm = compare_swap_asm_for(ArchArg::Avx512, DTypeArg::I64);
 
@@ -134,6 +213,16 @@ fn avx512_i64_compare_swap_uses_minmax_sq() {
     assert_mnemonic_count(&asm, "vblendvpd", 0);
     assert_mnemonic_count(&asm, "vpminsd", 0);
     assert_mnemonic_count(&asm, "vpmaxsd", 0);
+}
+
+#[test]
+fn avx512_u32_compare_swap_matches_i32_minmax() {
+    let asm = compare_swap_asm_for(ArchArg::Avx512, DTypeArg::U32);
+
+    assert_mnemonic_count(&asm, "vpminsd", 1);
+    assert_mnemonic_count(&asm, "vpmaxsd", 1);
+    assert_mnemonic_count(&asm, "vpcmpgtq", 0);
+    assert_mnemonic_count(&asm, "vblendvpd", 0);
 }
 
 #[test]

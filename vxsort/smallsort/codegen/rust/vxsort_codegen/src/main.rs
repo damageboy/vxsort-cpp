@@ -1,6 +1,7 @@
 use std::{
     io::IsTerminal,
     io::Write,
+    path::Path,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -12,22 +13,47 @@ use std::{
 
 use clap::Parser;
 use vxsort_codegen::{
-    CliArgs, CliCommand, DryRunSummary, FetchUicaDataConfig, RunConfig, RunSummary, RuntimeUiArg,
-    build_dry_run_summary, build_run_summary, build_run_summary_with_session,
-    convert_solution_json_to_asm, fetch_uica_data,
+    CliArgs, CliCommand, DryRunSummary, EstimateReport, FetchUicaDataConfig, RunConfig, RunSummary,
+    RuntimeUiArg, build_dry_run_summary, build_run_summary, build_run_summary_with_session,
+    convert_solution_json_to_asm, estimate_solution_json, fetch_uica_data,
     instruction_stream::{
-        InstructionBlock, LoweringOptions, ModeledInstruction, lower_solution_paths,
+        InstructionBlock, LoweringOptions, ModeledInstruction, lower_assigned_paths,
+        lower_solution_paths,
     },
     parse_run_config, read_solution_json,
     runtime::{ChannelRuntimeSession, LineRuntimeSession},
     runtime_tui::run_tui_event_loop,
     uica_scoring::{UiPackScorer, uops_key_for_instruction},
+    verify_solution_json,
 };
 
 fn main() {
     let args = CliArgs::parse();
     match &args.command {
         CliCommand::Solve(_) => {}
+        CliCommand::Verify(verify_args) => {
+            let report = exit_on_error(verify_solution_json(
+                &verify_args.input,
+                verify_args.top_k,
+                verify_args.workers,
+            ));
+            println!("All {} paths verified correct.", report.path_count);
+            return;
+        }
+        CliCommand::Estimate(estimate_args) => {
+            let report = exit_on_error(estimate_solution_json(
+                &estimate_args.input,
+                vxsort_codegen::EstimateOptions {
+                    target_cpu: estimate_args.target_cpu.clone(),
+                    uica_data_dir: estimate_args.uica_data_dir.clone(),
+                    top_k: estimate_args.top_k,
+                    output_dir: estimate_args.output_dir.clone(),
+                    write_traces: !estimate_args.no_traces,
+                },
+            ));
+            print_estimate_report(&report);
+            return;
+        }
         CliCommand::FetchUicaData(fetch_args) => {
             let report = exit_on_error(fetch_uica_data(&FetchUicaDataConfig {
                 target_cpus: split_target_cpus(&fetch_args.target_cpu),
@@ -71,12 +97,20 @@ fn main() {
 
 fn score_solution_json(args: &vxsort_codegen::ScoreJsonArgs) -> Result<(), String> {
     let imported = read_solution_json(&args.input)?;
-    let stream = lower_solution_paths(
-        &imported.metadata,
-        &imported.transition_table,
-        &imported.paths,
-        LoweringOptions::default(),
-    );
+    let stream = if imported.assigned_paths.is_empty() {
+        lower_solution_paths(
+            &imported.metadata,
+            &imported.transition_table,
+            &imported.paths,
+            LoweringOptions::default(),
+        )
+    } else {
+        lower_assigned_paths(
+            &imported.metadata,
+            &imported.assigned_paths,
+            LoweringOptions::default(),
+        )
+    };
     let scorer = UiPackScorer::from_data_dir(&args.uica_data_dir, &args.target_cpu)?;
     let path_indices = match args.path_index {
         Some(index) => vec![index],
@@ -169,6 +203,89 @@ fn split_target_cpus(target_cpu: &str) -> Vec<String> {
         .filter(|cpu| !cpu.is_empty())
         .map(str::to_owned)
         .collect()
+}
+
+fn print_estimate_report(report: &EstimateReport) {
+    println!("uiCA estimate");
+    println!("input: {}", report.input_path.display());
+    println!("target cpu: {}", report.target_cpu);
+    println!(
+        "paths: {} imported, {} estimated",
+        report.imported_path_count,
+        report.results.len()
+    );
+    println!("output dir: {}", report.output_dir.display());
+
+    if report.results.is_empty() {
+        println!("No paths to estimate.");
+        return;
+    }
+
+    println!();
+    println!(
+        "{:<5} {:<6} {:>8} {:>8} {:>8} {:>8} {:<24} Status",
+        "Rank", "Path", "TP", "Cycles", "Iters", "Instr", "Trace"
+    );
+    for result in &report.results {
+        let rank = result
+            .rank
+            .map(|rank| rank.to_string())
+            .unwrap_or_else(|| "-".to_owned());
+        let throughput = result
+            .throughput
+            .filter(|value| value.is_finite())
+            .map(|value| format!("{value:.2}"))
+            .unwrap_or_else(|| "err".to_owned());
+        let trace = result
+            .trace_path
+            .as_deref()
+            .map(terminal_file_link)
+            .unwrap_or_else(|| "-".to_owned());
+        let status = if result.error.is_some() { "err" } else { "ok" };
+        println!(
+            "{:<5} {:<6} {:>8} {:>8} {:>8} {:>8} {:<24} {}",
+            rank,
+            result.path_index,
+            throughput,
+            result.cycles_simulated,
+            result.iterations_simulated,
+            result.instruction_count,
+            trace,
+            status
+        );
+    }
+
+    let warnings = report
+        .results
+        .iter()
+        .filter_map(|result| {
+            result
+                .error
+                .as_ref()
+                .map(|error| (result.path_index, error))
+        })
+        .collect::<Vec<_>>();
+    if !warnings.is_empty() {
+        println!();
+        println!("Warnings:");
+        for (path_index, error) in warnings {
+            println!("  path {path_index}: {error}");
+        }
+    }
+}
+
+fn terminal_file_link(path: &Path) -> String {
+    let Some(label) = path.file_name().and_then(|name| name.to_str()) else {
+        return path.display().to_string();
+    };
+    let Ok(absolute) = path.canonicalize() else {
+        return label.to_owned();
+    };
+    format!(
+        "\x1b]8;;file://{}\x1b\\{}\x1b]8;;\x1b\\",
+        absolute.display(),
+        label
+    )
 }
 
 fn run_with_runtime_ui(config: &RunConfig) -> RunSummary {

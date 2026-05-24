@@ -37,6 +37,7 @@ uv run python src/bitonic_compiler.py --depth-limit=3 --gadget-depth 1 # Full sy
 
 ```bash
 cargo fmt --all --check                    # Format check
+cargo clippy --all-targets --all-features --release -- -D warnings # Lint Rust code
 cargo test --release -q                    # Run Rust tests in optimized/release mode
 ```
 
@@ -61,8 +62,11 @@ Rust implementations.
 
 - For Python changes: run Python tests with `uv run pytest` when relevant, plus `uv run ruff check .`
   and `uv run vulture` when Python code is touched. Fix failures or inspect reported dead code.
-- For Rust changes: run Rust tests with `cargo test --release -q` when Rust code is touched; use
-  release mode by default. Run `cargo fmt --all --check` for Rust formatting.
+- For Rust changes: after every Rust work item, run `cargo fmt --all --check`,
+  `cargo clippy --all-targets --all-features --release -- -D warnings`, and the relevant Rust tests
+  with `cargo test --release -q` (or a focused release-mode subset during iteration). Use release mode
+  by default for Rust checks. Treat Rust compiler warnings as failures: fix warnings surfaced by
+  `cargo test`, `cargo build`, or `cargo clippy` before considering the work item complete.
 - In general, and specifically if tests are added, it is important to ensure the relevant test suite
   doesn't run for more than 1 minute of wall clock
 - For documentation-only changes, no test suite is required unless the documentation change includes

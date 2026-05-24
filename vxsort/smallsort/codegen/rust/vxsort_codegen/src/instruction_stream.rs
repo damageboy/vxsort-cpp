@@ -24,9 +24,10 @@ use std::fmt;
 
 use gadget_synth::{InstructionArg, InstructionSpec, PermutationGadget};
 
+use crate::ArchArg;
 use crate::json_exporter::SolutionJsonMetadata;
+use crate::scoring::AssignedPath;
 use crate::transition_table::{CompletePath, StateTuple, TransitionKey, TransitionTable};
-use crate::{ArchArg, DTypeArg};
 
 // ---------------------------------------------------------------------------
 // Register
@@ -215,6 +216,27 @@ pub fn lower_solution_paths(
     }
 }
 
+pub fn lower_assigned_paths(
+    metadata: &SolutionJsonMetadata,
+    paths: &[AssignedPath],
+    _options: LoweringOptions,
+) -> InstructionStream {
+    let mut constants = ConstantPool::default();
+    let mut blocks = vec![];
+    for (solution_index, path) in paths.iter().enumerate() {
+        blocks.push(lower_assigned_path(
+            solution_index,
+            metadata,
+            path,
+            &mut constants,
+        ));
+    }
+    InstructionStream {
+        constants: constants.into_constants(),
+        blocks,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Private lowering helpers
 // ---------------------------------------------------------------------------
@@ -226,78 +248,105 @@ fn lower_path(
     path: &CompletePath,
     constants: &mut ConstantPool,
 ) -> InstructionBlock {
+    let steps = path
+        .iter()
+        .map(|(stage, input, output)| {
+            let transition_key: TransitionKey = (input.clone(), output.clone());
+            let gadget = table
+                .get_all_transitions(*stage)
+                .get(&transition_key)
+                .and_then(|gadgets| gadgets.first());
+            LoweringStep {
+                stage: *stage,
+                input,
+                output,
+                gadget,
+            }
+        })
+        .collect::<Vec<_>>();
+    lower_concrete_steps(solution_index, metadata, &steps, constants)
+}
+
+fn lower_assigned_path(
+    solution_index: usize,
+    metadata: &SolutionJsonMetadata,
+    path: &AssignedPath,
+    constants: &mut ConstantPool,
+) -> InstructionBlock {
+    let steps = path
+        .steps()
+        .iter()
+        .map(|step| LoweringStep {
+            stage: step.stage(),
+            input: step.input(),
+            output: step.output(),
+            gadget: Some(step.gadget()),
+        })
+        .collect::<Vec<_>>();
+    lower_concrete_steps(solution_index, metadata, &steps, constants)
+}
+
+struct LoweringStep<'a> {
+    stage: usize,
+    input: &'a StateTuple,
+    output: &'a StateTuple,
+    gadget: Option<&'a PermutationGadget>,
+}
+
+fn lower_concrete_steps(
+    solution_index: usize,
+    metadata: &SolutionJsonMetadata,
+    steps: &[LoweringStep<'_>],
+    constants: &mut ConstantPool,
+) -> InstructionBlock {
     let mut regs = LoweringRegAlloc::new(metadata.arch, metadata.num_vecs);
     let mut materialized = MaterializedConstants::default();
     let mut instructions: Vec<ModeledInstruction> = vec![];
 
-    if let Some((_, input, _)) = path.first() {
+    if let Some(step) = steps.first() {
         push_comment(&mut instructions, "Initial Input State:");
-        push_state_comments(&mut instructions, input);
+        push_state_comments(&mut instructions, step.input);
     }
 
-    for (step_index, (stage, input, output)) in path.iter().enumerate() {
+    for (step_index, step) in steps.iter().enumerate() {
         let src_top = regs.src_top();
         let src_bottom = regs.src_bottom();
-        let dst_top = regs.dst_top();
-        let dst_bottom = regs.dst_bottom();
-        let is_final_natural_order_stage = metadata.natural_order && step_index + 1 == path.len();
+        let is_final_natural_order_stage = metadata.natural_order && step_index + 1 == steps.len();
         let has_coex = !is_final_natural_order_stage && metadata.num_vecs > 1;
-        push_comment(&mut instructions, format!("Stage {stage}"));
+        push_comment(&mut instructions, format!("Stage {}", step.stage));
+        push_comment(
+            &mut instructions,
+            format!(
+                "Current registers: {} = top, {} = bottom",
+                src_top.name(),
+                src_bottom.name()
+            ),
+        );
 
-        let transition_key: TransitionKey = (input.clone(), output.clone());
-        let is_dual_side = if let Some(gadget) = table
-            .get_all_transitions(*stage)
-            .get(&transition_key)
-            .and_then(|gadgets| gadgets.first())
-        {
+        if let Some(gadget) = step.gadget {
             let mut state = LoweringState {
                 instructions: &mut instructions,
                 regs: &mut regs,
                 materialized: &mut materialized,
                 constants,
             };
-            lower_gadget(&mut state, gadget, *stage)
+            lower_gadget(&mut state, gadget, step.stage);
         } else {
             instructions.push(ModeledInstruction {
                 mnemonic: "nop".to_owned(),
                 operands: vec![Operand::Unsupported(format!(
-                    "missing gadget for stage {stage}"
+                    "missing gadget for stage {}",
+                    step.stage
                 ))],
-                comment: Some(format!("stage {stage}: missing gadget")),
+                comment: Some(format!("stage {}: missing gadget", step.stage)),
             });
-            false
-        };
-
-        let output_in_dst = is_dual_side != has_coex;
-        let (out_top, out_bottom) = if output_in_dst {
-            (&dst_top, &dst_bottom)
-        } else {
-            (&src_top, &src_bottom)
-        };
-        push_comment(
-            &mut instructions,
-            format!(
-                "Registers: {} = top, {} = bottom  ->  {} = top, {} = bottom",
-                src_top.name(),
-                src_bottom.name(),
-                out_top.name(),
-                out_bottom.name()
-            ),
-        );
+        }
 
         if has_coex {
-            push_comment(
-                &mut instructions,
-                format!(
-                    "Compare-swap: min -> {} (top), max -> {} (bottom)",
-                    regs.dst_top().name(),
-                    regs.dst_bottom().name()
-                ),
-            );
             lower_compare_swap(&mut instructions, &mut regs, metadata);
         }
         push_comment(&mut instructions, "Output State:");
-        push_state_comments(&mut instructions, output);
+        push_state_comments(&mut instructions, step.output);
         regs.reset_temps();
     }
 
@@ -322,8 +371,64 @@ fn push_comment(instructions: &mut Vec<ModeledInstruction>, comment: impl Into<S
 }
 
 fn push_state_comments(instructions: &mut Vec<ModeledInstruction>, state: &StateTuple) {
-    push_comment(instructions, format!("top: {:?}", state.0));
-    push_comment(instructions, format!("bottom: {:?}", state.1));
+    for line in state_table_lines(state) {
+        push_comment(instructions, line);
+    }
+}
+
+fn state_table_lines(state: &StateTuple) -> Vec<String> {
+    let max_len = state.0.len().max(state.1.len());
+    let mut widths = Vec::with_capacity(max_len + 1);
+    widths.push("Bottom".len());
+    for lane in 0..max_len {
+        let header_width = lane.to_string().len();
+        let top_width = state
+            .0
+            .get(lane)
+            .map(u64::to_string)
+            .map_or(0, |value| value.len());
+        let bottom_width = state
+            .1
+            .get(lane)
+            .map(u64::to_string)
+            .map_or(0, |value| value.len());
+        widths.push(3.max(header_width).max(top_width).max(bottom_width));
+    }
+
+    vec![
+        table_border('╭', '┬', '╮', &widths),
+        table_row("", (0..max_len).map(|lane| lane.to_string()), &widths),
+        table_border('├', '┼', '┤', &widths),
+        table_row(
+            "Top",
+            (0..max_len).map(|lane| state.0.get(lane).map_or(String::new(), u64::to_string)),
+            &widths,
+        ),
+        table_row(
+            "Bottom",
+            (0..max_len).map(|lane| state.1.get(lane).map_or(String::new(), u64::to_string)),
+            &widths,
+        ),
+        table_border('╰', '┴', '╯', &widths),
+    ]
+}
+
+fn table_border(left: char, sep: char, right: char, widths: &[usize]) -> String {
+    let segments = widths
+        .iter()
+        .map(|width| "─".repeat(width + 2))
+        .collect::<Vec<_>>()
+        .join(&sep.to_string());
+    format!("{left}{segments}{right}")
+}
+
+fn table_row(label: &str, values: impl IntoIterator<Item = String>, widths: &[usize]) -> String {
+    let mut cells = Vec::with_capacity(widths.len());
+    cells.push(format!(" {:<width$} ", label, width = widths[0]));
+    for (value, width) in values.into_iter().zip(widths.iter().skip(1)) {
+        cells.push(format!(" {:>width$} ", value, width = *width));
+    }
+    format!("│{}│", cells.join("│"))
 }
 
 struct LoweringState<'a> {
@@ -679,15 +784,54 @@ fn format_control_vector(value: u64, bits: u32, element_bits: u32) -> String {
 }
 
 fn immediate_comment(name: &str, value: u64) -> Option<String> {
-    if name.contains("permute")
-        || name.contains("shuffle")
-        || name.contains("blend")
-        || name.contains("alignr")
-    {
-        Some(format!("imm8=0b{value:08b}"))
-    } else {
-        None
+    match intrinsic_immediate_type(name)? {
+        ImmediateType::Binary => Some(format!("0b{value:08b}")),
+        ImmediateType::Shuffle2 => Some(mm_shuffle2_str(value)),
+        ImmediateType::Shuffle4 => Some(mm_shuffle_str(value)),
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ImmediateType {
+    Binary,
+    Shuffle2,
+    Shuffle4,
+}
+
+fn intrinsic_immediate_type(name: &str) -> Option<ImmediateType> {
+    Some(match name {
+        "_mm256_permute4x64_epi64"
+        | "_mm256_permute_ps"
+        | "_mm256_shuffle_ps"
+        | "_mm512_permute_ps"
+        | "_mm512_shuffle_ps"
+        | "_mm512_shuffle_i32x4"
+        | "_mm512_mask_permute_ps"
+        | "_mm512_mask_shuffle_ps"
+        | "_mm512_mask_shuffle_i32x4" => ImmediateType::Shuffle4,
+        "_mm256_permute_pd"
+        | "_mm256_shuffle_pd"
+        | "_mm512_permute_pd"
+        | "_mm512_shuffle_pd"
+        | "_mm512_mask_permute_pd"
+        | "_mm512_mask_shuffle_pd" => ImmediateType::Shuffle2,
+        "_mm256_blend_ps" | "_mm256_blend_pd" | "_mm256_blend_epi32" => ImmediateType::Binary,
+        _ => return None,
+    })
+}
+
+fn mm_shuffle_str(value: u64) -> String {
+    let w = value & 0b11;
+    let x = (value >> 2) & 0b11;
+    let y = (value >> 4) & 0b11;
+    let z = (value >> 6) & 0b11;
+    format!("_MM_SHUFFLE({z}, {y}, {x}, {w})")
+}
+
+fn mm_shuffle2_str(value: u64) -> String {
+    let x = value & 0b11;
+    let y = (value >> 2) & 0b11;
+    format!("_MM_SHUFFLE2({y}, {x})")
 }
 
 pub(crate) fn control_vector_elements(value: u64, bits: u32, element_bits: u32) -> Vec<u64> {
@@ -800,8 +944,8 @@ fn lower_compare_swap(
     regs: &mut LoweringRegAlloc,
     metadata: &SolutionJsonMetadata,
 ) {
-    match (metadata.arch, metadata.dtype) {
-        (ArchArg::Avx2, DTypeArg::I64) => {
+    match (metadata.arch, metadata.dtype.element_bits()) {
+        (ArchArg::Avx2, 64) => {
             let tmp = regs.allocate_temp();
             instructions.push(ModeledInstruction {
                 mnemonic: "vpcmpgtq".to_owned(),
@@ -833,7 +977,27 @@ fn lower_compare_swap(
                 comment: None,
             });
         }
-        (_, DTypeArg::I32) => {
+        (_, 16) => {
+            instructions.push(ModeledInstruction {
+                mnemonic: "vpminsw".to_owned(),
+                operands: vec![
+                    Operand::Register(regs.dst_top()),
+                    Operand::Register(regs.src_top()),
+                    Operand::Register(regs.src_bottom()),
+                ],
+                comment: None,
+            });
+            instructions.push(ModeledInstruction {
+                mnemonic: "vpmaxsw".to_owned(),
+                operands: vec![
+                    Operand::Register(regs.dst_bottom()),
+                    Operand::Register(regs.src_top()),
+                    Operand::Register(regs.src_bottom()),
+                ],
+                comment: None,
+            });
+        }
+        (_, 32) => {
             instructions.push(ModeledInstruction {
                 mnemonic: "vpminsd".to_owned(),
                 operands: vec![
@@ -853,7 +1017,7 @@ fn lower_compare_swap(
                 comment: None,
             });
         }
-        (_, DTypeArg::I64) => {
+        (_, 64) => {
             instructions.push(ModeledInstruction {
                 mnemonic: "vpminsq".to_owned(),
                 operands: vec![
@@ -873,6 +1037,7 @@ fn lower_compare_swap(
                 comment: None,
             });
         }
+        (_, bits) => unreachable!("unsupported compare-swap element width: {bits}"),
     }
     regs.swap_pairs();
 }
