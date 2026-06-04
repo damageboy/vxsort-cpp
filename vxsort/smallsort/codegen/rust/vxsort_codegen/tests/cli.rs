@@ -4,7 +4,7 @@ use std::fs;
 use std::process::Command;
 use vxsort_codegen::{
     ArchArg, CliArgs, CliCommand, DTypeArg, FetchUicaDataConfig, RunConfig, RuntimeUiArg,
-    build_dry_run_summary, build_run_summary, fetch_uica_data, parse_run_config,
+    WorkerBackendArg, build_dry_run_summary, build_run_summary, fetch_uica_data, parse_run_config,
 };
 
 #[test]
@@ -66,6 +66,7 @@ fn parses_python_compatible_solve_flags() {
             wave_attempts: 100,
             wave_outputs: 7,
             worker_count: 3,
+            worker_backend: WorkerBackendArg::Auto,
             runtime_ui: RuntimeUiArg::None,
             runtime_trace_path: Some(std::path::PathBuf::from("trace.jsonl")),
             dry_run: false,
@@ -333,7 +334,8 @@ fn run_summary_drives_sync_wave_loop() {
         "none",
     ])
     .expect("run flags should parse");
-    let config = parse_run_config(args).expect("run config should be built");
+    let mut config = parse_run_config(args).expect("run config should be built");
+    config.worker_backend = WorkerBackendArg::InProcess;
 
     let summary = build_run_summary(&config).expect("run summary should be built");
 
@@ -381,7 +383,8 @@ fn run_summary_writes_runtime_trace_file() {
         trace_path.to_str().expect("trace path should be utf-8"),
     ])
     .expect("run flags should parse");
-    let config = parse_run_config(args).expect("run config should be built");
+    let mut config = parse_run_config(args).expect("run config should be built");
+    config.worker_backend = WorkerBackendArg::InProcess;
 
     build_run_summary(&config).expect("run summary should be built");
 

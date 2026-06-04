@@ -755,7 +755,7 @@ fn lower_instruction_operands(
         }
     }
     for (name, value) in args {
-        if !consumed_args.contains(name) {
+        if !consumed_args.iter().any(|consumed| *consumed == name) {
             lower_unconsumed_arg(state, &mut operands, name, value);
         }
     }

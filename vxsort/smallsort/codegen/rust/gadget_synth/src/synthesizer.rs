@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use z3::ast::{Ast, BV, Bool};
-use z3::{Optimize, SatResult, Solver};
+use z3::{SatResult, Solver};
 use z3_avx::lanes::extract_element;
 use z3_avx::registers::{ymm_reg, zmm_reg};
 
@@ -206,47 +206,27 @@ impl GadgetSynthesizer {
                 )
             })
             .collect::<Vec<_>>();
-        // Keep every non-mux symbolic operand in the canonicalizing minimize
-        // pass: immediates, AVX512 k-masks, and control vectors. The z3_avx
-        // intrinsic semantics assert dead high bits to zero; minimizing this
-        // complete term set makes remaining don't-care bits match Python's
-        // deterministic K-per-wiring extraction without mask-specific code here.
-        let imm_terms = symbolic_order
-            .iter()
-            .filter(|name| !select_vars.contains(*name))
-            .map(|name| {
-                (
-                    name,
-                    symbolic_vars
-                        .get(name)
-                        .expect("symbolic order should reference an existing variable"),
-                )
-            })
-            .collect::<Vec<_>>();
-
         let mut wiring_blocks = Vec::new();
         loop {
             let mut wiring_constraints = Vec::new();
             let mut wiring_block_terms = Vec::new();
 
             if !select_terms.is_empty() {
-                let wiring_optimizer = Optimize::new();
+                let wiring_solver = Solver::new();
                 for assertion in &assertions {
-                    wiring_optimizer.assert(assertion);
+                    wiring_solver.assert(assertion);
                 }
                 for block in &wiring_blocks {
-                    wiring_optimizer.assert(block);
+                    wiring_solver.assert(block);
                 }
-                wiring_optimizer.minimize(top_output);
-                wiring_optimizer.minimize(bottom_output);
 
-                if wiring_optimizer.check(&[]) != SatResult::Sat {
+                if wiring_solver.check() != SatResult::Sat {
                     break;
                 }
 
-                let wiring_model = wiring_optimizer
+                let wiring_model = wiring_solver
                     .get_model()
-                    .expect("sat optimizer should have a model");
+                    .expect("sat solver should have a model");
                 for (name, select_var) in select_terms.iter().copied() {
                     let value = wiring_model
                         .eval(select_var, true)
@@ -258,63 +238,42 @@ impl GadgetSynthesizer {
 
             let mut output_blocks = Vec::new();
             for _ in 0..options.max_unique_outputs {
-                let output_optimizer = Optimize::new();
+                let output_solver = Solver::new();
                 for assertion in &assertions {
-                    output_optimizer.assert(assertion);
+                    output_solver.assert(assertion);
                 }
                 for constraint in &wiring_constraints {
-                    output_optimizer.assert(constraint);
+                    output_solver.assert(constraint);
                 }
                 for block in &output_blocks {
-                    output_optimizer.assert(block);
+                    output_solver.assert(block);
                 }
-                output_optimizer.minimize(top_output);
-                output_optimizer.minimize(bottom_output);
 
-                if output_optimizer.check(&[]) != SatResult::Sat {
+                if output_solver.check() != SatResult::Sat {
                     break;
                 }
 
-                let output_model = output_optimizer
+                let model = output_solver
                     .get_model()
-                    .expect("sat optimizer should have a model");
-                let top_value = output_model
+                    .expect("sat solver should have a model");
+                let top_value = model
                     .eval(top_output, true)
                     .ok_or_else(|| SynthesisError::ModelMissingValue("top_output".to_owned()))?;
-                let bottom_value = output_model
+                let bottom_value = model
                     .eval(bottom_output, true)
                     .ok_or_else(|| SynthesisError::ModelMissingValue("bottom_output".to_owned()))?;
-
-                let imm_optimizer = Optimize::new();
-                for assertion in &assertions {
-                    imm_optimizer.assert(assertion);
-                }
-                for constraint in &wiring_constraints {
-                    imm_optimizer.assert(constraint);
-                }
-                imm_optimizer.assert(top_output.eq(&top_value));
-                imm_optimizer.assert(bottom_output.eq(&bottom_value));
-                for (_, symbolic) in &imm_terms {
-                    imm_optimizer.minimize(*symbolic);
-                }
-
-                if imm_optimizer.check(&[]) == SatResult::Sat {
-                    let model = imm_optimizer
-                        .get_model()
-                        .expect("sat optimizer should have a model");
-                    let output_state = self.output_state_from_model_or_target_pairs(
-                        &model,
-                        top_output,
-                        bottom_output,
-                        target_pairs,
-                        options.allow_any_lane_order,
-                    )?;
-                    let gadget = PermutationGadget::new(
-                        self.concretize_root(graph.top.as_ref(), &model, symbolic_vars)?,
-                        self.concretize_root(graph.bottom.as_ref(), &model, symbolic_vars)?,
-                    );
-                    results.push((gadget, output_state));
-                }
+                let output_state = self.output_state_from_model_or_target_pairs(
+                    &model,
+                    top_output,
+                    bottom_output,
+                    target_pairs,
+                    options.allow_any_lane_order,
+                )?;
+                let gadget = PermutationGadget::new(
+                    self.concretize_root(graph.top.as_ref(), &model, symbolic_vars)?,
+                    self.concretize_root(graph.bottom.as_ref(), &model, symbolic_vars)?,
+                );
+                results.push((gadget, output_state));
 
                 output_blocks.push(Bool::or(&[
                     top_output.eq(&top_value).not(),
@@ -540,14 +499,12 @@ impl GadgetSynthesizer {
     ) -> Result<BV, SynthesisError> {
         match node {
             GadgetNode::Input(input) => {
-                context
-                    .registers
-                    .get(input.name)
-                    .cloned()
-                    .ok_or(SynthesisError::MissingOperand {
-                        intrinsic: parent_intrinsic,
-                        operand: input.name,
-                    })
+                context.registers.get(input.name).cloned().ok_or_else(|| {
+                    SynthesisError::MissingOperand {
+                        intrinsic: parent_intrinsic.to_owned(),
+                        operand: input.name.to_owned(),
+                    }
+                })
             }
             GadgetNode::Symbolic(symbolic) => Ok(symbolic_bv(
                 symbolic,

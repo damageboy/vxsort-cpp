@@ -709,7 +709,7 @@ impl PathVerifier {
                     previous_output: previous_output.as_ref(),
                     results: &results,
                 };
-                args.insert(*key, self.resolve_arg(key, value, &context)?);
+                args.insert(key.as_str(), self.resolve_arg(key, value, &context)?);
             }
             current_reg = dispatch_intrinsic(instruction.intrinsic_name(), &args, solver)
                 .map_err(|error| error.to_string())?;
@@ -722,7 +722,7 @@ impl PathVerifier {
 
     fn resolve_arg(
         &self,
-        key: &'static str,
+        key: &str,
         value: &InstructionArg,
         context: &ArgResolveContext<'_>,
     ) -> Result<BV, String> {
@@ -752,7 +752,7 @@ impl PathVerifier {
         }
     }
 
-    fn arg_bit_width(&self, key: &'static str) -> u32 {
+    fn arg_bit_width(&self, key: &str) -> u32 {
         match key {
             "imm8" => 8,
             "k" => self.elements_per_vector as u32,

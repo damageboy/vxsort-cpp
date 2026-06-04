@@ -12,6 +12,7 @@ pub use json_importer::{ImportedSolutionJson, read_solution_json, solution_json_
 use runtime::{NullRuntimeSession, RuntimeEvent, RuntimeSession};
 use runtime_trace::RuntimeTrace;
 use scoring::{PathCost, Scorer};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 pub use uica_data_fetch::{
     FetchUicaDataConfig, FetchUicaDataReport, default_uica_data_base_url, fetch_uica_data,
@@ -36,13 +37,13 @@ pub mod uica_scoring;
 pub mod verifier;
 pub mod wave_engine;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum, Serialize, Deserialize)]
 pub enum ArchArg {
     Avx2,
     Avx512,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum, Serialize, Deserialize)]
 pub enum DTypeArg {
     I16,
     U16,
@@ -52,6 +53,13 @@ pub enum DTypeArg {
     I64,
     U64,
     F64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum, Serialize, Deserialize)]
+pub enum WorkerBackendArg {
+    Auto,
+    InProcess,
+    Process,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -94,6 +102,16 @@ impl DTypeArg {
 
     pub fn is_synthesis_supported(self) -> bool {
         matches!(self, DTypeArg::I32 | DTypeArg::I64)
+    }
+}
+
+impl WorkerBackendArg {
+    pub fn cli_name(self) -> &'static str {
+        match self {
+            WorkerBackendArg::Auto => "auto",
+            WorkerBackendArg::InProcess => "in-process",
+            WorkerBackendArg::Process => "process",
+        }
     }
 }
 
@@ -181,6 +199,9 @@ pub struct SolveArgs {
     #[arg(long = "workers", default_value_t = 0)]
     pub workers: usize,
 
+    #[arg(long = "worker-backend", value_enum, ignore_case = true, default_value_t = WorkerBackendArg::Auto)]
+    pub worker_backend: WorkerBackendArg,
+
     #[arg(long = "runtime-ui", value_enum, ignore_case = true, default_value_t = RuntimeUiArg::Auto)]
     pub runtime_ui: RuntimeUiArg,
 
@@ -227,12 +248,17 @@ pub struct EstimateJsonArgs {
 #[derive(Debug, Subcommand)]
 pub enum CliCommand {
     Solve(SolveArgs),
+    #[command(name = "__synthesis-worker", hide = true)]
+    SynthesisWorker(SynthesisWorkerArgs),
     Verify(VerifyJsonArgs),
     Estimate(EstimateJsonArgs),
     FetchUicaData(FetchUicaDataArgs),
     JsonToAsm(JsonToAsmArgs),
     ScoreJson(ScoreJsonArgs),
 }
+
+#[derive(Debug, Args)]
+pub struct SynthesisWorkerArgs {}
 
 #[derive(Debug, Args)]
 pub struct FetchUicaDataArgs {
@@ -292,6 +318,7 @@ pub struct RunConfig {
     pub wave_attempts: usize,
     pub wave_outputs: usize,
     pub worker_count: usize,
+    pub worker_backend: WorkerBackendArg,
     pub runtime_ui: RuntimeUiArg,
     pub runtime_trace_path: Option<PathBuf>,
     pub dry_run: bool,
@@ -389,6 +416,7 @@ pub fn parse_run_config(args: CliArgs) -> Result<RunConfig, String> {
         wave_attempts: solve_args.wave_attempts,
         wave_outputs: solve_args.wave_outputs,
         worker_count: resolve_worker_count(solve_args.workers),
+        worker_backend: solve_args.worker_backend,
         runtime_ui: solve_args.runtime_ui,
         runtime_trace_path: solve_args.runtime_trace_path,
         dry_run: solve_args.dry_run,
@@ -489,6 +517,7 @@ pub fn build_run_summary_with_session(
             "wave_attempts": config.wave_attempts,
             "wave_outputs": config.wave_outputs,
             "worker_count": config.worker_count,
+            "worker_backend": config.worker_backend.cli_name(),
         }),
     );
 
@@ -522,6 +551,7 @@ pub fn build_run_summary_with_session(
                 retroactive_input: config.retroactive_input,
                 top_k: Some(rough_top_k),
                 worker_count: config.worker_count,
+                worker_backend: config.worker_backend,
                 max_unique_outputs: config.max_gadget_solutions,
             },
             move || {
@@ -999,6 +1029,7 @@ pub fn build_dry_run_summary(config: &RunConfig) -> Result<DryRunSummary, String
         retroactive_input: config.retroactive_input,
         top_k: config.top_k,
         worker_count: config.worker_count,
+        worker_backend: config.worker_backend,
         max_unique_outputs: config.max_gadget_solutions,
     })
     .map_err(|error| error.to_string())?;

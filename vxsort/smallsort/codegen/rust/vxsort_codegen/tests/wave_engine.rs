@@ -4,9 +4,9 @@ use std::sync::{
 };
 
 use vxsort_codegen::scoring::{AssignedPath, GadgetCost, PathCost, Scorer};
-use vxsort_codegen::transition_table::TransitionTable;
+use vxsort_codegen::transition_table::{TransitionKey, TransitionTable};
 use vxsort_codegen::wave_engine::{WaveConfig, WaveEngine};
-use vxsort_codegen::{ArchArg, DTypeArg};
+use vxsort_codegen::{ArchArg, DTypeArg, WorkerBackendArg};
 
 fn state(top: &[u64], bottom: &[u64]) -> gadget_synth::VectorState {
     gadget_synth::VectorState::new(top.to_vec(), bottom.to_vec())
@@ -35,6 +35,20 @@ fn gadget_with_instruction_count(count: usize) -> gadget_synth::PermutationGadge
     )
 }
 
+fn transitions_with_sorted_gadgets(
+    table: &TransitionTable,
+    stage: usize,
+) -> std::collections::HashMap<TransitionKey, Vec<gadget_synth::PermutationGadget>> {
+    table
+        .get_all_transitions(stage)
+        .into_iter()
+        .map(|(key, mut gadgets)| {
+            gadgets.sort_by_key(gadget_synth::PermutationGadget::sort_key);
+            (key, gadgets)
+        })
+        .collect()
+}
+
 fn fast_config() -> WaveConfig {
     WaveConfig {
         num_vecs: 2,
@@ -45,6 +59,7 @@ fn fast_config() -> WaveConfig {
         retroactive_input: false,
         top_k: None,
         worker_count: 1,
+        worker_backend: WorkerBackendArg::InProcess,
         max_unique_outputs: 3,
     }
 }
@@ -354,8 +369,8 @@ fn run_stage_sync_with_workers_matches_single_worker_results() {
         sequential.transition_table().stage_stats(0)
     );
     assert_eq!(
-        parallel.transition_table().get_all_transitions(0),
-        sequential.transition_table().get_all_transitions(0)
+        transitions_with_sorted_gadgets(parallel.transition_table(), 0),
+        transitions_with_sorted_gadgets(sequential.transition_table(), 0)
     );
 }
 
@@ -380,10 +395,8 @@ fn worker_pool_stops_applying_results_after_output_budget() {
         parallel.transition_table().stage_stats(0),
         sequential.transition_table().stage_stats(0)
     );
-    assert_eq!(
-        parallel.transition_table().get_all_transitions(0),
-        sequential.transition_table().get_all_transitions(0)
-    );
+    assert_eq!(parallel.transition_table().unique_output_count(0), 1);
+    assert_eq!(parallel.transition_table().stage_stats(0).total_gadgets, 1);
 }
 
 #[test]

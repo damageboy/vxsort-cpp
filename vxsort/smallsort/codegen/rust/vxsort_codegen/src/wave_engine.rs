@@ -1,5 +1,8 @@
 use std::{
     collections::{BTreeMap, HashSet},
+    env,
+    io::{self, ErrorKind, Read, Write},
+    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     sync::{Arc, Mutex, mpsc},
     thread,
 };
@@ -19,8 +22,11 @@ use crate::scoring::{AssignedPath, AssignedPathKey, DummyScorer, PathCost, Score
 use crate::transition_table::{
     CompletePath, PathId, PathRegistry, State, StateId, TransitionRef, TransitionTable,
 };
-use crate::{ArchArg, DTypeArg};
+use crate::{ArchArg, DTypeArg, WorkerBackendArg};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
+
+const SYNTHESIS_WORKER_COMMAND: &str = "__synthesis-worker";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct WaveConfig {
@@ -32,6 +38,7 @@ pub struct WaveConfig {
     pub retroactive_input: bool,
     pub top_k: Option<usize>,
     pub worker_count: usize,
+    pub worker_backend: WorkerBackendArg,
     pub max_unique_outputs: usize,
 }
 
@@ -168,6 +175,92 @@ struct WorkerSynthesisJob {
     graph: GadgetGraph,
     target_pairs: Vec<(u64, u64)>,
     stage_count: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+struct ProcessWorkerConfig {
+    arch: ArchArg,
+    dtype: DTypeArg,
+    gadget_depth: u8,
+    natural_order: bool,
+    max_unique_outputs: usize,
+}
+
+impl From<WaveConfig> for ProcessWorkerConfig {
+    fn from(config: WaveConfig) -> Self {
+        Self {
+            arch: config.arch,
+            dtype: config.dtype,
+            gadget_depth: config.gadget_depth,
+            natural_order: config.natural_order,
+            max_unique_outputs: config.max_unique_outputs,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+struct ProcessWorkerJob {
+    index: usize,
+    stage: usize,
+    input: u32,
+    input_state: VectorState,
+    candidate_index: usize,
+    target_pairs: Vec<(u64, u64)>,
+    stage_count: usize,
+}
+
+impl ProcessWorkerJob {
+    fn from_worker_job(worker_job: WorkerSynthesisJob) -> Self {
+        Self {
+            index: worker_job.index,
+            stage: worker_job.job.stage,
+            input: worker_job.job.input.0,
+            input_state: worker_job.job.input_state,
+            candidate_index: worker_job.job.candidate_index,
+            target_pairs: worker_job.target_pairs,
+            stage_count: worker_job.stage_count,
+        }
+    }
+
+    fn to_synthesis_job(&self) -> SynthesisJob {
+        SynthesisJob {
+            stage: self.stage,
+            input: StateId(self.input),
+            input_state: self.input_state.clone(),
+            candidate_index: self.candidate_index,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+struct ProcessWorkerOutput {
+    job: ProcessWorkerJob,
+    results: Vec<(PermutationGadget, VectorState)>,
+}
+
+impl ProcessWorkerOutput {
+    fn into_synthesis_output(self) -> SynthesisJobOutput {
+        SynthesisJobOutput {
+            job: self.job.to_synthesis_job(),
+            results: self.results,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+enum ProcessWorkerRequest {
+    Init(ProcessWorkerConfig),
+    Run(ProcessWorkerJob),
+    Shutdown,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+enum ProcessWorkerResponse {
+    Ready(Result<(), String>),
+    Finished {
+        index: usize,
+        result: Result<ProcessWorkerOutput, String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -452,6 +545,209 @@ impl Drop for ScoringPool {
     }
 }
 
+struct ProcessSynthesisWorker {
+    child: Child,
+    stdin: ChildStdin,
+    stdout: ChildStdout,
+}
+
+impl ProcessSynthesisWorker {
+    fn spawn(config: WaveConfig) -> Result<Self, SynthesisError> {
+        let current_exe = env::current_exe().map_err(|error| {
+            SynthesisError::WorkerProcess(format!("failed to locate current executable: {error}"))
+        })?;
+        let mut child = Command::new(current_exe)
+            .arg(SYNTHESIS_WORKER_COMMAND)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .map_err(|error| {
+                SynthesisError::WorkerProcess(format!("failed to spawn synthesis worker: {error}"))
+            })?;
+        let mut stdin = child.stdin.take().ok_or_else(|| {
+            SynthesisError::WorkerProcess("worker stdin was not piped".to_owned())
+        })?;
+        let mut stdout = child.stdout.take().ok_or_else(|| {
+            SynthesisError::WorkerProcess("worker stdout was not piped".to_owned())
+        })?;
+
+        write_frame(
+            &mut stdin,
+            &ProcessWorkerRequest::Init(ProcessWorkerConfig::from(config)),
+        )
+        .map_err(|error| {
+            SynthesisError::WorkerProcess(format!("failed to initialize worker: {error}"))
+        })?;
+        match read_frame::<_, ProcessWorkerResponse>(&mut stdout).map_err(|error| {
+            SynthesisError::WorkerProcess(format!("failed to read worker ready response: {error}"))
+        })? {
+            Some(ProcessWorkerResponse::Ready(Ok(()))) => Ok(Self {
+                child,
+                stdin,
+                stdout,
+            }),
+            Some(ProcessWorkerResponse::Ready(Err(error))) => {
+                Err(SynthesisError::WorkerProcess(error))
+            }
+            Some(other) => Err(SynthesisError::WorkerProcess(format!(
+                "unexpected worker initialization response: {other:?}"
+            ))),
+            None => Err(SynthesisError::WorkerProcess(
+                "worker exited before initialization completed".to_owned(),
+            )),
+        }
+    }
+
+    fn run_job(
+        &mut self,
+        worker_job: WorkerSynthesisJob,
+    ) -> Result<SynthesisJobOutput, SynthesisError> {
+        let request = ProcessWorkerRequest::Run(ProcessWorkerJob::from_worker_job(worker_job));
+        write_frame(&mut self.stdin, &request).map_err(|error| {
+            SynthesisError::WorkerProcess(format!("failed to send worker job: {error}"))
+        })?;
+        match read_frame::<_, ProcessWorkerResponse>(&mut self.stdout).map_err(|error| {
+            SynthesisError::WorkerProcess(format!("failed to read worker job result: {error}"))
+        })? {
+            Some(ProcessWorkerResponse::Finished {
+                result: Ok(output), ..
+            }) => Ok(output.into_synthesis_output()),
+            Some(ProcessWorkerResponse::Finished {
+                result: Err(error), ..
+            }) => Err(SynthesisError::WorkerProcess(error)),
+            Some(other) => Err(SynthesisError::WorkerProcess(format!(
+                "unexpected worker job response: {other:?}"
+            ))),
+            None => Err(SynthesisError::WorkerProcess(
+                "worker exited before sending job result".to_owned(),
+            )),
+        }
+    }
+
+    fn shutdown(mut self) {
+        let _ = write_frame(&mut self.stdin, &ProcessWorkerRequest::Shutdown);
+        drop(self.stdin);
+        let _ = self.child.wait();
+    }
+}
+
+pub fn run_synthesis_worker_stdio() -> Result<(), String> {
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    run_synthesis_worker_stdio_impl(&mut stdin.lock(), &mut stdout.lock())
+}
+
+fn run_synthesis_worker_stdio_impl<R: Read, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+) -> Result<(), String> {
+    let Some(ProcessWorkerRequest::Init(config)) =
+        read_frame::<_, ProcessWorkerRequest>(reader).map_err(|error| error.to_string())?
+    else {
+        return Err("worker expected an Init request".to_owned());
+    };
+
+    let runtime = match ProcessWorkerRuntime::new(config) {
+        Ok(runtime) => {
+            write_frame(writer, &ProcessWorkerResponse::Ready(Ok(())))
+                .map_err(|error| error.to_string())?;
+            runtime
+        }
+        Err(error) => {
+            write_frame(
+                writer,
+                &ProcessWorkerResponse::Ready(Err(error.to_string())),
+            )
+            .map_err(|error| error.to_string())?;
+            return Ok(());
+        }
+    };
+
+    loop {
+        match read_frame::<_, ProcessWorkerRequest>(reader).map_err(|error| error.to_string())? {
+            Some(ProcessWorkerRequest::Run(job)) => {
+                let index = job.index;
+                let result = runtime.run_job(job).map_err(|error| error.to_string());
+                write_frame(writer, &ProcessWorkerResponse::Finished { index, result })
+                    .map_err(|error| error.to_string())?;
+            }
+            Some(ProcessWorkerRequest::Shutdown) | None => break,
+            Some(ProcessWorkerRequest::Init(_)) => {
+                return Err("worker received duplicate Init request".to_owned());
+            }
+        }
+    }
+
+    Ok(())
+}
+
+struct ProcessWorkerRuntime {
+    config: ProcessWorkerConfig,
+    candidates: Vec<GadgetGraph>,
+    synth: GadgetSynthesizer,
+}
+
+impl ProcessWorkerRuntime {
+    fn new(config: ProcessWorkerConfig) -> Result<Self, SynthesisError> {
+        let synth =
+            GadgetSynthesizer::new(to_synth_arch(config.arch), to_synth_dtype(config.dtype));
+        let (shallow, deep) = synth.precompute_candidates_stratified(config.gadget_depth)?;
+        let mut candidates = shallow;
+        candidates.extend(deep);
+        Ok(Self {
+            config,
+            candidates,
+            synth,
+        })
+    }
+
+    fn run_job(&self, job: ProcessWorkerJob) -> Result<ProcessWorkerOutput, SynthesisError> {
+        let graph = self.candidates.get(job.candidate_index).ok_or_else(|| {
+            SynthesisError::WorkerProcess(format!(
+                "candidate index {} is out of range for {} candidates",
+                job.candidate_index,
+                self.candidates.len()
+            ))
+        })?;
+        let allow_any_lane_order = !(self.config.natural_order && job.stage + 1 == job.stage_count);
+        let results = self.synth.synthesize_graph(
+            graph,
+            &job.input_state,
+            &job.target_pairs,
+            SynthesisOptions {
+                max_unique_outputs: self.config.max_unique_outputs,
+                allow_any_lane_order,
+            },
+        )?;
+        Ok(ProcessWorkerOutput { job, results })
+    }
+}
+
+fn write_frame<W: Write, T: Serialize>(writer: &mut W, value: &T) -> io::Result<()> {
+    let bytes = bincode::serialize(value).map_err(io::Error::other)?;
+    let len = u32::try_from(bytes.len())
+        .map_err(|_| io::Error::new(ErrorKind::InvalidData, "frame exceeds u32 length"))?;
+    writer.write_all(&len.to_le_bytes())?;
+    writer.write_all(&bytes)?;
+    writer.flush()
+}
+
+fn read_frame<R: Read, T: DeserializeOwned>(reader: &mut R) -> io::Result<Option<T>> {
+    let mut len_bytes = [0_u8; 4];
+    match reader.read_exact(&mut len_bytes) {
+        Ok(()) => {}
+        Err(error) if error.kind() == ErrorKind::UnexpectedEof => return Ok(None),
+        Err(error) => return Err(error),
+    }
+    let len = u32::from_le_bytes(len_bytes) as usize;
+    let mut bytes = vec![0_u8; len];
+    reader.read_exact(&mut bytes)?;
+    bincode::deserialize(&bytes)
+        .map(Some)
+        .map_err(|error| io::Error::new(ErrorKind::InvalidData, error))
+}
+
 fn score_job(scorer: &dyn Scorer, job: ScoringJob) -> ScoringJobResult {
     let path_length = job.path.len();
     let scored_paths = scorer
@@ -586,6 +882,14 @@ impl WaveEngine {
 
     pub fn config(&self) -> WaveConfig {
         self.config
+    }
+
+    pub fn resolved_worker_backend(&self) -> WorkerBackendArg {
+        match self.config.worker_backend {
+            WorkerBackendArg::Auto if self.config.worker_count > 1 => WorkerBackendArg::Process,
+            WorkerBackendArg::Auto => WorkerBackendArg::InProcess,
+            backend => backend,
+        }
     }
 
     pub fn elements_per_vector(&self) -> usize {
@@ -1162,6 +1466,7 @@ impl WaveEngine {
                     "attempt_budget": attempt_budget,
                     "output_budget": output_budget,
                     "worker_count": self.config.worker_count,
+                    "worker_backend": self.resolved_worker_backend().cli_name(),
                 }),
             );
         }
@@ -1730,6 +2035,16 @@ impl WaveEngine {
     ) -> Result<StageRunResult, SynthesisError> {
         let worker_count = self.config.worker_count.min(jobs.len()).max(1);
         let config = self.config;
+        let backend = self.resolved_worker_backend();
+        let mut process_workers = if backend == WorkerBackendArg::Process {
+            Some(
+                (0..worker_count)
+                    .map(|_| ProcessSynthesisWorker::spawn(config))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )
+        } else {
+            None
+        };
         let (job_sender, job_receiver) = mpsc::channel::<Option<WorkerSynthesisJob>>();
         let job_receiver = Arc::new(Mutex::new(job_receiver));
         let (event_sender, event_receiver) = mpsc::channel::<WorkerPoolEvent>();
@@ -1740,6 +2055,7 @@ impl WaveEngine {
                     "stage": stage,
                     "jobs": jobs.len(),
                     "worker_capacity": worker_count,
+                    "worker_backend": backend.cli_name(),
                     "outputs_at_start": outputs_at_start,
                     "output_budget": output_budget,
                 }),
@@ -1747,33 +2063,65 @@ impl WaveEngine {
         }
 
         thread::scope(|scope| {
-            for _ in 0..worker_count {
-                let job_receiver = Arc::clone(&job_receiver);
-                let event_sender = event_sender.clone();
-                scope.spawn(move || {
-                    loop {
-                        let message = {
-                            let receiver = job_receiver
-                                .lock()
-                                .expect("worker job receiver lock should not be poisoned");
-                            receiver.recv()
-                        };
-                        let Ok(Some(worker_job)) = message else {
-                            break;
-                        };
-                        let index = worker_job.index;
-                        if event_sender.send(WorkerPoolEvent::Started(index)).is_err() {
-                            break;
+            if let Some(workers) = process_workers.take() {
+                for mut process_worker in workers {
+                    let job_receiver = Arc::clone(&job_receiver);
+                    let event_sender = event_sender.clone();
+                    scope.spawn(move || {
+                        loop {
+                            let message = {
+                                let receiver = job_receiver
+                                    .lock()
+                                    .expect("worker job receiver lock should not be poisoned");
+                                receiver.recv()
+                            };
+                            let Ok(Some(worker_job)) = message else {
+                                break;
+                            };
+                            let index = worker_job.index;
+                            if event_sender.send(WorkerPoolEvent::Started(index)).is_err() {
+                                break;
+                            }
+                            let result = process_worker.run_job(worker_job);
+                            if event_sender
+                                .send(WorkerPoolEvent::Finished(index, result))
+                                .is_err()
+                            {
+                                break;
+                            }
                         }
-                        let result = synthesize_worker_job(config, worker_job);
-                        if event_sender
-                            .send(WorkerPoolEvent::Finished(index, result))
-                            .is_err()
-                        {
-                            break;
+                        process_worker.shutdown();
+                    });
+                }
+            } else {
+                for _ in 0..worker_count {
+                    let job_receiver = Arc::clone(&job_receiver);
+                    let event_sender = event_sender.clone();
+                    scope.spawn(move || {
+                        loop {
+                            let message = {
+                                let receiver = job_receiver
+                                    .lock()
+                                    .expect("worker job receiver lock should not be poisoned");
+                                receiver.recv()
+                            };
+                            let Ok(Some(worker_job)) = message else {
+                                break;
+                            };
+                            let index = worker_job.index;
+                            if event_sender.send(WorkerPoolEvent::Started(index)).is_err() {
+                                break;
+                            }
+                            let result = synthesize_worker_job(config, worker_job);
+                            if event_sender
+                                .send(WorkerPoolEvent::Finished(index, result))
+                                .is_err()
+                            {
+                                break;
+                            }
                         }
-                    }
-                });
+                    });
+                }
             }
             drop(event_sender);
 
@@ -1782,8 +2130,7 @@ impl WaveEngine {
             let mut active_workers = 0;
             let mut stop_sending = false;
             let mut stop_applying = false;
-            let mut next_to_apply = 0;
-            let mut buffered = BTreeMap::new();
+            let mut applied_jobs = 0;
             let mut attempts = 0;
             let mut valid_outputs = 0;
             let mut new_transitions = 0;
@@ -1805,8 +2152,8 @@ impl WaveEngine {
                         active_workers,
                         in_flight,
                         next_to_send,
-                        next_to_apply,
-                        buffered_results: buffered.len(),
+                        next_to_apply: applied_jobs,
+                        buffered_results: 0,
                     },
                 );
             }
@@ -1827,8 +2174,8 @@ impl WaveEngine {
                     active_workers,
                     in_flight,
                     next_to_send,
-                    next_to_apply,
-                    buffered_results: buffered.len(),
+                    next_to_apply: applied_jobs,
+                    buffered_results: 0,
                 },
             );
             if session.should_stop() {
@@ -1889,8 +2236,8 @@ impl WaveEngine {
                                 active_workers,
                                 in_flight,
                                 next_to_send,
-                                next_to_apply,
-                                buffered_results: buffered.len(),
+                                next_to_apply: applied_jobs,
+                                buffered_results: 0,
                             },
                         );
                         continue;
@@ -1937,7 +2284,6 @@ impl WaveEngine {
                                 ),
                             }
                         }
-                        buffered.insert(index, result);
                         trace_worker_counters(
                             trace,
                             "job_finished",
@@ -1948,130 +2294,125 @@ impl WaveEngine {
                                 active_workers,
                                 in_flight,
                                 next_to_send,
-                                next_to_apply,
-                                buffered_results: buffered.len(),
+                                next_to_apply: applied_jobs,
+                                buffered_results: 0,
                             },
                         );
-                    }
-                }
-
-                while !stop_applying {
-                    let Some(result) = buffered.remove(&next_to_apply) else {
-                        break;
-                    };
-                    match result {
-                        Ok(output) => {
-                            let job_index = next_to_apply;
-                            let job_stage = output.job.stage();
-                            let candidate_index = output.job.candidate_index();
-                            let worker_valid_outputs = output.results.len();
-                            if trace.is_enabled() {
-                                trace.event(
-                                    "job_apply_started",
-                                    json!({
-                                        "stage": job_stage,
-                                        "job_index": job_index,
-                                        "candidate_index": candidate_index,
-                                        "valid_outputs": worker_valid_outputs,
-                                    }),
-                                );
-                            }
-                            let apply_result =
-                                self.apply_synthesis_output_with_trace(output, trace);
-                            attempts += apply_result.attempts();
-                            valid_outputs += apply_result.valid_output_count();
-                            new_transitions += apply_result.new_transition_count();
-                            discovered_paths += apply_result.discovered_paths();
-                            self.poll_scoring_jobs_with_trace(trace, "job_apply_finished");
-                            self.emit_scoring_update_with_trace(
-                                session,
-                                trace,
-                                "job_apply_finished",
-                            );
-                            next_to_apply += 1;
-                            self.emit_stage_update(stage, session);
-                            if trace.is_enabled() {
-                                trace.event(
-                                    "job_apply_finished",
-                                    json!({
-                                        "stage": job_stage,
-                                        "job_index": job_index,
-                                        "candidate_index": candidate_index,
-                                        "attempts": apply_result.attempts(),
-                                        "valid_outputs": apply_result.valid_output_count(),
-                                        "new_transitions": apply_result.new_transition_count(),
-                                        "discovered_paths": apply_result.discovered_paths(),
-                                        "total_attempts": attempts,
-                                        "total_valid_outputs": valid_outputs,
-                                        "total_new_transitions": new_transitions,
-                                        "stage_new_outputs": self.transition_table.unique_output_count(stage) - outputs_at_start,
-                                    }),
-                                );
-                            }
-                            trace_worker_counters(
-                                trace,
-                                "job_apply_finished",
-                                WorkerCounters {
-                                    stage,
-                                    job_count: jobs.len(),
-                                    worker_capacity: worker_count,
-                                    active_workers,
-                                    in_flight,
-                                    next_to_send,
-                                    next_to_apply,
-                                    buffered_results: buffered.len(),
-                                },
-                            );
-                            if session.should_stop() {
-                                stop_sending = true;
-                                stop_applying = true;
-                                trace.event(
-                                    "worker_pool_stop_requested",
-                                    json!({
-                                        "stage": stage,
-                                        "reason": "session_stop",
-                                        "next_to_send": next_to_send,
-                                        "in_flight": in_flight,
-                                        "active_workers": active_workers,
-                                    }),
-                                );
-                                break;
-                            }
-
-                            let new_outputs =
-                                self.transition_table.unique_output_count(stage) - outputs_at_start;
-                            if new_outputs >= output_budget {
-                                stop_sending = true;
-                                stop_applying = true;
-                                trace.event(
-                                    "worker_pool_stop_requested",
-                                    json!({
-                                        "stage": stage,
-                                        "reason": "output_budget",
-                                        "new_outputs": new_outputs,
-                                        "output_budget": output_budget,
-                                        "next_to_send": next_to_send,
-                                        "in_flight": in_flight,
-                                        "active_workers": active_workers,
-                                    }),
-                                );
-                            }
+                        if stop_applying {
+                            continue;
                         }
-                        Err(error) => {
-                            trace.event(
-                                "worker_pool_stop_requested",
-                                json!({
-                                    "stage": stage,
-                                    "reason": "worker_error",
-                                    "error": error.to_string(),
-                                    "next_to_send": next_to_send,
-                                    "in_flight": in_flight,
-                                    "active_workers": active_workers,
-                                }),
-                            );
-                            first_error = Some(error);
-                            stop_sending = true;
-                            stop_applying = true;
+                        match result {
+                            Ok(output) => {
+                                let job_index = index;
+                                let job_stage = output.job.stage();
+                                let candidate_index = output.job.candidate_index();
+                                let worker_valid_outputs = output.results.len();
+                                if trace.is_enabled() {
+                                    trace.event(
+                                        "job_apply_started",
+                                        json!({
+                                            "stage": job_stage,
+                                            "job_index": job_index,
+                                            "candidate_index": candidate_index,
+                                            "valid_outputs": worker_valid_outputs,
+                                        }),
+                                    );
+                                }
+                                let apply_result =
+                                    self.apply_synthesis_output_with_trace(output, trace);
+                                attempts += apply_result.attempts();
+                                valid_outputs += apply_result.valid_output_count();
+                                new_transitions += apply_result.new_transition_count();
+                                discovered_paths += apply_result.discovered_paths();
+                                self.poll_scoring_jobs_with_trace(trace, "job_apply_finished");
+                                self.emit_scoring_update_with_trace(
+                                    session,
+                                    trace,
+                                    "job_apply_finished",
+                                );
+                                applied_jobs += 1;
+                                self.emit_stage_update(stage, session);
+                                if trace.is_enabled() {
+                                    trace.event(
+                                        "job_apply_finished",
+                                        json!({
+                                            "stage": job_stage,
+                                            "job_index": job_index,
+                                            "candidate_index": candidate_index,
+                                            "attempts": apply_result.attempts(),
+                                            "valid_outputs": apply_result.valid_output_count(),
+                                            "new_transitions": apply_result.new_transition_count(),
+                                            "discovered_paths": apply_result.discovered_paths(),
+                                            "total_attempts": attempts,
+                                            "total_valid_outputs": valid_outputs,
+                                            "total_new_transitions": new_transitions,
+                                            "stage_new_outputs": self.transition_table.unique_output_count(stage) - outputs_at_start,
+                                        }),
+                                    );
+                                }
+                                trace_worker_counters(
+                                    trace,
+                                    "job_apply_finished",
+                                    WorkerCounters {
+                                        stage,
+                                        job_count: jobs.len(),
+                                        worker_capacity: worker_count,
+                                        active_workers,
+                                        in_flight,
+                                        next_to_send,
+                                        next_to_apply: applied_jobs,
+                                        buffered_results: 0,
+                                    },
+                                );
+                                if session.should_stop() {
+                                    trace.event(
+                                        "worker_pool_stop_requested",
+                                        json!({
+                                            "stage": stage,
+                                            "reason": "session_stop",
+                                            "next_to_send": next_to_send,
+                                            "in_flight": in_flight,
+                                            "active_workers": active_workers,
+                                        }),
+                                    );
+                                    break;
+                                }
+
+                                let new_outputs = self.transition_table.unique_output_count(stage)
+                                    - outputs_at_start;
+                                if new_outputs >= output_budget {
+                                    stop_sending = true;
+                                    stop_applying = true;
+                                    trace.event(
+                                        "worker_pool_stop_requested",
+                                        json!({
+                                            "stage": stage,
+                                            "reason": "output_budget",
+                                            "new_outputs": new_outputs,
+                                            "output_budget": output_budget,
+                                            "next_to_send": next_to_send,
+                                            "in_flight": in_flight,
+                                            "active_workers": active_workers,
+                                        }),
+                                    );
+                                }
+                            }
+                            Err(error) => {
+                                trace.event(
+                                    "worker_pool_stop_requested",
+                                    json!({
+                                        "stage": stage,
+                                        "reason": "worker_error",
+                                        "error": error.to_string(),
+                                        "next_to_send": next_to_send,
+                                        "in_flight": in_flight,
+                                        "active_workers": active_workers,
+                                    }),
+                                );
+                                first_error = Some(error);
+                                stop_sending = true;
+                                stop_applying = true;
+                            }
                         }
                     }
                 }
@@ -2121,8 +2462,8 @@ impl WaveEngine {
                             active_workers,
                             in_flight,
                             next_to_send,
-                            next_to_apply,
-                            buffered_results: buffered.len(),
+                            next_to_apply: applied_jobs,
+                            buffered_results: 0,
                         },
                     );
                 }
@@ -2143,8 +2484,8 @@ impl WaveEngine {
                         active_workers,
                         in_flight,
                         next_to_send,
-                        next_to_apply,
-                        buffered_results: buffered.len(),
+                        next_to_apply: applied_jobs,
+                        buffered_results: 0,
                     },
                 );
             }
@@ -2165,8 +2506,8 @@ impl WaveEngine {
                     active_workers: 0,
                     in_flight: 0,
                     next_to_send,
-                    next_to_apply,
-                    buffered_results: buffered.len(),
+                    next_to_apply: applied_jobs,
+                    buffered_results: 0,
                 },
             );
 
@@ -2186,8 +2527,8 @@ impl WaveEngine {
                     "discovered_paths": discovered_paths,
                     "job_count": jobs.len(),
                     "submitted_jobs": next_to_send,
-                    "applied_jobs": next_to_apply,
-                    "buffered_results": buffered.len(),
+                    "applied_jobs": applied_jobs,
+                    "buffered_results": 0,
                 }),
             );
             Ok(StageRunResult {

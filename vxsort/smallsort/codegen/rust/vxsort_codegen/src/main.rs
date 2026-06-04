@@ -32,6 +32,10 @@ fn main() {
     let args = CliArgs::parse();
     match &args.command {
         CliCommand::Solve(_) => {}
+        CliCommand::SynthesisWorker(_) => {
+            exit_on_error(vxsort_codegen::wave_engine::run_synthesis_worker_stdio());
+            return;
+        }
         CliCommand::Verify(verify_args) => {
             let report = exit_on_error(verify_solution_json(
                 &verify_args.input,

@@ -492,8 +492,8 @@ pub fn dual_input_nodes(
 }
 
 pub fn dispatch_intrinsic(
-    name: &'static str,
-    args: &BTreeMap<&'static str, BV>,
+    name: &str,
+    args: &BTreeMap<&str, BV>,
     solver: &Solver,
 ) -> Result<BV, SynthesisError> {
     match name {
@@ -856,17 +856,20 @@ pub fn dispatch_intrinsic(
                 solver,
             ))
         }
-        other => Err(SynthesisError::UnsupportedIntrinsic(other)),
+        other => Err(SynthesisError::UnsupportedIntrinsic(other.to_owned())),
     }
 }
 
 fn required_arg<'a>(
-    intrinsic: &'static str,
-    args: &'a BTreeMap<&'static str, BV>,
+    intrinsic: &str,
+    args: &'a BTreeMap<&str, BV>,
     operand: &'static str,
 ) -> Result<&'a BV, SynthesisError> {
     args.get(operand)
-        .ok_or(SynthesisError::MissingOperand { intrinsic, operand })
+        .ok_or_else(|| SynthesisError::MissingOperand {
+            intrinsic: intrinsic.to_owned(),
+            operand: operand.to_owned(),
+        })
 }
 
 fn symbolic(name: String, bit_width: u32) -> GadgetNode {

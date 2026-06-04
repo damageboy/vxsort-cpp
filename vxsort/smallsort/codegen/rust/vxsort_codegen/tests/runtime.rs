@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use vxsort_codegen::runtime::{ChannelRuntimeSession, RuntimeEvent, RuntimeSession};
 use vxsort_codegen::runtime_trace::RuntimeTrace;
 use vxsort_codegen::wave_engine::{WaveConfig, WaveEngine};
-use vxsort_codegen::{ArchArg, DTypeArg};
+use vxsort_codegen::{ArchArg, DTypeArg, WorkerBackendArg};
 
 #[derive(Default)]
 struct RecordingRuntimeSession {
@@ -97,6 +97,7 @@ fn fast_config() -> WaveConfig {
         retroactive_input: false,
         top_k: None,
         worker_count: 1,
+        worker_backend: WorkerBackendArg::InProcess,
         max_unique_outputs: 3,
     }
 }

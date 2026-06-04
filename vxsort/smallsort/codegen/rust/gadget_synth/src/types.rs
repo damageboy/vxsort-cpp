@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Arch {
     Avx2,
@@ -13,7 +15,7 @@ pub enum DType {
     I64,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct VectorState {
     top: Vec<u64>,
     bottom: Vec<u64>,
@@ -37,17 +39,17 @@ impl VectorState {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 pub enum InstructionArg {
     Input(String),
     U64(u64),
     BitVec { bits: u32, hex: String },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct InstructionSpec {
-    intrinsic_name: &'static str,
-    args: BTreeMap<&'static str, InstructionArg>,
+    intrinsic_name: String,
+    args: BTreeMap<String, InstructionArg>,
 }
 
 pub type InstructionSortKey = (String, Vec<(String, String)>);
@@ -56,13 +58,16 @@ pub type GadgetSortKey = (Vec<InstructionSortKey>, Vec<InstructionSortKey>);
 impl InstructionSpec {
     pub fn new(intrinsic_name: &'static str, args: BTreeMap<&'static str, InstructionArg>) -> Self {
         Self {
-            intrinsic_name,
-            args,
+            intrinsic_name: intrinsic_name.to_owned(),
+            args: args
+                .into_iter()
+                .map(|(key, value)| (key.to_owned(), value))
+                .collect(),
         }
     }
 
-    pub fn intrinsic_name(&self) -> &'static str {
-        self.intrinsic_name
+    pub fn intrinsic_name(&self) -> &str {
+        &self.intrinsic_name
     }
 
     pub fn arg_u64(&self, name: &'static str) -> Option<u64> {
@@ -72,16 +77,16 @@ impl InstructionSpec {
         }
     }
 
-    pub fn args(&self) -> &BTreeMap<&'static str, InstructionArg> {
+    pub fn args(&self) -> &BTreeMap<String, InstructionArg> {
         &self.args
     }
 
     pub fn sort_key(&self) -> InstructionSortKey {
         (
-            self.intrinsic_name.to_owned(),
+            self.intrinsic_name.clone(),
             self.args
                 .iter()
-                .map(|(key, value)| ((*key).to_owned(), instruction_arg_sort_value(value)))
+                .map(|(key, value)| (key.clone(), instruction_arg_sort_value(value)))
                 .collect(),
         )
     }
@@ -89,8 +94,8 @@ impl InstructionSpec {
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 struct InstructionSignature {
-    intrinsic_name: &'static str,
-    args: Vec<(&'static str, ResolvedInstructionArg)>,
+    intrinsic_name: String,
+    args: Vec<(String, ResolvedInstructionArg)>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -109,7 +114,7 @@ fn instruction_arg_sort_value(value: &InstructionArg) -> String {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PermutationGadget {
     top_instructions: Vec<InstructionSpec>,
     bottom_instructions: Vec<InstructionSpec>,
@@ -214,11 +219,16 @@ fn instruction_signature(
     prior_signatures: &[InstructionSignature],
 ) -> InstructionSignature {
     InstructionSignature {
-        intrinsic_name: instruction.intrinsic_name,
+        intrinsic_name: instruction.intrinsic_name.clone(),
         args: instruction
             .args
             .iter()
-            .map(|(key, value)| (*key, resolved_instruction_arg(value, prior_signatures)))
+            .map(|(key, value)| {
+                (
+                    key.clone(),
+                    resolved_instruction_arg(value, prior_signatures),
+                )
+            })
             .collect(),
     }
 }
@@ -342,14 +352,14 @@ impl Default for SynthesisOptions {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SynthesisError {
-    UnsupportedIntrinsic(&'static str),
+    UnsupportedIntrinsic(String),
     UnsupportedGadgetDepth {
         depth: u8,
         max_supported: u8,
     },
     MissingOperand {
-        intrinsic: &'static str,
-        operand: &'static str,
+        intrinsic: String,
+        operand: String,
     },
     InvalidInputState {
         expected_lanes: usize,
@@ -357,6 +367,7 @@ pub enum SynthesisError {
         bottom: usize,
     },
     ModelMissingValue(String),
+    WorkerProcess(String),
     UnsupportedMuxEvaluation,
     UnsupportedMuxConcretization,
 }
@@ -388,6 +399,9 @@ impl fmt::Display for SynthesisError {
             ),
             SynthesisError::ModelMissingValue(name) => {
                 write!(formatter, "model missing value for '{name}'")
+            }
+            SynthesisError::WorkerProcess(message) => {
+                write!(formatter, "worker process failed: {message}")
             }
             SynthesisError::UnsupportedMuxEvaluation => write!(
                 formatter,
