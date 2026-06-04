@@ -244,7 +244,7 @@ fn build_verify_jobs(
             .map(|(path_index, path)| {
                 Ok(VerifyJob {
                     path_index,
-                    steps: extract_assigned_verify_steps(path)?,
+                    steps: extract_assigned_verify_steps(path, &imported.transition_table)?,
                 })
             })
             .collect()
@@ -255,48 +255,74 @@ fn extract_verify_steps(
     path: &CompletePath,
     table: &TransitionTable,
 ) -> Result<Vec<VerifyStep>, String> {
-    validate_path_continuity(path)?;
+    validate_path_continuity(path, table)?;
     path.iter()
-        .map(|(stage, input_state, output_state)| {
-            let transition = (input_state.clone(), output_state.clone());
-            let gadgets = table
-                .get_all_transitions(*stage)
-                .get(&transition)
-                .ok_or_else(|| format!("path references missing stage {stage} transition"))?;
-            let [gadget] = gadgets.as_slice() else {
+        .map(|(stage, transition)| {
+            let reference = crate::transition_table::TransitionRef {
+                stage: stage
+                    .try_into()
+                    .expect("stage index should fit in transition ref"),
+                transition,
+            };
+            let record = table.transition(reference);
+            let [gadget] = record.gadgets() else {
                 return Err(format!(
                     "stage {stage} transition has {} gadgets; verify requires concrete one-gadget JSON",
-                    gadgets.len()
+                    record.gadgets().len()
                 ));
             };
             Ok(VerifyStep {
                 gadget: gadget.clone(),
-                input_state: input_state.clone(),
-                output_state: output_state.clone(),
+                input_state: table.state_as_one_based_tuple(record.input()),
+                output_state: table.state_as_one_based_tuple(record.output()),
             })
         })
         .collect()
 }
 
-fn extract_assigned_verify_steps(path: &AssignedPath) -> Result<Vec<VerifyStep>, String> {
+fn extract_assigned_verify_steps(
+    path: &AssignedPath,
+    table: &TransitionTable,
+) -> Result<Vec<VerifyStep>, String> {
     let complete_path = path.as_complete_path();
-    validate_path_continuity(&complete_path)?;
+    validate_path_continuity(&complete_path, table)?;
     Ok(path
-        .steps()
+        .path()
         .iter()
-        .map(|step| VerifyStep {
-            gadget: step.gadget().clone(),
-            input_state: step.input().clone(),
-            output_state: step.output().clone(),
+        .zip(path.gadgets())
+        .map(|((stage, transition), gadget_index)| {
+            let reference = crate::transition_table::TransitionRef {
+                stage: stage
+                    .try_into()
+                    .expect("stage index should fit in transition ref"),
+                transition,
+            };
+            let record = table.transition(reference);
+            VerifyStep {
+                gadget: record.gadget(*gadget_index).clone(),
+                input_state: table.state_as_one_based_tuple(record.input()),
+                output_state: table.state_as_one_based_tuple(record.output()),
+            }
         })
         .collect())
 }
 
-fn validate_path_continuity(path: &CompletePath) -> Result<(), String> {
-    for window in path.windows(2) {
-        let (stage, _, output_state) = &window[0];
-        let (next_stage, next_input_state, _) = &window[1];
-        if output_state != next_input_state {
+fn validate_path_continuity(path: &CompletePath, table: &TransitionTable) -> Result<(), String> {
+    for stage in 0..path.len().saturating_sub(1) {
+        let current_ref = crate::transition_table::TransitionRef {
+            stage: stage
+                .try_into()
+                .expect("stage index should fit in transition ref"),
+            transition: path.transition_at_stage(stage),
+        };
+        let next_stage = stage + 1;
+        let next_ref = crate::transition_table::TransitionRef {
+            stage: next_stage
+                .try_into()
+                .expect("stage index should fit in transition ref"),
+            transition: path.transition_at_stage(next_stage),
+        };
+        if table.transition(current_ref).output() != table.transition(next_ref).input() {
             return Err(format!(
                 "path is disconnected between stage {stage} and stage {next_stage}: output_state does not match next input_state"
             ));

@@ -1,4 +1,5 @@
 use clap::Parser;
+use serde_json::Value;
 use std::fs;
 use std::process::Command;
 use vxsort_codegen::{
@@ -31,6 +32,8 @@ fn parses_python_compatible_solve_flags() {
         "3",
         "--runtime-ui",
         "none",
+        "--runtime-trace",
+        "trace.jsonl",
         "--target-cpu",
         "ZEN4,ADL-P",
         "--max-gadget-solutions",
@@ -64,6 +67,7 @@ fn parses_python_compatible_solve_flags() {
             wave_outputs: 7,
             worker_count: 3,
             runtime_ui: RuntimeUiArg::None,
+            runtime_trace_path: Some(std::path::PathBuf::from("trace.jsonl")),
             dry_run: false,
         }
     );
@@ -343,6 +347,61 @@ fn run_summary_drives_sync_wave_loop() {
 }
 
 #[test]
+fn run_summary_writes_runtime_trace_file() {
+    let data_dir = fixture_uica_data_dir("runtime-trace");
+    let trace_path = std::env::temp_dir().join(format!(
+        "vxsort-runtime-trace-cli-{}.jsonl",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&trace_path);
+    let args = CliArgs::try_parse_from([
+        "vxsort-codegen",
+        "solve",
+        "--vector-machine",
+        "AVX2",
+        "--datatype",
+        "i64",
+        "--target-cpu",
+        "SKL",
+        "--top-k",
+        "1",
+        "--uica-data-dir",
+        data_dir.to_str().expect("fixture path should be utf-8"),
+        "--max-waves",
+        "1",
+        "--wave-attempts",
+        "5",
+        "--wave-outputs",
+        "100",
+        "--workers",
+        "2",
+        "--runtime-ui",
+        "none",
+        "--runtime-trace",
+        trace_path.to_str().expect("trace path should be utf-8"),
+    ])
+    .expect("run flags should parse");
+    let config = parse_run_config(args).expect("run config should be built");
+
+    build_run_summary(&config).expect("run summary should be built");
+
+    let trace_contents = fs::read_to_string(&trace_path).expect("trace file should be readable");
+    let events = trace_contents
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("trace line should be JSON"))
+        .collect::<Vec<_>>();
+    let _ = fs::remove_file(&trace_path);
+
+    assert!(events.iter().any(|event| event["event"] == "run_started"));
+    assert!(events.iter().any(|event| event["event"] == "job_submitted"));
+    assert!(
+        events
+            .iter()
+            .any(|event| event["event"] == "worker_counters")
+    );
+}
+
+#[test]
 fn binary_non_dry_run_prints_sync_summary() {
     let data_dir = fixture_uica_data_dir("binary-summary");
     let output = Command::new(env!("CARGO_BIN_EXE_vxsort_codegen"))
@@ -541,7 +600,7 @@ fn binary_converts_solution_json_to_assembly() {
 fn binary_estimate_prints_ranked_table_and_writes_trace() {
     let input_path = temp_named_output_path("estimate-input", "json");
     let output_dir =
-        std::env::temp_dir().join(format!("vxsort-estimate-output-{}", std::process::id()));
+        std::env::temp_dir().join(format!("vxsort estimate output {}", std::process::id()));
     let data_dir = fixture_uica_data_dir_with_vpermq("estimate");
     let _ = fs::remove_file(&input_path);
     let _ = fs::remove_dir_all(&output_dir);
@@ -574,8 +633,26 @@ fn binary_estimate_prints_ranked_table_and_writes_trace() {
     assert!(stdout.contains("Rank"), "stdout was:\n{stdout}");
     assert!(stdout.contains("TP"), "stdout was:\n{stdout}");
     assert!(stdout.contains("Trace"), "stdout was:\n{stdout}");
+    assert!(stdout.contains("╭"), "stdout was:\n{stdout}");
+    assert!(
+        !stdout.contains("Rank  Path         TP"),
+        "stdout was:\n{stdout}"
+    );
     assert!(
         stdout.contains("solution_000_trace.html"),
+        "stdout was:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("\x1b]8;;file://localhost/"),
+        "stdout was:\n{stdout}"
+    );
+    assert!(stdout.contains("%20"), "stdout was:\n{stdout}");
+    assert!(
+        stdout.contains("\x1b\\solution_000_trace.html\x1b]8;;"),
+        "stdout was:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("subl://open?url=file://"),
         "stdout was:\n{stdout}"
     );
     assert!(output_dir.join("solution_000_trace.html").is_file());

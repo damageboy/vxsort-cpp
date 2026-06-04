@@ -210,6 +210,7 @@ fn select_blocks_from_imported(
     } else {
         lower_assigned_paths(
             &imported.metadata,
+            &imported.transition_table,
             &imported.assigned_paths,
             LoweringOptions::default(),
         )

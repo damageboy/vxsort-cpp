@@ -7,7 +7,7 @@ use gadget_synth::{InstructionArg, InstructionSpec, PermutationGadget};
 use serde_json::{Map, Value, json};
 
 use crate::scoring::AssignedPath;
-use crate::transition_table::{CompletePath, StateTuple, TransitionKey, TransitionTable};
+use crate::transition_table::{CompletePath, StateTuple, TransitionRef, TransitionTable};
 use crate::{ArchArg, DTypeArg};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -34,10 +34,14 @@ pub fn write_solution_json_for_paths(
 pub fn write_solution_json_for_assigned_paths(
     output_path: impl AsRef<Path>,
     metadata: &SolutionJsonMetadata,
+    table: &TransitionTable,
     paths: &[AssignedPath],
 ) -> Result<(), io::Error> {
     let file = File::create(output_path)?;
-    serde_json::to_writer_pretty(file, &solution_json_for_assigned_paths(metadata, paths))?;
+    serde_json::to_writer_pretty(
+        file,
+        &solution_json_for_assigned_paths(metadata, table, paths),
+    )?;
     Ok(())
 }
 
@@ -49,6 +53,7 @@ pub fn solution_json_for_paths(
     let mut node_ids = BTreeMap::<StepKey, String>::new();
     let mut node_order = Vec::<StepKey>::new();
     let mut children = BTreeMap::<StepKey, BTreeSet<String>>::new();
+    let mut node_gadgets = BTreeMap::<StepKey, Vec<PermutationGadget>>::new();
     let mut root_ids = Vec::new();
 
     for path in paths {
@@ -56,21 +61,26 @@ pub fn solution_json_for_paths(
             continue;
         }
 
-        for step in path {
-            ensure_node_id(step, &mut node_ids, &mut node_order);
+        let keys = complete_path_keys(table, path);
+        for (key, gadgets) in &keys {
+            ensure_node_id(key, &mut node_ids, &mut node_order);
+            node_gadgets
+                .entry(key.clone())
+                .or_default()
+                .extend(gadgets.iter().cloned());
         }
 
         root_ids.push(
             node_ids
-                .get(&path[0])
+                .get(&keys[0].0)
                 .expect("path root should have an assigned node id")
                 .clone(),
         );
 
-        for window in path.windows(2) {
-            let parent = &window[0];
+        for window in keys.windows(2) {
+            let parent = &window[0].0;
             let child_id = node_ids
-                .get(&window[1])
+                .get(&window[1].0)
                 .expect("path child should have an assigned node id")
                 .clone();
             children.entry(parent.clone()).or_default().insert(child_id);
@@ -82,7 +92,11 @@ pub fn solution_json_for_paths(
         let id = node_ids
             .get(&key)
             .expect("node order should reference assigned ids");
-        nodes.insert(id.clone(), node_json(&key, table, &children));
+        let gadgets = node_gadgets.get(&key).cloned().unwrap_or_default();
+        nodes.insert(
+            id.clone(),
+            node_json_with_gadgets(&key, &gadgets, &children),
+        );
     }
 
     json!({
@@ -97,6 +111,7 @@ pub fn solution_json_for_paths(
 
 pub fn solution_json_for_assigned_paths(
     metadata: &SolutionJsonMetadata,
+    table: &TransitionTable,
     paths: &[AssignedPath],
 ) -> Value {
     let mut node_ids = BTreeMap::<StepKey, String>::new();
@@ -106,42 +121,29 @@ pub fn solution_json_for_assigned_paths(
     let mut root_ids = Vec::new();
 
     for path in paths {
-        if path.steps().is_empty() {
+        if path.path().is_empty() {
             continue;
         }
 
-        for step in path.steps() {
-            let key = (step.stage(), step.input().clone(), step.output().clone());
-            ensure_node_id(&key, &mut node_ids, &mut node_order);
-            let gadgets = node_gadgets.entry(key).or_default();
-            if !gadgets.contains(step.gadget()) {
-                gadgets.push(step.gadget().clone());
+        let keys = assigned_path_keys(table, path);
+        for (key, gadget) in &keys {
+            ensure_node_id(key, &mut node_ids, &mut node_order);
+            let gadgets = node_gadgets.entry(key.clone()).or_default();
+            if !gadgets.contains(gadget) {
+                gadgets.push((*gadget).clone());
             }
         }
 
-        let root_key = (
-            path.steps()[0].stage(),
-            path.steps()[0].input().clone(),
-            path.steps()[0].output().clone(),
-        );
         root_ids.push(
             node_ids
-                .get(&root_key)
+                .get(&keys[0].0)
                 .expect("assigned path root should have an assigned node id")
                 .clone(),
         );
 
-        for window in path.steps().windows(2) {
-            let parent_key = (
-                window[0].stage(),
-                window[0].input().clone(),
-                window[0].output().clone(),
-            );
-            let child_key = (
-                window[1].stage(),
-                window[1].input().clone(),
-                window[1].output().clone(),
-            );
+        for window in keys.windows(2) {
+            let parent_key = window[0].0.clone();
+            let child_key = window[1].0.clone();
             let child_id = node_ids
                 .get(&child_key)
                 .expect("assigned path child should have an assigned node id")
@@ -164,26 +166,28 @@ pub fn solution_json_for_assigned_paths(
 
     let concrete_paths = paths
         .iter()
-        .filter(|path| !path.steps().is_empty())
+        .filter(|path| !path.path().is_empty())
         .map(|path| {
             let steps = path
-                .steps()
+                .path()
                 .iter()
-                .map(|step| {
-                    let key = (step.stage(), step.input().clone(), step.output().clone());
+                .zip(path.gadgets())
+                .map(|((stage, transition), gadget_index)| {
+                    let key = step_key_for_transition(
+                        table,
+                        TransitionRef {
+                            stage: stage
+                                .try_into()
+                                .expect("stage index should fit in transition ref"),
+                            transition,
+                        },
+                    );
                     let node_id = node_ids
                         .get(&key)
                         .expect("assigned path step should have a node id");
-                    let gadgets = node_gadgets
-                        .get(&key)
-                        .expect("assigned path step should have node gadgets");
-                    let gadget_index = gadgets
-                        .iter()
-                        .position(|gadget| gadget == step.gadget())
-                        .expect("assigned path gadget should be present in node gadgets");
                     json!({
                         "node_id": node_id,
-                        "gadget_index": gadget_index,
+                        "gadget_index": gadget_index.0,
                     })
                 })
                 .collect::<Vec<_>>();
@@ -216,26 +220,6 @@ fn ensure_node_id(
     node_order.push(key.clone());
 }
 
-fn node_json(
-    key: &StepKey,
-    table: &TransitionTable,
-    children_by_key: &BTreeMap<StepKey, BTreeSet<String>>,
-) -> Value {
-    let (stage, input, output) = key;
-    let transition_key: TransitionKey = (input.clone(), output.clone());
-    let empty_gadgets = Vec::new();
-    let gadgets = table
-        .get_all_transitions(*stage)
-        .get(&transition_key)
-        .unwrap_or(&empty_gadgets);
-    let child_ids = children_by_key
-        .get(key)
-        .map(|children| children.iter().cloned().collect::<Vec<_>>())
-        .unwrap_or_default();
-
-    node_json_payload(stage, input, output, gadgets, child_ids)
-}
-
 fn node_json_with_gadgets(
     key: &StepKey,
     gadgets: &[PermutationGadget],
@@ -248,6 +232,56 @@ fn node_json_with_gadgets(
         .unwrap_or_default();
 
     node_json_payload(stage, input, output, gadgets, child_ids)
+}
+
+fn complete_path_keys(
+    table: &TransitionTable,
+    path: &CompletePath,
+) -> Vec<(StepKey, Vec<PermutationGadget>)> {
+    path.iter()
+        .map(|(stage, transition)| {
+            let transition_ref = TransitionRef {
+                stage: stage
+                    .try_into()
+                    .expect("stage index should fit in transition ref"),
+                transition,
+            };
+            let key = step_key_for_transition(table, transition_ref);
+            let gadgets = table.transition_gadgets(transition_ref).to_vec();
+            (key, gadgets)
+        })
+        .collect()
+}
+
+fn assigned_path_keys<'a>(
+    table: &'a TransitionTable,
+    path: &'a AssignedPath,
+) -> Vec<(StepKey, &'a PermutationGadget)> {
+    path.path()
+        .iter()
+        .zip(path.gadgets())
+        .map(|((stage, transition), gadget_index)| {
+            let transition_ref = TransitionRef {
+                stage: stage
+                    .try_into()
+                    .expect("stage index should fit in transition ref"),
+                transition,
+            };
+            (
+                step_key_for_transition(table, transition_ref),
+                table.transition(transition_ref).gadget(*gadget_index),
+            )
+        })
+        .collect()
+}
+
+fn step_key_for_transition(table: &TransitionTable, transition: TransitionRef) -> StepKey {
+    let record = table.transition(transition);
+    (
+        usize::from(transition.stage),
+        table.state_as_one_based_tuple(record.input()),
+        table.state_as_one_based_tuple(record.output()),
+    )
 }
 
 fn node_json_payload(

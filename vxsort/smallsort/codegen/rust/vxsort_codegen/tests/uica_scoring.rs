@@ -241,18 +241,20 @@ fn k_best_assignment_returns_lowest_concrete_gadget_combinations() {
     table.add_transition(0, &s0, &s1, cheap.clone());
     table.add_transition(1, &s1, &s2, expensive);
     table.add_transition(1, &s1, &s2, cheap);
-    let path = vec![
-        (0, s0.as_tuple(), s1.as_tuple()),
-        (1, s1.as_tuple(), s2.as_tuple()),
-    ];
+    let path = table
+        .complete_path_from_zero_based_steps(&[
+            (0, s0.as_tuple(), s1.as_tuple()),
+            (1, s1.as_tuple(), s2.as_tuple()),
+        ])
+        .expect("path should resolve");
 
     let assigned = scorer.assign_path_gadgets_k_best(&path, &table, 3);
     let selections: Vec<Vec<usize>> = assigned
         .iter()
         .map(|path| {
-            path.steps()
+            path.gadgets()
                 .iter()
-                .map(|step| step.gadget_index())
+                .map(|gadget| usize::from(gadget.0))
                 .collect()
         })
         .collect();

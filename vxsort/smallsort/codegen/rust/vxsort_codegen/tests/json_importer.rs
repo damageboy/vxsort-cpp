@@ -8,8 +8,8 @@ use vxsort_codegen::json_exporter::{
     SolutionJsonMetadata, solution_json_for_assigned_paths, solution_json_for_paths,
 };
 use vxsort_codegen::json_importer::solution_json_from_value;
-use vxsort_codegen::scoring::{AssignedPath, AssignedStep};
-use vxsort_codegen::transition_table::TransitionTable;
+use vxsort_codegen::scoring::AssignedPath;
+use vxsort_codegen::transition_table::{GadgetIndex, TransitionTable};
 use vxsort_codegen::{ArchArg, DTypeArg};
 
 fn state(top: &[u64], bottom: &[u64]) -> VectorState {
@@ -31,8 +31,8 @@ fn metadata() -> SolutionJsonMetadata {
 
 #[test]
 fn solution_json_import_reconstructs_paths_table_and_asm() {
-    let input = state(&[1, 3, 5, 7], &[2, 4, 6, 8]);
-    let output = state(&[1, 2, 5, 6], &[3, 4, 7, 8]);
+    let input = state(&[0, 2, 4, 6], &[1, 3, 5, 7]);
+    let output = state(&[0, 1, 4, 5], &[2, 3, 6, 7]);
     let gadget = PermutationGadget::new(
         vec![inst(
             "_mm256_permute4x64_epi64",
@@ -45,7 +45,9 @@ fn solution_json_import_reconstructs_paths_table_and_asm() {
     );
     let mut table = TransitionTable::new(1);
     table.add_transition(0, &input, &output, gadget);
-    let path = vec![(0, input.as_tuple(), output.as_tuple())];
+    let path = table
+        .complete_path_from_zero_based_steps(&[(0, input.as_tuple(), output.as_tuple())])
+        .expect("path should resolve");
     let json = solution_json_for_paths(&metadata(), &table, std::slice::from_ref(&path));
 
     let imported = solution_json_from_value(&json).expect("exported JSON should import");
@@ -68,8 +70,8 @@ fn solution_json_import_reconstructs_paths_table_and_asm() {
 
 #[test]
 fn solution_json_import_reconstructs_concrete_assigned_paths() {
-    let input = state(&[1, 3, 5, 7], &[2, 4, 6, 8]);
-    let output = state(&[1, 2, 5, 6], &[3, 4, 7, 8]);
+    let input = state(&[0, 2, 4, 6], &[1, 3, 5, 7]);
+    let output = state(&[0, 1, 4, 5], &[2, 3, 6, 7]);
     let identity = PermutationGadget::new(Vec::new(), Vec::new());
     let permute = PermutationGadget::new(
         vec![inst(
@@ -81,21 +83,15 @@ fn solution_json_import_reconstructs_concrete_assigned_paths() {
         )],
         Vec::new(),
     );
-    let selected = AssignedPath::new(vec![AssignedStep::new(
-        0,
-        input.as_tuple(),
-        output.as_tuple(),
-        1,
-        permute.clone(),
-    )]);
-    let unselected_first = AssignedPath::new(vec![AssignedStep::new(
-        0,
-        input.as_tuple(),
-        output.as_tuple(),
-        0,
-        identity,
-    )]);
-    let json = solution_json_for_assigned_paths(&metadata(), &[unselected_first, selected]);
+    let mut table = TransitionTable::new(1);
+    table.add_transition(0, &input, &output, identity);
+    table.add_transition(0, &input, &output, permute.clone());
+    let path = table
+        .complete_path_from_zero_based_steps(&[(0, input.as_tuple(), output.as_tuple())])
+        .expect("path should resolve");
+    let selected = AssignedPath::new(path.clone(), vec![GadgetIndex(1)]);
+    let unselected_first = AssignedPath::new(path, vec![GadgetIndex(0)]);
+    let json = solution_json_for_assigned_paths(&metadata(), &table, &[unselected_first, selected]);
     let selected_json = serde_json::json!({
         "natural_order": json["natural_order"],
         "vector_machine": json["vector_machine"],
@@ -109,14 +105,20 @@ fn solution_json_import_reconstructs_concrete_assigned_paths() {
     let imported = solution_json_from_value(&selected_json).expect("assigned JSON should import");
 
     assert_eq!(imported.assigned_paths.len(), 1);
-    assert_eq!(imported.assigned_paths[0].steps()[0].gadget_index(), 1);
+    assert_eq!(
+        imported.assigned_paths[0].gadget_at_stage(0),
+        GadgetIndex(1)
+    );
     assert_eq!(
         imported.paths,
         vec![imported.assigned_paths[0].as_complete_path()]
     );
 
-    let asm =
-        generate_solution_asm_for_assigned_paths(&imported.metadata, &imported.assigned_paths);
+    let asm = generate_solution_asm_for_assigned_paths(
+        &imported.metadata,
+        &imported.transition_table,
+        &imported.assigned_paths,
+    );
     assert!(asm.contains("vpermq"));
     assert!(asm.contains("ret"));
 }
@@ -214,9 +216,8 @@ fn solution_json_import_accepts_large_python_control_vector_integer() {
     .expect("large JSON integer should parse");
 
     let imported = solution_json_from_value(&json).expect("large integer should import");
-    let gadgets = imported
-        .transition_table
-        .get_all_transitions(0)
+    let transitions = imported.transition_table.get_all_transitions(0);
+    let gadgets = transitions
         .values()
         .next()
         .expect("transition should exist");

@@ -12,6 +12,7 @@ use std::{
 };
 
 use clap::Parser;
+use comfy_table::{Cell, Table, modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL};
 use vxsort_codegen::{
     CliArgs, CliCommand, DryRunSummary, EstimateReport, FetchUicaDataConfig, RunConfig, RunSummary,
     RuntimeUiArg, build_dry_run_summary, build_run_summary, build_run_summary_with_session,
@@ -107,6 +108,7 @@ fn score_solution_json(args: &vxsort_codegen::ScoreJsonArgs) -> Result<(), Strin
     } else {
         lower_assigned_paths(
             &imported.metadata,
+            &imported.transition_table,
             &imported.assigned_paths,
             LoweringOptions::default(),
         )
@@ -221,11 +223,14 @@ fn print_estimate_report(report: &EstimateReport) {
         return;
     }
 
-    println!();
-    println!(
-        "{:<5} {:<6} {:>8} {:>8} {:>8} {:>8} {:<24} Status",
-        "Rank", "Path", "TP", "Cycles", "Iters", "Instr", "Trace"
-    );
+    let mut table = Table::new();
+    table
+        .load_preset(UTF8_FULL)
+        .apply_modifier(UTF8_ROUND_CORNERS);
+    table.set_header([
+        "Rank", "Path", "TP", "Cycles", "Iters", "Instr", "Trace", "Status",
+    ]);
+    let mut trace_links = vec![];
     for result in &report.results {
         let rank = result
             .rank
@@ -236,24 +241,32 @@ fn print_estimate_report(report: &EstimateReport) {
             .filter(|value| value.is_finite())
             .map(|value| format!("{value:.2}"))
             .unwrap_or_else(|| "err".to_owned());
-        let trace = result
-            .trace_path
-            .as_deref()
-            .map(terminal_file_link)
-            .unwrap_or_else(|| "-".to_owned());
-        let status = if result.error.is_some() { "err" } else { "ok" };
-        println!(
-            "{:<5} {:<6} {:>8} {:>8} {:>8} {:>8} {:<24} {}",
-            rank,
-            result.path_index,
-            throughput,
-            result.cycles_simulated,
-            result.iterations_simulated,
-            result.instruction_count,
-            trace,
-            status
+        let trace = result.trace_path.as_deref().map_or_else(
+            || "-".to_owned(),
+            |path| {
+                let label = terminal_file_label(path);
+                trace_links.push((label.clone(), terminal_file_link(path)));
+                label
+            },
         );
+        let status = if result.error.is_some() { "err" } else { "ok" };
+        table.add_row([
+            Cell::new(rank),
+            Cell::new(result.path_index),
+            Cell::new(throughput),
+            Cell::new(result.cycles_simulated),
+            Cell::new(result.iterations_simulated),
+            Cell::new(result.instruction_count),
+            Cell::new(trace),
+            Cell::new(status),
+        ]);
     }
+    println!();
+    let mut rendered_table = table.to_string();
+    for (label, link) in trace_links {
+        rendered_table = rendered_table.replace(&label, &link);
+    }
+    println!("{rendered_table}");
 
     let warnings = report
         .results
@@ -275,17 +288,35 @@ fn print_estimate_report(report: &EstimateReport) {
 }
 
 fn terminal_file_link(path: &Path) -> String {
-    let Some(label) = path.file_name().and_then(|name| name.to_str()) else {
-        return path.display().to_string();
-    };
+    let label = terminal_file_label(path);
     let Ok(absolute) = path.canonicalize() else {
         return label.to_owned();
     };
-    format!(
-        "\x1b]8;;file://{}\x1b\\{}\x1b]8;;\x1b\\",
-        absolute.display(),
-        label
-    )
+    let url = local_file_url(&absolute);
+    format!("\x1b]8;;{url}\x1b\\{label}\x1b]8;;\x1b\\")
+}
+
+fn terminal_file_label(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_owned)
+        .unwrap_or_else(|| path.display().to_string())
+}
+
+fn local_file_url(path: &Path) -> String {
+    let mut url = String::from("file://localhost");
+    for byte in path.display().to_string().bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'.' | b'_' | b'~' => {
+                url.push(byte as char);
+            }
+            _ => {
+                use std::fmt::Write as _;
+                write!(url, "%{byte:02X}").expect("writing to String should not fail");
+            }
+        }
+    }
+    url
 }
 
 fn run_with_runtime_ui(config: &RunConfig) -> RunSummary {

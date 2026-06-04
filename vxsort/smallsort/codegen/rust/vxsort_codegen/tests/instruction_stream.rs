@@ -17,6 +17,17 @@ fn state(top: &[u64], bottom: &[u64]) -> VectorState {
     VectorState::new(top.to_vec(), bottom.to_vec())
 }
 
+fn path_for(
+    table: &TransitionTable,
+    stage: usize,
+    input: &VectorState,
+    output: &VectorState,
+) -> vxsort_codegen::transition_table::CompletePath {
+    table
+        .complete_path_from_zero_based_steps(&[(stage, input.as_tuple(), output.as_tuple())])
+        .expect("test path should resolve")
+}
+
 fn inst(name: &'static str, args: &[(&'static str, InstructionArg)]) -> InstructionSpec {
     InstructionSpec::new(name, args.iter().cloned().collect::<BTreeMap<_, _>>())
 }
@@ -224,7 +235,7 @@ fn identical_bitvec_constants_share_one_pool_entry_and_materialized_register() {
 
     let mut table = TransitionTable::new(1);
     table.add_transition(0, &input, &output, gadget);
-    let path = vec![(0, input.as_tuple(), output.as_tuple())];
+    let path = path_for(&table, 0, &input, &output);
 
     let stream = lower_solution_paths(
         &avx512_i64_metadata(),
@@ -273,6 +284,44 @@ fn identical_bitvec_constants_share_one_pool_entry_and_materialized_register() {
 }
 
 #[test]
+fn lowering_options_can_omit_human_comments_for_scoring() {
+    let input = state(&[1, 3, 5, 7], &[2, 4, 6, 8]);
+    let output = state(&[1, 2, 5, 6], &[3, 4, 7, 8]);
+    let gadget = PermutationGadget::new(
+        vec![inst(
+            "_mm256_permute4x64_epi64",
+            &[
+                ("a", InstructionArg::Input("top".to_owned())),
+                ("imm8", InstructionArg::U64(0x1b)),
+            ],
+        )],
+        vec![],
+    );
+    let mut table = TransitionTable::new(1);
+    table.add_transition(0, &input, &output, gadget);
+    let path = path_for(&table, 0, &input, &output);
+
+    let stream = lower_solution_paths(
+        &avx2_i64_metadata(),
+        &table,
+        &[path],
+        LoweringOptions {
+            include_comments: false,
+        },
+    );
+
+    let block = &stream.blocks[0];
+    assert!(
+        block
+            .instructions
+            .iter()
+            .all(|instruction| !instruction.mnemonic.is_empty() && instruction.comment.is_none()),
+        "scoring lowering should not build comment-only state tables: {:?}",
+        block.instructions
+    );
+}
+
+#[test]
 fn identical_kmask_constants_share_one_pool_entry_and_materialized_register() {
     let input = state(&[1, 3, 5, 7], &[2, 4, 6, 8]);
     let output = state(&[1, 2, 5, 6], &[3, 4, 7, 8]);
@@ -300,7 +349,7 @@ fn identical_kmask_constants_share_one_pool_entry_and_materialized_register() {
 
     let mut table = TransitionTable::new(1);
     table.add_transition(0, &input, &output, gadget);
-    let path = vec![(0, input.as_tuple(), output.as_tuple())];
+    let path = path_for(&table, 0, &input, &output);
 
     let stream = lower_solution_paths(
         &avx512_i64_metadata(),
@@ -376,7 +425,7 @@ fn lower_one_stage_avx2_i64_path() {
 
     let mut table = TransitionTable::new(1);
     table.add_transition(0, &input, &output, gadget);
-    let path = vec![(0, input.as_tuple(), output.as_tuple())];
+    let path = path_for(&table, 0, &input, &output);
 
     let stream = lower_solution_paths(
         &avx2_i64_metadata(),
@@ -441,7 +490,7 @@ fn lower_avx2_i64_vpermq_operands() {
 
     let mut table = TransitionTable::new(1);
     table.add_transition(0, &input, &output, gadget);
-    let path = vec![(0, input.as_tuple(), output.as_tuple())];
+    let path = path_for(&table, 0, &input, &output);
 
     let stream = lower_solution_paths(
         &avx2_i64_metadata(),
@@ -495,7 +544,7 @@ fn lower_unconsumed_operands_as_unsupported_markers() {
     );
     let mut table = TransitionTable::new(1);
     table.add_transition(0, &input, &output, gadget);
-    let path = vec![(0, input.as_tuple(), output.as_tuple())];
+    let path = path_for(&table, 0, &input, &output);
 
     let stream = lower_solution_paths(
         &avx512_i64_metadata(),
@@ -537,7 +586,7 @@ fn lower_src_alias_does_not_hide_unconsumed_a_operand() {
     );
     let mut table = TransitionTable::new(1);
     table.add_transition(0, &input, &output, gadget);
-    let path = vec![(0, input.as_tuple(), output.as_tuple())];
+    let path = path_for(&table, 0, &input, &output);
 
     let stream = lower_solution_paths(
         &avx2_i64_metadata(),
@@ -573,7 +622,7 @@ fn lower_empty_paths_produces_empty_stream() {
 /// A gadget with no matching transition emits an `Operand::Unsupported` marker
 /// instead of silently dropping instructions.
 #[test]
-fn lower_missing_gadget_emits_unsupported() {
+fn id_based_path_resolution_rejects_missing_transition() {
     // Build a table for stage 0 but register a *different* input/output pair
     // than what the path references, so the lookup misses.
     let registered_input = state(&[0, 1, 2, 3], &[4, 5, 6, 7]);
@@ -594,25 +643,13 @@ fn lower_missing_gadget_emits_unsupported() {
     // Path uses a *different* transition that isn't in the table
     let path_input = state(&[9, 8, 7, 6], &[5, 4, 3, 2]);
     let path_output = state(&[5, 4, 3, 2], &[9, 8, 7, 6]);
-    let path = vec![(0, path_input.as_tuple(), path_output.as_tuple())];
-
-    let stream = lower_solution_paths(
-        &avx2_i64_metadata(),
-        &table,
-        &[path],
-        LoweringOptions::default(),
-    );
-
-    let block = &stream.blocks[0];
-    // Should contain a nop with Unsupported operand, not just silently absent
-    let has_unsupported = block.instructions.iter().any(|i| {
-        i.operands
-            .iter()
-            .any(|op| matches!(op, Operand::Unsupported(_)))
-    });
     assert!(
-        has_unsupported,
-        "expected Unsupported marker for missing gadget, got {:?}",
-        block.instructions
+        table
+            .complete_path_from_zero_based_steps(&[(
+                0,
+                path_input.as_tuple(),
+                path_output.as_tuple()
+            )])
+            .is_none()
     );
 }

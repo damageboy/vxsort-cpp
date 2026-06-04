@@ -47,6 +47,9 @@ pub struct TuiState {
     wave_count: usize,
     search_exhausted: bool,
     scored_paths: usize,
+    scoring_completed_paths: usize,
+    scoring_total_paths: usize,
+    scoring_pending_paths: usize,
     best_score: Option<f64>,
     current_phase: String,
     log_lines: Vec<String>,
@@ -106,6 +109,9 @@ impl TuiState {
             wave_count: 0,
             search_exhausted: false,
             scored_paths: 0,
+            scoring_completed_paths: 0,
+            scoring_total_paths: 0,
+            scoring_pending_paths: 0,
             best_score: None,
             current_phase: "starting".to_owned(),
             log_lines: Vec::new(),
@@ -150,6 +156,12 @@ impl TuiState {
                     *slot = snapshot;
                 }
                 self.refresh_total_gadget_completion_rate(now);
+            }
+            RuntimeEvent::ScoringProgress(snapshot) => {
+                self.scoring_completed_paths = snapshot.completed_paths();
+                self.scoring_total_paths = snapshot.total_paths();
+                self.scoring_pending_paths = snapshot.pending_paths();
+                self.scored_paths = snapshot.scored_paths();
             }
             RuntimeEvent::WaveFinished {
                 wave,
@@ -347,6 +359,18 @@ impl TuiState {
 
     pub fn scored_paths(&self) -> usize {
         self.scored_paths
+    }
+
+    pub fn scoring_completed_paths(&self) -> usize {
+        self.scoring_completed_paths
+    }
+
+    pub fn scoring_total_paths(&self) -> usize {
+        self.scoring_total_paths
+    }
+
+    pub fn scoring_pending_paths(&self) -> usize {
+        self.scoring_pending_paths
     }
 
     pub fn best_score(&self) -> Option<f64> {
@@ -585,7 +609,12 @@ pub fn render_tui(frame: &mut Frame<'_>, state: &TuiState) {
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
         .split(root[1]);
-    render_stage_table(frame, body[0], state);
+    let progress = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(7), Constraint::Length(3)])
+        .split(body[0]);
+    render_stage_table(frame, progress[0], state);
+    render_scoring_progress(frame, progress[1], state);
     render_selected_stage(frame, body[1], state);
     render_log(frame, root[2], state);
     render_footer(frame, root[3], state);
@@ -707,6 +736,25 @@ fn render_stage_table(frame: &mut Frame<'_>, area: Rect, state: &TuiState) {
     frame.render_widget(table, area);
 }
 
+fn render_scoring_progress(frame: &mut Frame<'_>, area: Rect, state: &TuiState) {
+    let bar_width = scoring_progress_bar_width(area.width);
+    let completed = state.scoring_completed_paths();
+    let total = state.scoring_total_paths();
+    let pending = state.scoring_pending_paths();
+    let mut line = render_scoring_progress_bar(completed, total, bar_width);
+    line.spans.push(Span::raw(format!(
+        " {completed}/{total} paths | pending {pending} | scored candidates {}",
+        state.scored_paths()
+    )));
+    let paragraph = Paragraph::new(vec![line]).block(
+        Block::default()
+            .title("Scoring Progress")
+            .borders(Borders::ALL)
+            .style(Style::default().fg(Color::Magenta)),
+    );
+    frame.render_widget(paragraph, area);
+}
+
 fn right_cell<'a>(content: impl Into<Line<'a>>) -> Cell<'a> {
     Cell::new(content.into().alignment(Alignment::Right))
 }
@@ -805,6 +853,40 @@ pub fn render_progress_bar(
     }
     spans.push(Span::raw("]"));
     Line::from(spans)
+}
+
+pub fn render_scoring_progress_bar(completed: usize, total: usize, width: usize) -> Line<'static> {
+    let total = total.max(completed).max(1) as f64;
+    let completed_cells = (completed as f64 / total).clamp(0.0, 1.0) * width as f64;
+    let completed_style = Style::default().fg(Color::Magenta);
+
+    let mut spans = vec![Span::raw("[")];
+    for cell in 0..width {
+        let level = (completed_cells - cell as f64).clamp(0.0, 1.0);
+        if level >= 1.0 {
+            spans.push(Span::styled("█", completed_style));
+            continue;
+        }
+        let block = fractional_block(level);
+        if !block.is_empty() {
+            spans.push(Span::styled(block, completed_style));
+            continue;
+        }
+        spans.push(Span::raw(" "));
+    }
+    spans.push(Span::raw("]"));
+    Line::from(spans)
+}
+
+fn scoring_progress_bar_width(panel_width: u16) -> usize {
+    const BORDER_WIDTH: u16 = 2;
+    const TEXT_WIDTH: u16 = 48;
+    const MIN_BAR_WIDTH: u16 = 12;
+
+    panel_width
+        .saturating_sub(BORDER_WIDTH)
+        .saturating_sub(TEXT_WIDTH)
+        .max(MIN_BAR_WIDTH) as usize
 }
 
 fn fractional_block(level: f64) -> &'static str {

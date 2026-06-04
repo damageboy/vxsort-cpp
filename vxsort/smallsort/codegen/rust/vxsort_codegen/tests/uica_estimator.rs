@@ -10,8 +10,8 @@ use uica_data::{
 use vxsort_codegen::json_exporter::{
     SolutionJsonMetadata, solution_json_for_assigned_paths, solution_json_for_paths,
 };
-use vxsort_codegen::scoring::{AssignedPath, AssignedStep};
-use vxsort_codegen::transition_table::TransitionTable;
+use vxsort_codegen::scoring::AssignedPath;
+use vxsort_codegen::transition_table::{GadgetIndex, TransitionTable};
 use vxsort_codegen::{ArchArg, DTypeArg, EstimateOptions, estimate_solution_json};
 
 fn state(top: &[u64], bottom: &[u64]) -> VectorState {
@@ -77,81 +77,25 @@ fn unsupported_gadget() -> PermutationGadget {
 }
 
 fn assigned_json_with_two_paths() -> serde_json::Value {
-    let input = state(&[1, 3, 5, 7], &[2, 4, 6, 8]);
-    let output = state(&[1, 3, 5, 7], &[2, 4, 6, 8]);
-    let path_a = AssignedPath::new(vec![AssignedStep::new(
-        0,
-        input.as_tuple(),
-        output.as_tuple(),
-        0,
-        permute_gadget(0x4e),
-    )]);
-    let path_b = AssignedPath::new(vec![AssignedStep::new(
-        0,
-        input.as_tuple(),
-        output.as_tuple(),
-        0,
-        permute_gadget(0x1b),
-    )]);
-
-    solution_json_for_assigned_paths(&metadata(), &[path_a, path_b])
+    assigned_json_from_gadgets(vec![permute_gadget(0x4e), permute_gadget(0x1b)], &[0, 1])
 }
 
 fn assigned_json_for_ranking() -> serde_json::Value {
-    let input = state(&[1, 3, 5, 7], &[2, 4, 6, 8]);
-    let output = state(&[1, 3, 5, 7], &[2, 4, 6, 8]);
-    let path_a = AssignedPath::new(vec![AssignedStep::new(
-        0,
-        input.as_tuple(),
-        output.as_tuple(),
-        0,
-        permute_gadget(0x4e),
-    )]);
-    let path_b = AssignedPath::new(vec![AssignedStep::new(
-        0,
-        input.as_tuple(),
-        output.as_tuple(),
-        0,
-        double_permute_gadget(),
-    )]);
-
-    solution_json_for_assigned_paths(&metadata(), &[path_a, path_b])
+    assigned_json_from_gadgets(vec![permute_gadget(0x4e), double_permute_gadget()], &[0, 1])
 }
 
 fn assigned_json_with_unsupported_path() -> serde_json::Value {
-    let input = state(&[1, 3, 5, 7], &[2, 4, 6, 8]);
-    let output = state(&[1, 3, 5, 7], &[2, 4, 6, 8]);
-    let path = AssignedPath::new(vec![AssignedStep::new(
-        0,
-        input.as_tuple(),
-        output.as_tuple(),
-        0,
-        unsupported_gadget(),
-    )]);
-
-    solution_json_for_assigned_paths(&metadata(), &[path])
+    assigned_json_from_gadgets(vec![unsupported_gadget()], &[0])
 }
 
 fn assigned_json_selecting_second_gadget() -> serde_json::Value {
-    let input = state(&[1, 3, 5, 7], &[2, 4, 6, 8]);
-    let output = state(&[1, 3, 5, 7], &[2, 4, 6, 8]);
-    let identity = PermutationGadget::new(Vec::new(), Vec::new());
-    let permute = permute_gadget(0x4e);
-    let unselected = AssignedPath::new(vec![AssignedStep::new(
-        0,
-        input.as_tuple(),
-        output.as_tuple(),
-        0,
-        identity,
-    )]);
-    let selected = AssignedPath::new(vec![AssignedStep::new(
-        0,
-        input.as_tuple(),
-        output.as_tuple(),
-        1,
-        permute,
-    )]);
-    let json = solution_json_for_assigned_paths(&metadata(), &[unselected, selected]);
+    let json = assigned_json_from_gadgets(
+        vec![
+            PermutationGadget::new(Vec::new(), Vec::new()),
+            permute_gadget(0x4e),
+        ],
+        &[0, 1],
+    );
 
     serde_json::json!({
         "natural_order": json["natural_order"],
@@ -165,13 +109,35 @@ fn assigned_json_selecting_second_gadget() -> serde_json::Value {
 }
 
 fn roots_nodes_json_with_one_path() -> serde_json::Value {
-    let input = state(&[1, 3, 5, 7], &[2, 4, 6, 8]);
-    let output = state(&[1, 3, 5, 7], &[2, 4, 6, 8]);
+    let input = state(&[0, 2, 4, 6], &[1, 3, 5, 7]);
+    let output = state(&[0, 2, 4, 6], &[1, 3, 5, 7]);
     let mut table = TransitionTable::new(1);
     table.add_transition(0, &input, &output, permute_gadget(0x4e));
-    let path = vec![(0, input.as_tuple(), output.as_tuple())];
+    let path = table
+        .complete_path_from_zero_based_steps(&[(0, input.as_tuple(), output.as_tuple())])
+        .expect("path should resolve");
 
     solution_json_for_paths(&metadata(), &table, &[path])
+}
+
+fn assigned_json_from_gadgets(
+    gadgets: Vec<PermutationGadget>,
+    selected_indices: &[u16],
+) -> serde_json::Value {
+    let input = state(&[0, 2, 4, 6], &[1, 3, 5, 7]);
+    let output = state(&[0, 2, 4, 6], &[1, 3, 5, 7]);
+    let mut table = TransitionTable::new(1);
+    for gadget in gadgets {
+        table.add_transition(0, &input, &output, gadget);
+    }
+    let path = table
+        .complete_path_from_zero_based_steps(&[(0, input.as_tuple(), output.as_tuple())])
+        .expect("path should resolve");
+    let paths = selected_indices
+        .iter()
+        .map(|index| AssignedPath::new(path.clone(), vec![GadgetIndex(*index)]))
+        .collect::<Vec<_>>();
+    solution_json_for_assigned_paths(&metadata(), &table, &paths)
 }
 
 #[test]

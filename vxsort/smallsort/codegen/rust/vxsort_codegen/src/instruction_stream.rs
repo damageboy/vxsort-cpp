@@ -22,12 +22,13 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use comfy_table::{Table, modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL};
 use gadget_synth::{InstructionArg, InstructionSpec, PermutationGadget};
 
 use crate::ArchArg;
 use crate::json_exporter::SolutionJsonMetadata;
 use crate::scoring::AssignedPath;
-use crate::transition_table::{CompletePath, StateTuple, TransitionKey, TransitionTable};
+use crate::transition_table::{CompletePath, StateTuple, TransitionRef, TransitionTable};
 
 // ---------------------------------------------------------------------------
 // Register
@@ -157,8 +158,18 @@ pub struct InstructionBlock {
 /// [`InstructionStream`].
 ///
 /// Skeletal for Task 1; will grow as lowering is implemented in later tasks.
-#[derive(Debug, Clone, Eq, PartialEq, Default)]
-pub struct LoweringOptions {}
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct LoweringOptions {
+    pub include_comments: bool,
+}
+
+impl Default for LoweringOptions {
+    fn default() -> Self {
+        Self {
+            include_comments: true,
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // InstructionStream
@@ -197,7 +208,7 @@ pub fn lower_solution_paths(
     metadata: &SolutionJsonMetadata,
     table: &TransitionTable,
     paths: &[CompletePath],
-    _options: LoweringOptions,
+    options: LoweringOptions,
 ) -> InstructionStream {
     let mut constants = ConstantPool::default();
     let mut blocks = vec![];
@@ -208,6 +219,7 @@ pub fn lower_solution_paths(
             table,
             path,
             &mut constants,
+            options,
         ));
     }
     InstructionStream {
@@ -218,8 +230,9 @@ pub fn lower_solution_paths(
 
 pub fn lower_assigned_paths(
     metadata: &SolutionJsonMetadata,
+    table: &TransitionTable,
     paths: &[AssignedPath],
-    _options: LoweringOptions,
+    options: LoweringOptions,
 ) -> InstructionStream {
     let mut constants = ConstantPool::default();
     let mut blocks = vec![];
@@ -227,8 +240,10 @@ pub fn lower_assigned_paths(
         blocks.push(lower_assigned_path(
             solution_index,
             metadata,
+            table,
             path,
             &mut constants,
+            options,
         ));
     }
     InstructionStream {
@@ -247,49 +262,64 @@ fn lower_path(
     table: &TransitionTable,
     path: &CompletePath,
     constants: &mut ConstantPool,
+    options: LoweringOptions,
 ) -> InstructionBlock {
     let steps = path
         .iter()
-        .map(|(stage, input, output)| {
-            let transition_key: TransitionKey = (input.clone(), output.clone());
-            let gadget = table
-                .get_all_transitions(*stage)
-                .get(&transition_key)
-                .and_then(|gadgets| gadgets.first());
+        .map(|(stage, transition)| {
+            let transition_ref = TransitionRef {
+                stage: stage
+                    .try_into()
+                    .expect("stage index should fit in transition ref"),
+                transition,
+            };
+            let record = table.transition(transition_ref);
             LoweringStep {
-                stage: *stage,
-                input,
-                output,
-                gadget,
+                stage,
+                input: table.state_as_zero_based_tuple(record.input()),
+                output: table.state_as_zero_based_tuple(record.output()),
+                gadget: record.gadgets().first(),
             }
         })
         .collect::<Vec<_>>();
-    lower_concrete_steps(solution_index, metadata, &steps, constants)
+    lower_concrete_steps(solution_index, metadata, &steps, constants, options)
 }
 
 fn lower_assigned_path(
     solution_index: usize,
     metadata: &SolutionJsonMetadata,
+    table: &TransitionTable,
     path: &AssignedPath,
     constants: &mut ConstantPool,
+    options: LoweringOptions,
 ) -> InstructionBlock {
     let steps = path
-        .steps()
+        .path()
         .iter()
-        .map(|step| LoweringStep {
-            stage: step.stage(),
-            input: step.input(),
-            output: step.output(),
-            gadget: Some(step.gadget()),
+        .zip(path.gadgets().iter().copied())
+        .map(|((stage, transition), gadget_index)| {
+            let transition_ref = TransitionRef {
+                stage: stage
+                    .try_into()
+                    .expect("stage index should fit in transition ref"),
+                transition,
+            };
+            let record = table.transition(transition_ref);
+            LoweringStep {
+                stage,
+                input: table.state_as_zero_based_tuple(record.input()),
+                output: table.state_as_zero_based_tuple(record.output()),
+                gadget: Some(record.gadget(gadget_index)),
+            }
         })
         .collect::<Vec<_>>();
-    lower_concrete_steps(solution_index, metadata, &steps, constants)
+    lower_concrete_steps(solution_index, metadata, &steps, constants, options)
 }
 
 struct LoweringStep<'a> {
     stage: usize,
-    input: &'a StateTuple,
-    output: &'a StateTuple,
+    input: StateTuple,
+    output: StateTuple,
     gadget: Option<&'a PermutationGadget>,
 }
 
@@ -298,14 +328,17 @@ fn lower_concrete_steps(
     metadata: &SolutionJsonMetadata,
     steps: &[LoweringStep<'_>],
     constants: &mut ConstantPool,
+    options: LoweringOptions,
 ) -> InstructionBlock {
     let mut regs = LoweringRegAlloc::new(metadata.arch, metadata.num_vecs);
-    let mut materialized = MaterializedConstants::default();
+    let mut materialized = MaterializedConstants::new(options.include_comments);
     let mut instructions: Vec<ModeledInstruction> = vec![];
 
-    if let Some(step) = steps.first() {
+    if options.include_comments
+        && let Some(step) = steps.first()
+    {
         push_comment(&mut instructions, "Initial Input State:");
-        push_state_comments(&mut instructions, step.input);
+        push_state_comments(&mut instructions, &step.input);
     }
 
     for (step_index, step) in steps.iter().enumerate() {
@@ -313,15 +346,17 @@ fn lower_concrete_steps(
         let src_bottom = regs.src_bottom();
         let is_final_natural_order_stage = metadata.natural_order && step_index + 1 == steps.len();
         let has_coex = !is_final_natural_order_stage && metadata.num_vecs > 1;
-        push_comment(&mut instructions, format!("Stage {}", step.stage));
-        push_comment(
-            &mut instructions,
-            format!(
-                "Current registers: {} = top, {} = bottom",
-                src_top.name(),
-                src_bottom.name()
-            ),
-        );
+        if options.include_comments {
+            push_comment(&mut instructions, format!("Stage {}", step.stage));
+            push_comment(
+                &mut instructions,
+                format!(
+                    "Current registers: {} = top, {} = bottom",
+                    src_top.name(),
+                    src_bottom.name()
+                ),
+            );
+        }
 
         if let Some(gadget) = step.gadget {
             let mut state = LoweringState {
@@ -329,6 +364,7 @@ fn lower_concrete_steps(
                 regs: &mut regs,
                 materialized: &mut materialized,
                 constants,
+                include_comments: options.include_comments,
             };
             lower_gadget(&mut state, gadget, step.stage);
         } else {
@@ -338,15 +374,19 @@ fn lower_concrete_steps(
                     "missing gadget for stage {}",
                     step.stage
                 ))],
-                comment: Some(format!("stage {}: missing gadget", step.stage)),
+                comment: options
+                    .include_comments
+                    .then(|| format!("stage {}: missing gadget", step.stage)),
             });
         }
 
         if has_coex {
             lower_compare_swap(&mut instructions, &mut regs, metadata);
         }
-        push_comment(&mut instructions, "Output State:");
-        push_state_comments(&mut instructions, step.output);
+        if options.include_comments {
+            push_comment(&mut instructions, "Output State:");
+            push_state_comments(&mut instructions, &step.output);
+        }
         regs.reset_temps();
     }
 
@@ -378,57 +418,27 @@ fn push_state_comments(instructions: &mut Vec<ModeledInstruction>, state: &State
 
 fn state_table_lines(state: &StateTuple) -> Vec<String> {
     let max_len = state.0.len().max(state.1.len());
-    let mut widths = Vec::with_capacity(max_len + 1);
-    widths.push("Bottom".len());
-    for lane in 0..max_len {
-        let header_width = lane.to_string().len();
-        let top_width = state
-            .0
-            .get(lane)
-            .map(u64::to_string)
-            .map_or(0, |value| value.len());
-        let bottom_width = state
-            .1
-            .get(lane)
-            .map(u64::to_string)
-            .map_or(0, |value| value.len());
-        widths.push(3.max(header_width).max(top_width).max(bottom_width));
-    }
+    let mut table = Table::new();
+    table
+        .load_preset(UTF8_FULL)
+        .apply_modifier(UTF8_ROUND_CORNERS);
 
-    vec![
-        table_border('╭', '┬', '╮', &widths),
-        table_row("", (0..max_len).map(|lane| lane.to_string()), &widths),
-        table_border('├', '┼', '┤', &widths),
-        table_row(
-            "Top",
-            (0..max_len).map(|lane| state.0.get(lane).map_or(String::new(), u64::to_string)),
-            &widths,
-        ),
-        table_row(
-            "Bottom",
-            (0..max_len).map(|lane| state.1.get(lane).map_or(String::new(), u64::to_string)),
-            &widths,
-        ),
-        table_border('╰', '┴', '╯', &widths),
-    ]
-}
+    let mut header = Vec::with_capacity(max_len + 1);
+    header.push(String::new());
+    header.extend((0..max_len).map(|lane| lane.to_string()));
+    table.set_header(header);
 
-fn table_border(left: char, sep: char, right: char, widths: &[usize]) -> String {
-    let segments = widths
-        .iter()
-        .map(|width| "─".repeat(width + 2))
-        .collect::<Vec<_>>()
-        .join(&sep.to_string());
-    format!("{left}{segments}{right}")
-}
+    let mut top = Vec::with_capacity(max_len + 1);
+    top.push("Top".to_owned());
+    top.extend((0..max_len).map(|lane| state.0.get(lane).map_or(String::new(), u64::to_string)));
+    table.add_row(top);
 
-fn table_row(label: &str, values: impl IntoIterator<Item = String>, widths: &[usize]) -> String {
-    let mut cells = Vec::with_capacity(widths.len());
-    cells.push(format!(" {:<width$} ", label, width = widths[0]));
-    for (value, width) in values.into_iter().zip(widths.iter().skip(1)) {
-        cells.push(format!(" {:>width$} ", value, width = *width));
-    }
-    format!("│{}│", cells.join("│"))
+    let mut bottom = Vec::with_capacity(max_len + 1);
+    bottom.push("Bottom".to_owned());
+    bottom.extend((0..max_len).map(|lane| state.1.get(lane).map_or(String::new(), u64::to_string)));
+    table.add_row(bottom);
+
+    table.lines().collect()
 }
 
 struct LoweringState<'a> {
@@ -436,6 +446,7 @@ struct LoweringState<'a> {
     regs: &'a mut LoweringRegAlloc,
     materialized: &'a mut MaterializedConstants,
     constants: &'a mut ConstantPool,
+    include_comments: bool,
 }
 
 fn lower_gadget(state: &mut LoweringState<'_>, gadget: &PermutationGadget, stage: usize) -> bool {
@@ -445,13 +456,15 @@ fn lower_gadget(state: &mut LoweringState<'_>, gadget: &PermutationGadget, stage
         let prefix_len = shared_prefix_len(gadget.top_instructions(), gadget.bottom_instructions());
         let mut shared_results = BTreeMap::new();
         if prefix_len > 0 {
-            push_comment(
-                state.instructions,
-                format!(
-                    "Shared instructions ({prefix_len} of {}):",
-                    gadget.top_instructions().len()
-                ),
-            );
+            if state.include_comments {
+                push_comment(
+                    state.instructions,
+                    format!(
+                        "Shared instructions ({prefix_len} of {}):",
+                        gadget.top_instructions().len()
+                    ),
+                );
+            }
             shared_results = lower_instruction_chain_inner(
                 state,
                 &gadget.top_instructions()[..prefix_len],
@@ -467,10 +480,12 @@ fn lower_gadget(state: &mut LoweringState<'_>, gadget: &PermutationGadget, stage
         }
 
         if gadget.top_instructions().len() > prefix_len {
-            push_comment(
-                state.instructions,
-                format!("Top vector ({}) operations:", state.regs.src_top().name()),
-            );
+            if state.include_comments {
+                push_comment(
+                    state.instructions,
+                    format!("Top vector ({}) operations:", state.regs.src_top().name()),
+                );
+            }
             lower_instruction_chain_inner(
                 state,
                 gadget.top_instructions(),
@@ -486,13 +501,15 @@ fn lower_gadget(state: &mut LoweringState<'_>, gadget: &PermutationGadget, stage
         }
 
         if gadget.bottom_instructions().len() > prefix_len {
-            push_comment(
-                state.instructions,
-                format!(
-                    "Bottom vector ({}) operations:",
-                    state.regs.src_bottom().name()
-                ),
-            );
+            if state.include_comments {
+                push_comment(
+                    state.instructions,
+                    format!(
+                        "Bottom vector ({}) operations:",
+                        state.regs.src_bottom().name()
+                    ),
+                );
+            }
             lower_instruction_chain_inner(
                 state,
                 gadget.bottom_instructions(),
@@ -518,7 +535,7 @@ fn lower_gadget(state: &mut LoweringState<'_>, gadget: &PermutationGadget, stage
                         Operand::Register(state.regs.dst_top()),
                         Operand::Register(last_shared.clone()),
                     ],
-                    comment: Some("shared -> top".to_owned()),
+                    comment: state.include_comments.then(|| "shared -> top".to_owned()),
                 });
             }
             if prefix_len == gadget.bottom_instructions().len() {
@@ -528,7 +545,9 @@ fn lower_gadget(state: &mut LoweringState<'_>, gadget: &PermutationGadget, stage
                         Operand::Register(state.regs.dst_bottom()),
                         Operand::Register(last_shared),
                     ],
-                    comment: Some("shared -> bottom".to_owned()),
+                    comment: state
+                        .include_comments
+                        .then(|| "shared -> bottom".to_owned()),
                 });
             }
         }
@@ -634,7 +653,7 @@ fn lower_instruction_chain_inner(
         state.instructions.push(ModeledInstruction {
             mnemonic: intrinsic_to_asm_mnemonic(spec.intrinsic_name()).to_owned(),
             operands,
-            comment: Some(comment),
+            comment: state.include_comments.then_some(comment),
         });
         previous = dest.clone();
         result_regs.insert(index, dest);
@@ -1118,9 +1137,17 @@ struct MaterializedConstants {
     vector_registers: BTreeMap<ConstantKey, Register>,
     kmask_registers: BTreeMap<ConstantKey, u8>,
     next_kmask: u8,
+    include_comments: bool,
 }
 
 impl MaterializedConstants {
+    fn new(include_comments: bool) -> Self {
+        Self {
+            include_comments,
+            ..Self::default()
+        }
+    }
+
     fn materialize_vector(
         &mut self,
         instructions: &mut Vec<ModeledInstruction>,
@@ -1145,7 +1172,9 @@ impl MaterializedConstants {
                 Operand::Register(register.clone()),
                 Operand::ConstantRef(label),
             ],
-            comment: Some("materialize vector constant".to_owned()),
+            comment: self
+                .include_comments
+                .then(|| "materialize vector constant".to_owned()),
         });
         self.vector_registers.insert(key, register.clone());
         register
@@ -1168,12 +1197,16 @@ impl MaterializedConstants {
         instructions.push(ModeledInstruction {
             mnemonic: "mov".to_owned(),
             operands: vec![Operand::Gpr(gpr), Operand::Immediate(value)],
-            comment: Some("materialize k-mask constant".to_owned()),
+            comment: self
+                .include_comments
+                .then(|| "materialize k-mask constant".to_owned()),
         });
         instructions.push(ModeledInstruction {
             mnemonic: kmask_load_mnemonic(bits).to_owned(),
             operands: vec![Operand::KMask(register), Operand::Gpr(gpr)],
-            comment: Some("materialize k-mask constant".to_owned()),
+            comment: self
+                .include_comments
+                .then(|| "materialize k-mask constant".to_owned()),
         });
         self.kmask_registers.insert(key, register);
         register
@@ -1205,7 +1238,9 @@ impl MaterializedConstants {
                 Operand::Register(register.clone()),
                 Operand::ConstantRef(label),
             ],
-            comment: Some(format_control_vector(value, bits, element_bits)),
+            comment: self
+                .include_comments
+                .then(|| format_control_vector(value, bits, element_bits)),
         });
         self.vector_registers.insert(key, register.clone());
         register

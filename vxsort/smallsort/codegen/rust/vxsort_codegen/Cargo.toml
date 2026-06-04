@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+comfy-table = "7"
 crossterm = "0.29"
 gadget_synth = { path = "../gadget_synth" }
 ratatui = "0.29"

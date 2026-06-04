@@ -2,12 +2,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
-use gadget_synth::{InstructionArg, InstructionSpec, PermutationGadget, VectorState};
+use gadget_synth::{InstructionArg, InstructionSpec, PermutationGadget};
 use serde_json::Value;
 
 use crate::json_exporter::SolutionJsonMetadata;
-use crate::scoring::{AssignedPath, AssignedStep};
-use crate::transition_table::{CompletePath, PathStep, StateTuple, TransitionTable};
+use crate::scoring::AssignedPath;
+use crate::transition_table::{CompletePath, GadgetIndex, StateTuple, TransitionTable};
 use crate::{ArchArg, DTypeArg};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -43,10 +43,13 @@ pub fn solution_json_from_value(value: &Value) -> Result<ImportedSolutionJson, S
 
     let mut transition_table = TransitionTable::new(max_stage.map_or(0, |stage| stage + 1));
     for parsed in parsed_nodes.values() {
-        let input = VectorState::new(parsed.step.1.0.clone(), parsed.step.1.1.clone());
-        let output = VectorState::new(parsed.step.2.0.clone(), parsed.step.2.1.clone());
         for gadget in &parsed.gadgets {
-            transition_table.add_transition(parsed.step.0, &input, &output, gadget.clone());
+            transition_table.add_transition_one_based_tuples(
+                parsed.step.0,
+                &parsed.step.1,
+                &parsed.step.2,
+                gadget.clone(),
+            );
         }
     }
 
@@ -61,7 +64,12 @@ pub fn solution_json_from_value(value: &Value) -> Result<ImportedSolutionJson, S
             .ok_or_else(|| "solution JSON root ids must be strings".to_owned())?;
         collect_paths(root_id, &parsed_nodes, &mut Vec::new(), &mut graph_paths)?;
     }
-    let assigned_paths = parse_assigned_paths(value.get("paths"), &parsed_nodes)?;
+    let graph_paths = graph_paths
+        .into_iter()
+        .map(|path| complete_path_from_steps(&transition_table, &path))
+        .collect::<Result<Vec<_>, _>>()?;
+    let assigned_paths =
+        parse_assigned_paths(value.get("paths"), &parsed_nodes, &transition_table)?;
     let paths = if assigned_paths.is_empty() {
         graph_paths
     } else {
@@ -81,10 +89,12 @@ pub fn solution_json_from_value(value: &Value) -> Result<ImportedSolutionJson, S
 
 #[derive(Clone, Debug, PartialEq)]
 struct ParsedNode {
-    step: PathStep,
+    step: StepKey,
     gadgets: Vec<PermutationGadget>,
     children: Vec<String>,
 }
+
+type StepKey = (usize, StateTuple, StateTuple);
 
 fn parse_metadata(value: &Value) -> Result<SolutionJsonMetadata, String> {
     Ok(SolutionJsonMetadata {
@@ -351,8 +361,8 @@ fn decimal_to_hex(decimal: &str) -> Result<String, String> {
 fn collect_paths(
     node_id: &str,
     nodes: &BTreeMap<String, ParsedNode>,
-    current: &mut CompletePath,
-    paths: &mut Vec<CompletePath>,
+    current: &mut Vec<StepKey>,
+    paths: &mut Vec<Vec<StepKey>>,
 ) -> Result<(), String> {
     let node = nodes
         .get(node_id)
@@ -372,9 +382,24 @@ fn collect_paths(
     Ok(())
 }
 
+fn complete_path_from_steps(
+    table: &TransitionTable,
+    steps: &[StepKey],
+) -> Result<CompletePath, String> {
+    let mut transitions = Vec::with_capacity(steps.len());
+    for (stage, input, output) in steps {
+        let transition = table
+            .transition_ref_for_one_based_tuples(*stage, input, output)
+            .ok_or_else(|| format!("path references missing stage {stage} transition"))?;
+        transitions.push(transition.transition);
+    }
+    Ok(CompletePath::new(transitions))
+}
+
 fn parse_assigned_paths(
     value: Option<&Value>,
     nodes: &BTreeMap<String, ParsedNode>,
+    table: &TransitionTable,
 ) -> Result<Vec<AssignedPath>, String> {
     let Some(value) = value else {
         return Ok(Vec::new());
@@ -385,7 +410,7 @@ fn parse_assigned_paths(
     paths
         .iter()
         .enumerate()
-        .map(|(path_index, path)| parse_assigned_path(path_index, path, nodes))
+        .map(|(path_index, path)| parse_assigned_path(path_index, path, nodes, table))
         .collect()
 }
 
@@ -393,17 +418,20 @@ fn parse_assigned_path(
     path_index: usize,
     value: &Value,
     nodes: &BTreeMap<String, ParsedNode>,
+    table: &TransitionTable,
 ) -> Result<AssignedPath, String> {
     let steps = value
         .get("steps")
         .and_then(Value::as_array)
         .ok_or_else(|| format!("paths[{path_index}] must contain array `steps`"))?;
-    steps
-        .iter()
-        .enumerate()
-        .map(|(step_index, step)| parse_assigned_step(path_index, step_index, step, nodes))
-        .collect::<Result<Vec<_>, _>>()
-        .map(AssignedPath::new)
+    let mut transitions = Vec::with_capacity(steps.len());
+    let mut gadgets = Vec::with_capacity(steps.len());
+    for (step_index, step) in steps.iter().enumerate() {
+        let (transition, gadget) = parse_assigned_step(path_index, step_index, step, nodes, table)?;
+        transitions.push(transition);
+        gadgets.push(gadget);
+    }
+    Ok(AssignedPath::new(CompletePath::new(transitions), gadgets))
 }
 
 fn parse_assigned_step(
@@ -411,7 +439,8 @@ fn parse_assigned_step(
     step_index: usize,
     value: &Value,
     nodes: &BTreeMap<String, ParsedNode>,
-) -> Result<AssignedStep, String> {
+    table: &TransitionTable,
+) -> Result<(crate::transition_table::TransitionIndex, GadgetIndex), String> {
     let node_id = value
         .get("node_id")
         .or_else(|| value.get("node"))
@@ -424,23 +453,29 @@ fn parse_assigned_step(
         .and_then(Value::as_u64)
         .ok_or_else(|| {
             format!("paths[{path_index}].steps[{step_index}] must contain integer `gadget_index`")
-        })? as usize;
+        })?;
     let node = nodes.get(node_id).ok_or_else(|| {
         format!("paths[{path_index}].steps[{step_index}] references missing node `{node_id}`")
     })?;
-    let gadget = node.gadgets.get(gadget_index).ok_or_else(|| {
+    let transition = table
+        .transition_ref_for_one_based_tuples(node.step.0, &node.step.1, &node.step.2)
+        .ok_or_else(|| {
+            format!("paths[{path_index}].steps[{step_index}] references missing transition for node `{node_id}`")
+        })?;
+    let gadget_index_usize: usize = gadget_index.try_into().map_err(|_| {
+        format!("paths[{path_index}].steps[{step_index}] gadget_index is too large")
+    })?;
+    node.gadgets.get(gadget_index_usize).ok_or_else(|| {
         format!(
             "paths[{path_index}].steps[{step_index}] references gadget_index {gadget_index}, but node `{node_id}` has {} gadgets",
             node.gadgets.len()
         )
     })?;
-
-    Ok(AssignedStep::new(
-        node.step.0,
-        node.step.1.clone(),
-        node.step.2.clone(),
-        gadget_index,
-        gadget.clone(),
+    Ok((
+        transition.transition,
+        GadgetIndex(gadget_index.try_into().map_err(|_| {
+            format!("paths[{path_index}].steps[{step_index}] gadget_index is too large")
+        })?),
     ))
 }
 

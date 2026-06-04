@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use gadget_synth::{InstructionArg, InstructionSpec, PermutationGadget, VectorState};
-use vxsort_codegen::transition_table::TransitionTable;
+use vxsort_codegen::transition_table::{CompletePath, State, StateInterner, TransitionTable};
 
 fn state(top: &[u64], bottom: &[u64]) -> VectorState {
     VectorState::new(top.to_vec(), bottom.to_vec())
@@ -29,6 +29,31 @@ fn add_identity(
     table.add_transition(stage_idx, input, output, empty_gadget());
 }
 
+fn path_for(
+    table: &TransitionTable,
+    steps: &[(usize, &VectorState, &VectorState)],
+) -> CompletePath {
+    let steps = steps
+        .iter()
+        .map(|(stage, input, output)| (*stage, input.as_tuple(), output.as_tuple()))
+        .collect::<Vec<_>>();
+    table
+        .complete_path_from_zero_based_steps(&steps)
+        .expect("test path should resolve")
+}
+
+#[test]
+fn interning_same_state_returns_same_id() {
+    let mut interner = StateInterner::new(4);
+    let state = State::from_top_bottom([0, 1, 2, 3], [4, 5, 6, 7]);
+
+    let first = interner.intern(state.clone());
+    let second = interner.intern(state);
+
+    assert_eq!(first, second);
+    assert_eq!(interner.len(), 1);
+}
+
 #[test]
 fn add_transition_tracks_unique_inputs_outputs_and_deduplicates_gadgets() {
     let mut table = TransitionTable::new(1);
@@ -45,13 +70,10 @@ fn add_transition_tracks_unique_inputs_outputs_and_deduplicates_gadgets() {
     assert_eq!(transitions.len(), 1);
     assert_eq!(transitions[&output.as_tuple()].len(), 2);
     assert_eq!(table.unique_output_count(0), 1);
-    assert!(table.stage(0).unique_inputs().contains(&input.as_tuple()));
-    assert!(
-        table
-            .stage(0)
-            .unique_outputs()
-            .contains_key(&output.as_tuple())
-    );
+    let input_id = table.lookup_zero_based_tuple(&input.as_tuple()).unwrap();
+    let output_id = table.lookup_zero_based_tuple(&output.as_tuple()).unwrap();
+    assert!(table.stage(0).unique_input_ids().contains(&input_id));
+    assert!(table.stage(0).unique_output_ids().contains(&output_id));
 }
 
 #[test]
@@ -99,18 +121,12 @@ fn enumerates_complete_paths_through_every_stage() {
     add_identity(&mut table, 2, &e, &z);
 
     let paths = table.enumerate_complete_paths(None, None, None);
+    let first_path = path_for(&table, &[(0, &a, &b), (1, &b, &d), (2, &d, &z)]);
+    let second_path = path_for(&table, &[(0, &a, &c), (1, &c, &e), (2, &e, &z)]);
 
     assert_eq!(paths.len(), 2);
-    assert!(paths.contains(&vec![
-        (0, a.as_tuple(), b.as_tuple()),
-        (1, b.as_tuple(), d.as_tuple()),
-        (2, d.as_tuple(), z.as_tuple()),
-    ]));
-    assert!(paths.contains(&vec![
-        (0, a.as_tuple(), c.as_tuple()),
-        (1, c.as_tuple(), e.as_tuple()),
-        (2, e.as_tuple(), z.as_tuple()),
-    ]));
+    assert!(paths.contains(&first_path));
+    assert!(paths.contains(&second_path));
 }
 
 #[test]
@@ -134,10 +150,6 @@ fn traces_complete_paths_ending_with_terminal_transition() {
 
     assert_eq!(
         paths,
-        vec![vec![
-            (0, a.as_tuple(), c.as_tuple()),
-            (1, c.as_tuple(), e.as_tuple()),
-            (2, e.as_tuple(), z.as_tuple()),
-        ]]
+        vec![path_for(&table, &[(0, &a, &c), (1, &c, &e), (2, &e, &z)])]
     );
 }

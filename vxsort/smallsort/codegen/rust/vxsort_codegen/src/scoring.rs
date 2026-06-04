@@ -3,9 +3,9 @@ use std::collections::{BinaryHeap, HashSet};
 
 use gadget_synth::PermutationGadget;
 
-use crate::transition_table::{CompletePath, StateTuple, TransitionTable};
+use crate::transition_table::{CompletePath, GadgetIndex, TransitionRef, TransitionTable};
 
-pub type AssignedPathKey = Vec<(usize, StateTuple, StateTuple, usize)>;
+pub type AssignedPathKey = Vec<(TransitionRef, GadgetIndex)>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct GadgetCost {
@@ -71,90 +71,58 @@ impl PathCost {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct AssignedStep {
-    stage: usize,
-    input: StateTuple,
-    output: StateTuple,
-    gadget_index: usize,
-    gadget: PermutationGadget,
-}
-
-impl AssignedStep {
-    pub fn new(
-        stage: usize,
-        input: StateTuple,
-        output: StateTuple,
-        gadget_index: usize,
-        gadget: PermutationGadget,
-    ) -> Self {
-        Self {
-            stage,
-            input,
-            output,
-            gadget_index,
-            gadget,
-        }
-    }
-
-    pub fn stage(&self) -> usize {
-        self.stage
-    }
-
-    pub fn input(&self) -> &StateTuple {
-        &self.input
-    }
-
-    pub fn output(&self) -> &StateTuple {
-        &self.output
-    }
-
-    pub fn gadget_index(&self) -> usize {
-        self.gadget_index
-    }
-
-    pub fn gadget(&self) -> &PermutationGadget {
-        &self.gadget
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct AssignedPath {
-    steps: Vec<AssignedStep>,
+    path: CompletePath,
+    gadgets: Vec<GadgetIndex>,
 }
 
 impl AssignedPath {
-    pub fn new(steps: Vec<AssignedStep>) -> Self {
-        Self { steps }
+    pub fn new(path: CompletePath, gadgets: Vec<GadgetIndex>) -> Self {
+        assert_eq!(
+            path.len(),
+            gadgets.len(),
+            "assigned path must select one gadget per stage"
+        );
+        Self { path, gadgets }
     }
 
-    pub fn steps(&self) -> &[AssignedStep] {
-        &self.steps
+    pub fn path(&self) -> &CompletePath {
+        &self.path
+    }
+
+    pub fn gadgets(&self) -> &[GadgetIndex] {
+        &self.gadgets
+    }
+
+    pub fn gadget_at_stage(&self, stage: usize) -> GadgetIndex {
+        self.gadgets[stage]
     }
 
     pub fn as_complete_path(&self) -> CompletePath {
-        self.steps
-            .iter()
-            .map(|step| (step.stage, step.input.clone(), step.output.clone()))
-            .collect()
+        self.path.clone()
     }
 
     pub fn selection_key(&self) -> AssignedPathKey {
-        self.steps
+        self.path
             .iter()
-            .map(|step| {
+            .zip(self.gadgets.iter().copied())
+            .map(|((stage, transition), gadget)| {
                 (
-                    step.stage,
-                    step.input.clone(),
-                    step.output.clone(),
-                    step.gadget_index,
+                    TransitionRef {
+                        stage: stage
+                            .try_into()
+                            .expect("stage index should fit in transition ref"),
+                        transition,
+                    },
+                    gadget,
                 )
             })
             .collect()
     }
 }
 
-pub trait Scorer {
+pub trait Scorer: Send {
     fn score_gadget(&self, gadget: &PermutationGadget) -> GadgetCost;
 
     fn assign_path_gadgets(
@@ -162,27 +130,31 @@ pub trait Scorer {
         path: &CompletePath,
         table: &TransitionTable,
     ) -> Option<AssignedPath> {
-        let mut steps = Vec::with_capacity(path.len());
-        for (stage, input, output) in path {
-            let gadgets = table
-                .get_all_transitions(*stage)
-                .get(&(input.clone(), output.clone()))?;
-            let (gadget_index, gadget) = gadgets.iter().enumerate().min_by(|left, right| {
-                self.score_gadget(left.1)
-                    .score()
-                    .total_cmp(&self.score_gadget(right.1).score())
-                    .then_with(|| left.0.cmp(&right.0))
-            })?;
-            steps.push(AssignedStep::new(
-                *stage,
-                input.clone(),
-                output.clone(),
-                gadget_index,
-                gadget.clone(),
+        let mut gadgets = Vec::with_capacity(path.len());
+        for (stage, transition) in path.iter() {
+            let transition_ref = TransitionRef {
+                stage: stage
+                    .try_into()
+                    .expect("stage index should fit in transition ref"),
+                transition,
+            };
+            let selected = table
+                .transition_gadgets(transition_ref)
+                .iter()
+                .enumerate()
+                .min_by(|left, right| {
+                    self.score_gadget(left.1)
+                        .score()
+                        .total_cmp(&self.score_gadget(right.1).score())
+                        .then_with(|| left.0.cmp(&right.0))
+                })?
+                .0;
+            gadgets.push(GadgetIndex(
+                selected.try_into().expect("gadget index should fit in u16"),
             ));
         }
 
-        Some(AssignedPath::new(steps))
+        Some(AssignedPath::new(path.clone(), gadgets))
     }
 
     fn assign_path_gadgets_k_best(
@@ -195,28 +167,36 @@ pub trait Scorer {
             return Vec::new();
         }
         if path.is_empty() {
-            return vec![AssignedPath::new(Vec::new())];
+            return vec![AssignedPath::new(CompletePath::new(Vec::new()), Vec::new())];
         }
 
         let mut choices = Vec::with_capacity(path.len());
-        for (stage, input, output) in path {
-            let Some(gadgets) = table
-                .get_all_transitions(*stage)
-                .get(&(input.clone(), output.clone()))
-            else {
-                return Vec::new();
+        for (stage, transition) in path.iter() {
+            let transition_ref = TransitionRef {
+                stage: stage
+                    .try_into()
+                    .expect("stage index should fit in transition ref"),
+                transition,
             };
-            let mut scored = gadgets
+            let mut scored = table
+                .transition_gadgets(transition_ref)
                 .iter()
                 .enumerate()
                 .map(|(gadget_index, gadget)| {
                     let cost = self.score_gadget(gadget).score();
-                    (gadget_index, gadget.clone(), cost)
+                    (
+                        GadgetIndex(
+                            gadget_index
+                                .try_into()
+                                .expect("gadget index should fit in u16"),
+                        ),
+                        cost,
+                    )
                 })
                 .collect::<Vec<_>>();
             scored.sort_by(|left, right| {
-                left.2
-                    .total_cmp(&right.2)
+                left.1
+                    .total_cmp(&right.1)
                     .then_with(|| left.0.cmp(&right.0))
             });
             if scored.is_empty() {
@@ -263,11 +243,15 @@ pub trait Scorer {
         assigned
     }
 
-    fn score_assigned_path(&self, assigned_path: &AssignedPath) -> PathCost;
+    fn score_assigned_path(
+        &self,
+        assigned_path: &AssignedPath,
+        table: &TransitionTable,
+    ) -> PathCost;
 
     fn score_path(&self, path: &CompletePath, table: &TransitionTable) -> PathCost {
         self.assign_path_gadgets(path, table)
-            .map(|assigned_path| self.score_assigned_path(&assigned_path))
+            .map(|assigned_path| self.score_assigned_path(&assigned_path, table))
             .unwrap_or_else(|| PathCost::new(0, f64::INFINITY, f64::INFINITY))
     }
 }
@@ -302,34 +286,25 @@ impl PartialOrd for KBestEntry {
     }
 }
 
-fn assignment_score(choices: &[Vec<(usize, PermutationGadget, f64)>], indices: &[usize]) -> f64 {
+fn assignment_score(choices: &[Vec<(GadgetIndex, f64)>], indices: &[usize]) -> f64 {
     indices
         .iter()
         .enumerate()
-        .map(|(step, choice)| choices[step][*choice].2)
+        .map(|(step, choice)| choices[step][*choice].1)
         .sum()
 }
 
 fn build_assignment(
     path: &CompletePath,
-    choices: &[Vec<(usize, PermutationGadget, f64)>],
+    choices: &[Vec<(GadgetIndex, f64)>],
     indices: &[usize],
 ) -> AssignedPath {
-    let steps = path
+    let gadgets = indices
         .iter()
         .enumerate()
-        .map(|(step_index, (stage, input, output))| {
-            let (gadget_index, gadget, _) = &choices[step_index][indices[step_index]];
-            AssignedStep::new(
-                *stage,
-                input.clone(),
-                output.clone(),
-                *gadget_index,
-                gadget.clone(),
-            )
-        })
+        .map(|(step, choice)| choices[step][*choice].0)
         .collect();
-    AssignedPath::new(steps)
+    AssignedPath::new(path.clone(), gadgets)
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -347,30 +322,26 @@ impl Scorer for DummyScorer {
         )
     }
 
-    fn score_assigned_path(&self, assigned_path: &AssignedPath) -> PathCost {
+    fn score_assigned_path(
+        &self,
+        assigned_path: &AssignedPath,
+        table: &TransitionTable,
+    ) -> PathCost {
         let instruction_count = assigned_path
-            .steps()
+            .path()
             .iter()
-            .map(|step| self.score_gadget(step.gadget()).instruction_count())
+            .zip(assigned_path.gadgets())
+            .map(|((stage, transition), gadget_index)| {
+                let transition_ref = TransitionRef {
+                    stage: stage
+                        .try_into()
+                        .expect("stage index should fit in transition ref"),
+                    transition,
+                };
+                self.score_gadget(table.transition(transition_ref).gadget(*gadget_index))
+                    .instruction_count()
+            })
             .sum();
         PathCost::new(instruction_count, 10.0, 10.0)
     }
-}
-
-pub fn transition_table_from_assigned_paths(
-    num_stages: usize,
-    assigned_paths: &[AssignedPath],
-) -> TransitionTable {
-    let mut table = TransitionTable::new(num_stages);
-    for assigned_path in assigned_paths {
-        for step in assigned_path.steps() {
-            table.add_transition(
-                step.stage(),
-                &gadget_synth::VectorState::new(step.input().0.clone(), step.input().1.clone()),
-                &gadget_synth::VectorState::new(step.output().0.clone(), step.output().1.clone()),
-                step.gadget().clone(),
-            );
-        }
-    }
-    table
 }

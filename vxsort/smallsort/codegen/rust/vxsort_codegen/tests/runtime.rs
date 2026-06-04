@@ -1,10 +1,15 @@
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-    mpsc,
+use std::{
+    fs,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
 };
 
+use serde_json::{Value, json};
 use vxsort_codegen::runtime::{ChannelRuntimeSession, RuntimeEvent, RuntimeSession};
+use vxsort_codegen::runtime_trace::RuntimeTrace;
 use vxsort_codegen::wave_engine::{WaveConfig, WaveEngine};
 use vxsort_codegen::{ArchArg, DTypeArg};
 
@@ -96,6 +101,22 @@ fn fast_config() -> WaveConfig {
     }
 }
 
+fn state(top: &[u64], bottom: &[u64]) -> gadget_synth::VectorState {
+    gadget_synth::VectorState::new(top.to_vec(), bottom.to_vec())
+}
+
+fn chain_state(index: u64) -> gadget_synth::VectorState {
+    let base = index * 8;
+    state(
+        &[base, base + 1, base + 2, base + 3],
+        &[base + 4, base + 5, base + 6, base + 7],
+    )
+}
+
+fn empty_gadget() -> gadget_synth::PermutationGadget {
+    gadget_synth::PermutationGadget::new(Vec::new(), Vec::new())
+}
+
 #[test]
 fn run_sync_with_session_emits_lifecycle_and_stage_updates() {
     let mut engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
@@ -140,6 +161,59 @@ fn run_sync_with_session_emits_lifecycle_and_stage_updates() {
             best_score: None,
         })
     ));
+}
+
+#[test]
+fn run_sync_with_session_emits_async_scoring_progress() {
+    let mut engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
+    let states = [
+        chain_state(0),
+        chain_state(1),
+        chain_state(2),
+        chain_state(3),
+        chain_state(4),
+        chain_state(5),
+        chain_state(6),
+    ];
+    for stage in 0..engine.stages().len() {
+        engine.transition_table_mut().add_transition(
+            stage,
+            &states[stage],
+            &states[stage + 1],
+            empty_gadget(),
+        );
+    }
+    let last_stage = engine.stages().len() - 1;
+    let terminal = engine
+        .transition_table()
+        .transition_ref_for_zero_based_tuples(
+            last_stage,
+            &states[last_stage].as_tuple(),
+            &states[last_stage + 1].as_tuple(),
+        )
+        .expect("terminal transition should resolve");
+    assert_eq!(engine.discover_paths_for_transition(terminal, None), 1);
+
+    let mut session = RecordingRuntimeSession::default();
+    engine
+        .run_sync_with_session(Some(0), 0, 1, &mut session)
+        .expect("run should complete");
+
+    assert!(session.events.iter().any(|event| matches!(
+        event,
+        RuntimeEvent::ScoringProgress(snapshot)
+            if snapshot.total_paths() == 1
+                && snapshot.pending_paths() == 1
+                && snapshot.completed_paths() == 0
+    )));
+    assert!(session.events.iter().any(|event| matches!(
+        event,
+        RuntimeEvent::ScoringProgress(snapshot)
+            if snapshot.total_paths() == 1
+                && snapshot.pending_paths() == 0
+                && snapshot.completed_paths() == 1
+                && snapshot.scored_paths() == 1
+    )));
 }
 
 #[test]
@@ -320,6 +394,117 @@ fn worker_run_reports_active_worker_occupancy_before_results_apply() {
                 && snapshot.worker_capacity() == 2
                 && snapshot.queued_jobs() > 0
     )));
+}
+
+#[test]
+fn worker_run_does_not_report_submitted_jobs_as_active_workers() {
+    let mut engine = WaveEngine::new(WaveConfig {
+        worker_count: 2,
+        ..fast_config()
+    })
+    .expect("wave engine should initialize");
+    let mut session = RecordingRuntimeSession::default();
+
+    engine
+        .run_sync_with_session(Some(1), 5, 100, &mut session)
+        .expect("run should complete");
+
+    let first_pool_snapshot = session
+        .events
+        .iter()
+        .find_map(|event| match event {
+            RuntimeEvent::StageUpdated(snapshot)
+                if snapshot.stage() == 0 && snapshot.worker_capacity() == 2 =>
+            {
+                Some(snapshot)
+            }
+            _ => None,
+        })
+        .expect("worker pool should emit a capacity snapshot");
+
+    assert_eq!(first_pool_snapshot.active_workers(), 0);
+    assert_eq!(first_pool_snapshot.queued_jobs(), 5);
+}
+
+#[test]
+fn runtime_trace_records_worker_jobs_and_counters() {
+    let mut engine = WaveEngine::new(WaveConfig {
+        worker_count: 2,
+        ..fast_config()
+    })
+    .expect("wave engine should initialize");
+    let mut session = RecordingRuntimeSession::default();
+    let trace_path = std::env::temp_dir().join(format!(
+        "vxsort-runtime-trace-worker-jobs-{}.jsonl",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&trace_path);
+
+    {
+        let mut trace = RuntimeTrace::open(&trace_path).expect("trace file should open");
+        engine
+            .run_sync_with_session_and_trace(Some(1), 5, 100, &mut session, &mut trace)
+            .expect("run should complete");
+        trace.flush().expect("trace should flush");
+    }
+
+    let trace_contents = fs::read_to_string(&trace_path).expect("trace file should be readable");
+    let events = trace_contents
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("trace line should be JSON"))
+        .collect::<Vec<_>>();
+    let _ = fs::remove_file(&trace_path);
+
+    assert!(
+        events
+            .iter()
+            .any(|event| event["event"] == "worker_pool_started")
+    );
+    assert!(events.iter().any(|event| event["event"] == "job_submitted"));
+    assert!(events.iter().any(|event| event["event"] == "job_started"));
+    assert!(events.iter().any(|event| event["event"] == "job_finished"));
+    assert!(
+        events
+            .iter()
+            .any(|event| event["event"] == "job_apply_finished")
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| event["event"] == "worker_pool_finished")
+    );
+    assert!(events.iter().any(|event| {
+        event["event"] == "worker_counters"
+            && event["stage"] == 0
+            && event["worker_capacity"] == 2
+            && event["queued_jobs"].as_u64().is_some()
+            && event["in_flight"].as_u64().is_some()
+            && event["active_workers"].as_u64().is_some()
+    }));
+}
+
+#[test]
+fn runtime_trace_writes_complete_line_without_explicit_flush() {
+    let trace_path = std::env::temp_dir().join(format!(
+        "vxsort-runtime-trace-live-{}.jsonl",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&trace_path);
+
+    let mut trace = RuntimeTrace::open(&trace_path).expect("trace file should open");
+    trace.event("probe", json!({"value": 1}));
+
+    let trace_contents = fs::read_to_string(&trace_path).expect("trace file should be readable");
+    let _ = fs::remove_file(&trace_path);
+    let line = trace_contents
+        .lines()
+        .next()
+        .expect("trace event should be visible before explicit flush");
+    let event = serde_json::from_str::<Value>(line).expect("visible trace line should be JSON");
+
+    assert_eq!(event["event"], "probe");
+    assert_eq!(event["value"], 1);
+    assert_eq!(trace_contents.lines().count(), 1);
 }
 
 #[test]

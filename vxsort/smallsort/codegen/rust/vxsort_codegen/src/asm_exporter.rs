@@ -40,10 +40,11 @@ pub fn write_solution_asm_for_paths(
 pub fn write_solution_asm_for_assigned_paths(
     output_path: impl AsRef<Path>,
     metadata: &SolutionJsonMetadata,
+    table: &TransitionTable,
     paths: &[AssignedPath],
 ) -> Result<(), io::Error> {
     let mut file = File::create(output_path)?;
-    file.write_all(generate_solution_asm_for_assigned_paths(metadata, paths).as_bytes())
+    file.write_all(generate_solution_asm_for_assigned_paths(metadata, table, paths).as_bytes())
 }
 
 /// Generate NASM/Intel-syntax assembly for `paths` and return it as a
@@ -67,9 +68,10 @@ pub fn generate_solution_asm_for_paths(
 
 pub fn generate_solution_asm_for_assigned_paths(
     metadata: &SolutionJsonMetadata,
+    table: &TransitionTable,
     paths: &[AssignedPath],
 ) -> String {
-    let stream = lower_assigned_paths(metadata, paths, LoweringOptions::default());
+    let stream = lower_assigned_paths(metadata, table, paths, LoweringOptions::default());
     render_asm(&stream, metadata)
 }
 

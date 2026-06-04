@@ -1632,6 +1632,7 @@ name = "vxsort_codegen"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "comfy-table",
  "crossterm 0.29.0",
  "gadget_synth",
  "ratatui",

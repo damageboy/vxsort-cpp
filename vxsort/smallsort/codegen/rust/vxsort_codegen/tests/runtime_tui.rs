@@ -5,10 +5,10 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use vxsort_codegen::runtime::{RuntimeEvent, StageProgressSnapshot};
+use vxsort_codegen::runtime::{RuntimeEvent, ScoringProgressSnapshot, StageProgressSnapshot};
 use vxsort_codegen::runtime_tui::{
-    FocusedPane, TUI_TICK_RATE, TuiApp, TuiControl, TuiState, render_progress_bar, render_tui,
-    stage_progress_bar_width, stage_progress_total,
+    FocusedPane, TUI_TICK_RATE, TuiApp, TuiControl, TuiState, render_progress_bar,
+    render_scoring_progress_bar, render_tui, stage_progress_bar_width, stage_progress_total,
 };
 use vxsort_codegen::transition_table::StageStats;
 
@@ -212,6 +212,43 @@ fn render_tui_draws_active_worker_and_queued_job_counts() {
     assert!(rendered.contains("workers 3/4 active"));
     assert!(rendered.contains("queued 17"));
     assert!(rendered.contains("3/4"));
+}
+
+#[test]
+fn render_tui_draws_separate_scoring_progress_bar() {
+    let backend = ratatui::backend::TestBackend::new(150, 32);
+    let mut terminal = ratatui::Terminal::new(backend).expect("test backend should initialize");
+    let mut state = TuiState::new(2);
+
+    state.apply_event(RuntimeEvent::ScoringProgress(ScoringProgressSnapshot::new(
+        3, 10, 7, 5,
+    )));
+
+    terminal
+        .draw(|frame| render_tui(frame, &state))
+        .expect("render should succeed");
+
+    let rendered = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+
+    assert_eq!(state.scoring_completed_paths(), 3);
+    assert_eq!(state.scoring_total_paths(), 10);
+    assert_eq!(state.scoring_pending_paths(), 7);
+    assert!(rendered.contains("Scoring Progress"));
+    assert!(rendered.contains("3/10 paths"));
+    assert!(rendered.contains("pending 7"));
+}
+
+#[test]
+fn scoring_progress_bar_uses_distinct_color_from_stage_progress() {
+    let line = render_scoring_progress_bar(3, 10, 10);
+
+    assert_eq!(line.spans[1].style.fg, Some(ratatui::style::Color::Magenta));
 }
 
 #[test]

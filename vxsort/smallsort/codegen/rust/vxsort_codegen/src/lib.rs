@@ -2,11 +2,13 @@ use std::path::{Path, PathBuf};
 
 use asm_exporter::{write_solution_asm_for_assigned_paths, write_solution_asm_for_paths};
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use instruction_stream::{LoweringOptions, lower_solution_paths};
+use instruction_stream::{LoweringOptions, lower_assigned_paths};
 use json_exporter::{SolutionJsonMetadata, write_solution_json_for_assigned_paths};
 pub use json_importer::{ImportedSolutionJson, read_solution_json, solution_json_from_value};
 use runtime::{NullRuntimeSession, RuntimeEvent, RuntimeSession};
-use scoring::{PathCost, transition_table_from_assigned_paths};
+use runtime_trace::RuntimeTrace;
+use scoring::PathCost;
+use serde_json::json;
 pub use uica_data_fetch::{
     FetchUicaDataConfig, FetchUicaDataReport, default_uica_data_base_url, fetch_uica_data,
 };
@@ -20,6 +22,7 @@ pub mod instruction_stream;
 pub mod json_exporter;
 pub mod json_importer;
 pub mod runtime;
+pub mod runtime_trace;
 pub mod runtime_tui;
 pub mod scoring;
 pub mod transition_table;
@@ -177,6 +180,9 @@ pub struct SolveArgs {
     #[arg(long = "runtime-ui", value_enum, ignore_case = true, default_value_t = RuntimeUiArg::Auto)]
     pub runtime_ui: RuntimeUiArg,
 
+    #[arg(long = "runtime-trace")]
+    pub runtime_trace_path: Option<PathBuf>,
+
     #[arg(long = "dry-run")]
     pub dry_run: bool,
 }
@@ -283,6 +289,7 @@ pub struct RunConfig {
     pub wave_outputs: usize,
     pub worker_count: usize,
     pub runtime_ui: RuntimeUiArg,
+    pub runtime_trace_path: Option<PathBuf>,
     pub dry_run: bool,
 }
 
@@ -379,6 +386,7 @@ pub fn parse_run_config(args: CliArgs) -> Result<RunConfig, String> {
         wave_outputs: solve_args.wave_outputs,
         worker_count: resolve_worker_count(solve_args.workers),
         runtime_ui: solve_args.runtime_ui,
+        runtime_trace_path: solve_args.runtime_trace_path,
         dry_run: solve_args.dry_run,
     })
 }
@@ -416,6 +424,7 @@ pub fn convert_solution_json_to_asm(
         write_solution_asm_for_assigned_paths(
             output_path,
             &imported.metadata,
+            &imported.transition_table,
             &imported.assigned_paths,
         )
         .map_err(|error| format!("failed to write solution assembly: {error}"))
@@ -458,6 +467,26 @@ pub fn build_run_summary_with_session(
     if config.target_cpus.is_empty() {
         return Err("--target-cpu is required for scored solving".to_owned());
     }
+    let mut trace = RuntimeTrace::from_path(config.runtime_trace_path.as_deref())?;
+    trace.event(
+        "run_started",
+        json!({
+            "num_vecs": config.num_vecs,
+            "arch": config.arch.cli_name(),
+            "dtype": config.dtype.cli_name(),
+            "gadget_depth": config.gadget_depth,
+            "natural_order": config.natural_order,
+            "retroactive_input": config.retroactive_input,
+            "max_gadget_solutions": config.max_gadget_solutions,
+            "target_cpus": config.target_cpus.clone(),
+            "final_top_k": final_top_k,
+            "rough_top_k": rough_top_k,
+            "max_waves": config.max_waves,
+            "wave_attempts": config.wave_attempts,
+            "wave_outputs": config.wave_outputs,
+            "worker_count": config.worker_count,
+        }),
+    );
 
     let mut total_wave_count = 0;
     let mut search_exhausted = true;
@@ -467,6 +496,14 @@ pub fn build_run_summary_with_session(
     let multi_target = config.target_cpus.len() > 1;
 
     for target_cpu in &config.target_cpus {
+        trace.event(
+            "target_started",
+            json!({
+                "target_cpu": target_cpu,
+                "rough_top_k": rough_top_k,
+                "final_top_k": final_top_k,
+            }),
+        );
         let rough_scorer = UiPackScorer::from_data_dir(&config.uica_data_dir, target_cpu)?
             .with_solution_metadata(metadata.clone());
         let mut engine = WaveEngine::with_scorer(
@@ -489,14 +526,25 @@ pub fn build_run_summary_with_session(
             let mut target_session =
                 TargetRuntimeSession::new(session, target_cpu, rough_top_k, final_top_k);
             engine
-                .run_sync_with_session(
+                .run_sync_with_session_and_trace(
                     config.max_waves,
                     config.wave_attempts,
                     config.wave_outputs,
                     &mut target_session,
+                    &mut trace,
                 )
                 .map_err(|error| error.to_string())?
         };
+        trace.event(
+            "target_rough_finished",
+            json!({
+                "target_cpu": target_cpu,
+                "wave_count": result.wave_count(),
+                "search_exhausted": result.search_exhausted(),
+                "rough_candidate_count": engine.scored_paths().len(),
+                "best_rough_score": engine.best_score(),
+            }),
+        );
 
         let full_scorer = UiPackScorer::from_data_dir(&config.uica_data_dir, target_cpu)?;
         let final_paths = full_score_and_prune_paths(
@@ -522,8 +570,13 @@ pub fn build_run_summary_with_session(
                 kind: "JSON".to_owned(),
                 path: output_path.display().to_string(),
             });
-            write_solution_json_for_assigned_paths(&output_path, &metadata, &assigned_paths)
-                .map_err(|error| format!("failed to write solution JSON: {error}"))?;
+            write_solution_json_for_assigned_paths(
+                &output_path,
+                &metadata,
+                engine.transition_table(),
+                &assigned_paths,
+            )
+            .map_err(|error| format!("failed to write solution JSON: {error}"))?;
             session.on_event(RuntimeEvent::ExportFinished {
                 target_cpu: target_cpu.clone(),
                 kind: "JSON".to_owned(),
@@ -569,6 +622,16 @@ pub fn build_run_summary_with_session(
         scored_paths: total_scored_paths,
         best_score,
     });
+    trace.event(
+        "run_finished",
+        json!({
+            "wave_count": total_wave_count,
+            "search_exhausted": search_exhausted,
+            "scored_paths": total_scored_paths,
+            "best_score": best_score,
+        }),
+    );
+    trace.flush()?;
 
     Ok(RunSummary {
         wave_count: total_wave_count,
@@ -720,15 +783,10 @@ fn full_score_assigned_path(
     scorer: &UiPackScorer,
 ) -> PathCost {
     let assigned_path = rough_path.assigned_path().clone();
-    let export_table = transition_table_from_assigned_paths(
-        table.stages().len(),
-        std::slice::from_ref(&assigned_path),
-    );
-    let complete_path = assigned_path.as_complete_path();
-    let stream = lower_solution_paths(
+    let stream = lower_assigned_paths(
         metadata,
-        &export_table,
-        std::slice::from_ref(&complete_path),
+        table,
+        std::slice::from_ref(&assigned_path),
         LoweringOptions::default(),
     );
     let Some(block) = stream.blocks.first() else {
@@ -795,13 +853,13 @@ pub fn build_dry_run_summary(config: &RunConfig) -> Result<DryRunSummary, String
             .initial_state()
             .top()
             .iter()
-            .map(|value| *value as usize)
+            .map(|value| *value as usize + 1)
             .collect(),
         initial_bottom: engine
             .initial_state()
             .bottom()
             .iter()
-            .map(|value| *value as usize)
+            .map(|value| *value as usize + 1)
             .collect(),
         stages,
         shallow_candidate_count: engine.shallow_candidates().len(),

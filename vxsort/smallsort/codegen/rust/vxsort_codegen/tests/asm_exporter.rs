@@ -10,6 +10,19 @@ fn state(top: &[u64], bottom: &[u64]) -> VectorState {
     VectorState::new(top.to_vec(), bottom.to_vec())
 }
 
+fn path_for(
+    table: &TransitionTable,
+    steps: &[(usize, &VectorState, &VectorState)],
+) -> vxsort_codegen::transition_table::CompletePath {
+    let steps = steps
+        .iter()
+        .map(|(stage, input, output)| (*stage, input.as_tuple(), output.as_tuple()))
+        .collect::<Vec<_>>();
+    table
+        .complete_path_from_zero_based_steps(&steps)
+        .expect("test path should resolve")
+}
+
 fn inst(name: &'static str, args: &[(&'static str, InstructionArg)]) -> InstructionSpec {
     InstructionSpec::new(name, args.iter().cloned().collect::<BTreeMap<_, _>>())
 }
@@ -33,7 +46,7 @@ fn compare_swap_asm_for(arch: ArchArg, dtype: DTypeArg) -> String {
     let gadget = PermutationGadget::new(Vec::new(), Vec::new());
     let mut table = TransitionTable::new(1);
     table.add_transition(0, &input, &output, gadget);
-    let path = vec![(0, input.as_tuple(), output.as_tuple())];
+    let path = path_for(&table, &[(0, &input, &output)]);
 
     generate_solution_asm_for_paths(&metadata_for(arch, dtype), &table, &[path])
 }
@@ -62,7 +75,7 @@ fn emits_nasm_style_solution_with_gadget_and_compare_swap() {
     );
     let mut table = TransitionTable::new(1);
     table.add_transition(0, &input, &output, gadget);
-    let path = vec![(0, input.as_tuple(), output.as_tuple())];
+    let path = path_for(&table, &[(0, &input, &output)]);
 
     let asm = generate_solution_asm_for_paths(&metadata(), &table, &[path]);
 
@@ -105,7 +118,7 @@ fn imm8_comments_follow_python_intrinsic_metadata() {
     );
     let mut table = TransitionTable::new(1);
     table.add_transition(0, &input, &output, gadget);
-    let path = vec![(0, input.as_tuple(), output.as_tuple())];
+    let path = path_for(&table, &[(0, &input, &output)]);
 
     let asm = generate_solution_asm_for_paths(&metadata(), &table, &[path]);
 
@@ -115,28 +128,29 @@ fn imm8_comments_follow_python_intrinsic_metadata() {
 }
 
 #[test]
-fn emits_python_parity_stage_state_register_and_compare_swap_comments() {
+fn emits_comfy_stage_state_register_and_compare_swap_comments() {
     let input = state(&[1, 3, 5, 7], &[2, 4, 6, 8]);
     let output = state(&[1, 2, 5, 6], &[3, 4, 7, 8]);
     let gadget = PermutationGadget::new(Vec::new(), Vec::new());
     let mut table = TransitionTable::new(1);
     table.add_transition(0, &input, &output, gadget);
-    let path = vec![(0, input.as_tuple(), output.as_tuple())];
+    let path = path_for(&table, &[(0, &input, &output)]);
 
     let asm = generate_solution_asm_for_paths(&metadata(), &table, &[path]);
 
     assert!(asm.contains("; Initial Input State:"));
-    assert!(asm.contains("; ╭────────┬─────┬─────┬─────┬─────╮"));
-    assert!(asm.contains("; │        │   0 │   1 │   2 │   3 │"));
-    assert!(asm.contains("; │ Top    │   1 │   3 │   5 │   7 │"));
-    assert!(asm.contains("; │ Bottom │   2 │   4 │   6 │   8 │"));
-    assert!(asm.contains("; ╰────────┴─────┴─────┴─────┴─────╯"));
+    assert!(asm.contains("; ╭────────┬───┬───┬───┬───╮"));
+    assert!(asm.contains("; │        ┆ 0 ┆ 1 ┆ 2 ┆ 3 │"));
+    assert!(asm.contains("; ╞════════╪═══╪═══╪═══╪═══╡"));
+    assert!(asm.contains("; │ Top    ┆ 1 ┆ 3 ┆ 5 ┆ 7 │"));
+    assert!(asm.contains("; │ Bottom ┆ 2 ┆ 4 ┆ 6 ┆ 8 │"));
+    assert!(asm.contains("; ╰────────┴───┴───┴───┴───╯"));
     assert!(asm.contains("; Stage 0"));
     assert!(!asm.contains("; Registers:"));
     assert!(!asm.contains("; Compare-swap:"));
     assert!(asm.contains("; Output State:"));
-    assert!(asm.contains("; │ Top    │   1 │   2 │   5 │   6 │"));
-    assert!(asm.contains("; │ Bottom │   3 │   4 │   7 │   8 │"));
+    assert!(asm.contains("; │ Top    ┆ 1 ┆ 2 ┆ 5 ┆ 6 │"));
+    assert!(asm.contains("; │ Bottom ┆ 3 ┆ 4 ┆ 7 ┆ 8 │"));
 }
 
 #[test]
@@ -148,10 +162,7 @@ fn emits_current_top_bottom_register_comment_at_each_stage() {
     let mut table = TransitionTable::new(2);
     table.add_transition(0, &input0, &output0, gadget.clone());
     table.add_transition(1, &output0, &output1, gadget);
-    let path = vec![
-        (0, input0.as_tuple(), output0.as_tuple()),
-        (1, output0.as_tuple(), output1.as_tuple()),
-    ];
+    let path = path_for(&table, &[(0, &input0, &output0), (1, &output0, &output1)]);
 
     let asm = generate_solution_asm_for_paths(&metadata(), &table, &[path]);
 
@@ -238,7 +249,7 @@ fn unsupported_gadget_instruction_forms_remain_explicit_in_asm() {
     );
     let mut table = TransitionTable::new(1);
     table.add_transition(0, &input, &output, gadget);
-    let path = vec![(0, input.as_tuple(), output.as_tuple())];
+    let path = path_for(&table, &[(0, &input, &output)]);
 
     let asm = generate_solution_asm_for_paths(&metadata(), &table, &[path]);
 
@@ -282,7 +293,7 @@ fn emits_rodata_for_stream_constants_without_renderer_pooling() {
     );
     let mut table = TransitionTable::new(1);
     table.add_transition(0, &input, &output, gadget);
-    let path = vec![(0, input.as_tuple(), output.as_tuple())];
+    let path = path_for(&table, &[(0, &input, &output)]);
 
     let asm = generate_solution_asm_for_paths(&metadata(), &table, &[path]);
 
@@ -311,7 +322,7 @@ fn emits_control_vectors_as_rodata_with_lane_comments() {
     );
     let mut table = TransitionTable::new(1);
     table.add_transition(0, &input, &output, gadget);
-    let path = vec![(0, input.as_tuple(), output.as_tuple())];
+    let path = path_for(&table, &[(0, &input, &output)]);
 
     let asm = generate_solution_asm_for_paths(&metadata(), &table, &[path]);
 
@@ -340,7 +351,7 @@ fn emits_mask_loads_and_writemask_operands_for_avx512() {
     );
     let mut table = TransitionTable::new(1);
     table.add_transition(0, &input, &output, gadget);
-    let path = vec![(0, input.as_tuple(), output.as_tuple())];
+    let path = path_for(&table, &[(0, &input, &output)]);
 
     let asm = generate_solution_asm_for_paths(
         &metadata_for(ArchArg::Avx512, DTypeArg::I32),
@@ -368,7 +379,7 @@ fn emits_shared_prefix_once_for_dual_side_gadgets() {
     let gadget = PermutationGadget::new(vec![shared.clone()], vec![shared]);
     let mut table = TransitionTable::new(1);
     table.add_transition(0, &input, &output, gadget);
-    let path = vec![(0, input.as_tuple(), output.as_tuple())];
+    let path = path_for(&table, &[(0, &input, &output)]);
 
     let asm = generate_solution_asm_for_paths(&metadata(), &table, &[path]);
 

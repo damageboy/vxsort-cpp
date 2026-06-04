@@ -14,11 +14,10 @@ use uica_decode_ir::DecodedInstruction;
 use uica_model::{Invocation, ReportBundle};
 
 use crate::instruction_stream::{InstructionBlock, ModeledInstruction, Operand, Register};
-use crate::instruction_stream::{LoweringOptions, lower_solution_paths};
+use crate::instruction_stream::{LoweringOptions, lower_assigned_paths};
 use crate::json_exporter::SolutionJsonMetadata;
-use crate::scoring::{
-    AssignedPath, GadgetCost, PathCost, Scorer, transition_table_from_assigned_paths,
-};
+use crate::scoring::{AssignedPath, GadgetCost, PathCost, Scorer};
+use crate::transition_table::{TransitionRef, TransitionTable};
 
 pub struct UiPackScorer {
     arch: String,
@@ -306,25 +305,19 @@ impl Scorer for UiPackScorer {
         GadgetCost::new(instruction_count as u32, score, score, score)
     }
 
-    fn score_assigned_path(&self, assigned_path: &AssignedPath) -> PathCost {
+    fn score_assigned_path(
+        &self,
+        assigned_path: &AssignedPath,
+        table: &TransitionTable,
+    ) -> PathCost {
         if let Some(metadata) = &self.solution_metadata {
-            let num_stages = assigned_path
-                .steps()
-                .iter()
-                .map(|step| step.stage())
-                .max()
-                .map(|stage| stage + 1)
-                .unwrap_or(0);
-            let table = transition_table_from_assigned_paths(
-                num_stages,
-                std::slice::from_ref(assigned_path),
-            );
-            let complete_path = assigned_path.as_complete_path();
-            let stream = lower_solution_paths(
+            let stream = lower_assigned_paths(
                 metadata,
-                &table,
-                std::slice::from_ref(&complete_path),
-                LoweringOptions::default(),
+                table,
+                std::slice::from_ref(assigned_path),
+                LoweringOptions {
+                    include_comments: false,
+                },
             );
             if let Some(block) = stream.blocks.first() {
                 return self.rough_score_block(block);
@@ -332,14 +325,34 @@ impl Scorer for UiPackScorer {
         }
 
         let instruction_count = assigned_path
-            .steps()
+            .path()
             .iter()
-            .map(|step| self.score_gadget(step.gadget()).instruction_count())
+            .zip(assigned_path.gadgets())
+            .map(|((stage, transition), gadget_index)| {
+                let transition_ref = TransitionRef {
+                    stage: stage
+                        .try_into()
+                        .expect("stage index should fit in transition ref"),
+                    transition,
+                };
+                self.score_gadget(table.transition(transition_ref).gadget(*gadget_index))
+                    .instruction_count()
+            })
             .sum();
         let score = assigned_path
-            .steps()
+            .path()
             .iter()
-            .map(|step| self.score_gadget(step.gadget()).score())
+            .zip(assigned_path.gadgets())
+            .map(|((stage, transition), gadget_index)| {
+                let transition_ref = TransitionRef {
+                    stage: stage
+                        .try_into()
+                        .expect("stage index should fit in transition ref"),
+                    transition,
+                };
+                self.score_gadget(table.transition(transition_ref).gadget(*gadget_index))
+                    .score()
+            })
             .sum();
         PathCost::new(instruction_count, score, score)
     }

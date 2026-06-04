@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use gadget_synth::{InstructionSpec, PermutationGadget, VectorState};
 use vxsort_codegen::scoring::{DummyScorer, Scorer};
-use vxsort_codegen::transition_table::TransitionTable;
+use vxsort_codegen::transition_table::{CompletePath, GadgetIndex, TransitionTable};
 
 fn state(top: &[u64], bottom: &[u64]) -> VectorState {
     VectorState::new(top.to_vec(), bottom.to_vec())
@@ -39,7 +39,7 @@ fn dummy_scorer_assigns_constant_path_score() {
     let scorer = DummyScorer;
     let table = TransitionTable::new(0);
 
-    let cost = scorer.score_path(&Vec::new(), &table);
+    let cost = scorer.score_path(&CompletePath::new(Vec::new()), &table);
 
     assert_eq!(cost.score(), 10.0);
     assert_eq!(cost.instruction_count(), 0);
@@ -56,17 +56,19 @@ fn dummy_scorer_assigns_lowest_cost_gadget_per_path_step() {
 
     table.add_transition(0, &input, &output, expensive);
     table.add_transition(0, &input, &output, cheap);
-    let path = vec![(0, input.as_tuple(), output.as_tuple())];
+    let path = table
+        .complete_path_from_zero_based_steps(&[(0, input.as_tuple(), output.as_tuple())])
+        .expect("path should resolve");
 
     let assigned = scorer
         .assign_path_gadgets(&path, &table)
         .expect("path should have gadget assignments");
 
-    assert_eq!(assigned.steps().len(), 1);
-    assert_eq!(assigned.steps()[0].gadget_index(), 1);
+    assert_eq!(assigned.path().len(), 1);
+    assert_eq!(assigned.gadget_at_stage(0), GadgetIndex(1));
     assert_eq!(
         scorer
-            .score_gadget(assigned.steps()[0].gadget())
+            .score_gadget(&table.transition_gadgets(assigned.selection_key()[0].0)[1])
             .instruction_count(),
         1
     );

@@ -99,6 +99,46 @@ impl StageProgressSnapshot {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct ScoringProgressSnapshot {
+    completed_paths: usize,
+    total_paths: usize,
+    pending_paths: usize,
+    scored_paths: usize,
+}
+
+impl ScoringProgressSnapshot {
+    pub fn new(
+        completed_paths: usize,
+        total_paths: usize,
+        pending_paths: usize,
+        scored_paths: usize,
+    ) -> Self {
+        Self {
+            completed_paths,
+            total_paths: total_paths.max(completed_paths + pending_paths),
+            pending_paths,
+            scored_paths,
+        }
+    }
+
+    pub fn completed_paths(&self) -> usize {
+        self.completed_paths
+    }
+
+    pub fn total_paths(&self) -> usize {
+        self.total_paths
+    }
+
+    pub fn pending_paths(&self) -> usize {
+        self.pending_paths
+    }
+
+    pub fn scored_paths(&self) -> usize {
+        self.scored_paths
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum RuntimeEvent {
     RunStarted {
         stage_count: usize,
@@ -113,6 +153,7 @@ pub enum RuntimeEvent {
         target_stage: usize,
     },
     StageUpdated(StageProgressSnapshot),
+    ScoringProgress(ScoringProgressSnapshot),
     WaveFinished {
         wave: usize,
         target_stage: usize,
@@ -306,6 +347,15 @@ impl<W: Write> RuntimeSession for LineRuntimeSession<W> {
                     snapshot.active_workers(),
                     snapshot.worker_capacity(),
                     snapshot.queued_jobs()
+                ));
+            }
+            RuntimeEvent::ScoringProgress(snapshot) => {
+                self.write_line(format!(
+                    "runtime: rough scoring paths {}/{} pending {} scored candidates {}",
+                    snapshot.completed_paths(),
+                    snapshot.total_paths(),
+                    snapshot.pending_paths(),
+                    snapshot.scored_paths()
                 ));
             }
             RuntimeEvent::WaveFinished {

@@ -5,6 +5,14 @@ fn state(top: &[u64], bottom: &[u64]) -> gadget_synth::VectorState {
     gadget_synth::VectorState::new(top.to_vec(), bottom.to_vec())
 }
 
+fn chain_state(index: u64) -> gadget_synth::VectorState {
+    let base = index * 8;
+    state(
+        &[base, base + 1, base + 2, base + 3],
+        &[base + 4, base + 5, base + 6, base + 7],
+    )
+}
+
 fn empty_gadget() -> gadget_synth::PermutationGadget {
     gadget_synth::PermutationGadget::new(Vec::new(), Vec::new())
 }
@@ -40,8 +48,8 @@ fn construction_matches_python_wave_engine_initial_state() {
 
     assert_eq!(engine.elements_per_vector(), 4);
     assert_eq!(engine.total_elements(), 8);
-    assert_eq!(engine.initial_state().top(), &[1, 3, 5, 7]);
-    assert_eq!(engine.initial_state().bottom(), &[2, 4, 6, 8]);
+    assert_eq!(engine.initial_state().top(), &[0, 2, 4, 6]);
+    assert_eq!(engine.initial_state().bottom(), &[1, 3, 5, 7]);
     assert_eq!(engine.stages().len(), 6);
     assert_eq!(
         engine.transition_table().stages().len(),
@@ -501,13 +509,13 @@ fn run_wave_sync_marks_downstream_stage_without_inputs_as_stalled() {
 fn complete_path_discovery_scores_terminal_paths_with_dummy_score() {
     let mut engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
     let states = [
-        state(&[1], &[2]),
-        state(&[3], &[4]),
-        state(&[5], &[6]),
-        state(&[7], &[8]),
-        state(&[9], &[10]),
-        state(&[11], &[12]),
-        state(&[13], &[14]),
+        chain_state(0),
+        chain_state(1),
+        chain_state(2),
+        chain_state(3),
+        chain_state(4),
+        chain_state(5),
+        chain_state(6),
     ];
 
     for stage in 0..engine.stages().len() {
@@ -520,35 +528,39 @@ fn complete_path_discovery_scores_terminal_paths_with_dummy_score() {
     }
 
     let last_stage = engine.stages().len() - 1;
-    let discovered = engine.discover_paths_for_transition(
-        last_stage,
-        &states[last_stage].as_tuple(),
-        &states[last_stage + 1].as_tuple(),
-        None,
-    );
+    let terminal = engine
+        .transition_table()
+        .transition_ref_for_zero_based_tuples(
+            last_stage,
+            &states[last_stage].as_tuple(),
+            &states[last_stage + 1].as_tuple(),
+        )
+        .expect("terminal transition should resolve");
+    let discovered = engine.discover_paths_for_transition(terminal, None);
 
     assert_eq!(discovered, 1);
+    assert_eq!(engine.drain_scoring_jobs(), 1);
     assert_eq!(engine.scored_path_count(), 1);
     assert_eq!(engine.best_score(), Some(10.0));
     assert_eq!(engine.scored_paths()[0].cost().score(), 10.0);
     assert_eq!(
-        engine.scored_paths()[0].assigned_path().steps().len(),
+        engine.scored_paths()[0].assigned_path().path().len(),
         engine.stages().len()
     );
     assert_eq!(engine.scored_paths()[0].path().len(), engine.stages().len());
 }
 
 #[test]
-fn complete_path_discovery_deduplicates_already_scored_paths() {
+fn terminal_path_discovery_enqueues_scoring_until_drain() {
     let mut engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
     let states = [
-        state(&[1], &[2]),
-        state(&[3], &[4]),
-        state(&[5], &[6]),
-        state(&[7], &[8]),
-        state(&[9], &[10]),
-        state(&[11], &[12]),
-        state(&[13], &[14]),
+        chain_state(0),
+        chain_state(1),
+        chain_state(2),
+        chain_state(3),
+        chain_state(4),
+        chain_state(5),
+        chain_state(6),
     ];
 
     for stage in 0..engine.stages().len() {
@@ -561,24 +573,62 @@ fn complete_path_discovery_deduplicates_already_scored_paths() {
     }
 
     let last_stage = engine.stages().len() - 1;
-    assert_eq!(
-        engine.discover_paths_for_transition(
+    let terminal = engine
+        .transition_table()
+        .transition_ref_for_zero_based_tuples(
             last_stage,
             &states[last_stage].as_tuple(),
             &states[last_stage + 1].as_tuple(),
-            None,
-        ),
-        1
-    );
-    assert_eq!(
-        engine.discover_paths_for_transition(
+        )
+        .expect("terminal transition should resolve");
+    let discovered = engine.discover_paths_for_transition(terminal, None);
+
+    assert_eq!(discovered, 1);
+    assert_eq!(engine.pending_scoring_job_count(), 1);
+    assert_eq!(engine.scored_path_count(), 0);
+
+    let scored = engine.drain_scoring_jobs();
+
+    assert_eq!(scored, 1);
+    assert_eq!(engine.pending_scoring_job_count(), 0);
+    assert_eq!(engine.scored_path_count(), 1);
+    assert_eq!(engine.best_score(), Some(10.0));
+}
+
+#[test]
+fn complete_path_discovery_deduplicates_already_scored_paths() {
+    let mut engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
+    let states = [
+        chain_state(0),
+        chain_state(1),
+        chain_state(2),
+        chain_state(3),
+        chain_state(4),
+        chain_state(5),
+        chain_state(6),
+    ];
+
+    for stage in 0..engine.stages().len() {
+        engine.transition_table_mut().add_transition(
+            stage,
+            &states[stage],
+            &states[stage + 1],
+            empty_gadget(),
+        );
+    }
+
+    let last_stage = engine.stages().len() - 1;
+    let terminal = engine
+        .transition_table()
+        .transition_ref_for_zero_based_tuples(
             last_stage,
             &states[last_stage].as_tuple(),
             &states[last_stage + 1].as_tuple(),
-            None,
-        ),
-        0
-    );
+        )
+        .expect("terminal transition should resolve");
+    assert_eq!(engine.discover_paths_for_transition(terminal, None), 1);
+    assert_eq!(engine.discover_paths_for_transition(terminal, None), 0);
+    assert_eq!(engine.drain_scoring_jobs(), 1);
 
     assert_eq!(engine.scored_path_count(), 1);
 }
@@ -587,13 +637,13 @@ fn complete_path_discovery_deduplicates_already_scored_paths() {
 fn recording_terminal_transition_discovers_and_scores_complete_paths() {
     let mut engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
     let states = [
-        state(&[1], &[2]),
-        state(&[3], &[4]),
-        state(&[5], &[6]),
-        state(&[7], &[8]),
-        state(&[9], &[10]),
-        state(&[11], &[12]),
-        state(&[13], &[14]),
+        chain_state(0),
+        chain_state(1),
+        chain_state(2),
+        chain_state(3),
+        chain_state(4),
+        chain_state(5),
+        chain_state(6),
     ];
     let last_stage = engine.stages().len() - 1;
 
@@ -606,15 +656,17 @@ fn recording_terminal_transition_discovers_and_scores_complete_paths() {
         );
     }
 
-    let result = engine.record_transition(
-        last_stage,
-        &states[last_stage],
-        &states[last_stage + 1],
-        empty_gadget(),
-    );
+    let input = engine
+        .transition_table()
+        .lookup_zero_based_tuple(&states[last_stage].as_tuple())
+        .expect("last-stage input should already be interned");
+    let result =
+        engine.record_transition(last_stage, input, &states[last_stage + 1], empty_gadget());
 
     assert!(result.transition_added());
     assert_eq!(result.discovered_paths(), 1);
+    assert_eq!(engine.pending_scoring_job_count(), 1);
+    assert_eq!(engine.drain_scoring_jobs(), 1);
     assert_eq!(engine.scored_path_count(), 1);
     assert_eq!(engine.best_score(), Some(10.0));
 }
@@ -623,13 +675,13 @@ fn recording_terminal_transition_discovers_and_scores_complete_paths() {
 fn scored_path_assignment_uses_lowest_cost_gadget_alternative() {
     let mut engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
     let states = [
-        state(&[1], &[2]),
-        state(&[3], &[4]),
-        state(&[5], &[6]),
-        state(&[7], &[8]),
-        state(&[9], &[10]),
-        state(&[11], &[12]),
-        state(&[13], &[14]),
+        chain_state(0),
+        chain_state(1),
+        chain_state(2),
+        chain_state(3),
+        chain_state(4),
+        chain_state(5),
+        chain_state(6),
     ];
     let last_stage = engine.stages().len() - 1;
 
@@ -654,15 +706,85 @@ fn scored_path_assignment_uses_lowest_cost_gadget_alternative() {
         );
     }
 
+    let input = engine
+        .transition_table()
+        .lookup_zero_based_tuple(&states[last_stage].as_tuple())
+        .expect("last-stage input should already be interned");
+    engine.record_transition(last_stage, input, &states[last_stage + 1], empty_gadget());
+    assert_eq!(engine.drain_scoring_jobs(), 1);
+
+    let assigned = engine.scored_paths()[0].assigned_path();
+    assert_eq!(assigned.gadget_at_stage(0).0, 1);
+}
+
+#[test]
+fn new_gadget_on_known_mid_stage_transition_resubmits_complete_path_for_scoring() {
+    let mut engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
+    let states = [
+        chain_state(0),
+        chain_state(1),
+        chain_state(2),
+        chain_state(3),
+        chain_state(4),
+        chain_state(5),
+        chain_state(6),
+    ];
+    let last_stage = engine.stages().len() - 1;
+
+    engine.transition_table_mut().add_transition(
+        0,
+        &states[0],
+        &states[1],
+        gadget_with_instruction_count(3),
+    );
+    for stage in 1..last_stage {
+        engine.transition_table_mut().add_transition(
+            stage,
+            &states[stage],
+            &states[stage + 1],
+            empty_gadget(),
+        );
+    }
+    let terminal_input = engine
+        .transition_table()
+        .lookup_zero_based_tuple(&states[last_stage].as_tuple())
+        .expect("last-stage input should already be interned");
     engine.record_transition(
         last_stage,
-        &states[last_stage],
+        terminal_input,
         &states[last_stage + 1],
         empty_gadget(),
     );
+    assert_eq!(engine.drain_scoring_jobs(), 1);
+    assert_eq!(
+        engine.scored_paths()[0]
+            .assigned_path()
+            .gadget_at_stage(0)
+            .0,
+        0
+    );
 
-    let assigned = engine.scored_paths()[0].assigned_path();
-    assert_eq!(assigned.steps()[0].gadget_index(), 1);
+    let stage0_input = engine
+        .transition_table()
+        .lookup_zero_based_tuple(&states[0].as_tuple())
+        .expect("stage 0 input should already be interned");
+    let result = engine.record_transition(
+        0,
+        stage0_input,
+        &states[1],
+        gadget_with_instruction_count(1),
+    );
+
+    assert!(result.transition_added());
+    assert_eq!(result.discovered_paths(), 1);
+    assert_eq!(engine.drain_scoring_jobs(), 1);
+    assert_eq!(engine.scored_path_count(), 2);
+    assert!(
+        engine
+            .scored_paths()
+            .iter()
+            .any(|path| path.assigned_path().gadget_at_stage(0).0 == 1)
+    );
 }
 
 #[test]
@@ -673,22 +795,22 @@ fn scored_path_retention_respects_top_k_with_stable_ties() {
     })
     .expect("wave engine should initialize");
     let first_path = [
-        state(&[1], &[2]),
-        state(&[3], &[4]),
-        state(&[5], &[6]),
-        state(&[7], &[8]),
-        state(&[9], &[10]),
-        state(&[11], &[12]),
-        state(&[13], &[14]),
+        chain_state(0),
+        chain_state(1),
+        chain_state(2),
+        chain_state(3),
+        chain_state(4),
+        chain_state(5),
+        chain_state(6),
     ];
     let second_path = [
-        state(&[21], &[22]),
-        state(&[23], &[24]),
-        state(&[25], &[26]),
-        state(&[27], &[28]),
-        state(&[29], &[30]),
-        state(&[31], &[32]),
-        state(&[33], &[34]),
+        chain_state(10),
+        chain_state(11),
+        chain_state(12),
+        chain_state(13),
+        chain_state(14),
+        chain_state(15),
+        chain_state(16),
     ];
     let last_stage = engine.stages().len() - 1;
 
@@ -706,22 +828,34 @@ fn scored_path_retention_respects_top_k_with_stable_ties() {
             empty_gadget(),
         );
     }
+    let first_input = engine
+        .transition_table()
+        .lookup_zero_based_tuple(&first_path[last_stage].as_tuple())
+        .expect("first last-stage input should be interned");
     engine.record_transition(
         last_stage,
-        &first_path[last_stage],
+        first_input,
         &first_path[last_stage + 1],
         empty_gadget(),
     );
+    let second_input = engine
+        .transition_table()
+        .lookup_zero_based_tuple(&second_path[last_stage].as_tuple())
+        .expect("second last-stage input should be interned");
     engine.record_transition(
         last_stage,
-        &second_path[last_stage],
+        second_input,
         &second_path[last_stage + 1],
         empty_gadget(),
     );
 
+    assert_eq!(engine.drain_scoring_jobs(), 2);
     assert_eq!(engine.scored_path_count(), 1);
     assert_eq!(
-        engine.scored_paths()[0].path()[0].1,
+        engine
+            .transition_table()
+            .resolve_complete_path(engine.scored_paths()[0].path())[0]
+            .input_state,
         first_path[0].as_tuple()
     );
 }
