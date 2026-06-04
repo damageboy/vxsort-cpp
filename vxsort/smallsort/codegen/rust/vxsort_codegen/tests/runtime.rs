@@ -484,6 +484,101 @@ fn runtime_trace_records_worker_jobs_and_counters() {
 }
 
 #[test]
+fn runtime_trace_records_scoring_queue_events() {
+    let mut engine = WaveEngine::new(WaveConfig {
+        worker_count: 2,
+        ..fast_config()
+    })
+    .expect("wave engine should initialize");
+    let states = [
+        chain_state(0),
+        chain_state(1),
+        chain_state(2),
+        chain_state(3),
+        chain_state(4),
+        chain_state(5),
+        chain_state(6),
+    ];
+    for stage in 0..engine.stages().len() {
+        engine.transition_table_mut().add_transition(
+            stage,
+            &states[stage],
+            &states[stage + 1],
+            empty_gadget(),
+        );
+    }
+    let last_stage = engine.stages().len() - 1;
+    let terminal = engine
+        .transition_table()
+        .transition_ref_for_zero_based_tuples(
+            last_stage,
+            &states[last_stage].as_tuple(),
+            &states[last_stage + 1].as_tuple(),
+        )
+        .expect("terminal transition should resolve");
+    let mut session = RecordingRuntimeSession::default();
+    let trace_path = std::env::temp_dir().join(format!(
+        "vxsort-runtime-trace-scoring-queue-{}.jsonl",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&trace_path);
+
+    {
+        let mut trace = RuntimeTrace::open(&trace_path).expect("trace file should open");
+        assert_eq!(
+            engine.discover_paths_for_transition_with_trace(terminal, None, &mut trace),
+            1
+        );
+        engine
+            .run_sync_with_session_and_trace(Some(0), 0, 1, &mut session, &mut trace)
+            .expect("run should complete");
+        trace.flush().expect("trace should flush");
+    }
+
+    let trace_contents = fs::read_to_string(&trace_path).expect("trace file should be readable");
+    let events = trace_contents
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("trace line should be JSON"))
+        .collect::<Vec<_>>();
+    let _ = fs::remove_file(&trace_path);
+
+    assert!(events.iter().any(|event| {
+        event["event"] == "scoring_job_queued"
+            && event["reason"].as_str().is_some()
+            && event["order"].as_u64().is_some()
+            && event["path_length"].as_u64().is_some()
+            && event["path_transitions"].as_array().is_some()
+            && event["queued"].as_u64().is_some()
+            && event["submitted"].as_u64().is_some()
+            && event["completed"].as_u64().is_some()
+            && event["pending"].as_u64().is_some()
+            && event["scored"].as_u64().is_some()
+    }));
+    assert!(events.iter().any(|event| {
+        event["event"] == "scoring_job_applied"
+            && event["reason"].as_str().is_some()
+            && event["order"].as_u64().is_some()
+            && event["path_length"].as_u64().is_some()
+            && event["assigned_candidates"].as_u64().is_some()
+            && event["applied_candidates"].as_u64().is_some()
+            && event["queued"].as_u64().is_some()
+            && event["submitted"].as_u64().is_some()
+            && event["completed"].as_u64().is_some()
+            && event["pending"].as_u64().is_some()
+            && event["scored"].as_u64().is_some()
+    }));
+    assert!(events.iter().any(|event| {
+        event["event"] == "scoring_queue_snapshot"
+            && event["reason"].as_str().is_some()
+            && event["queued"].as_u64().is_some()
+            && event["submitted"].as_u64().is_some()
+            && event["completed"].as_u64().is_some()
+            && event["pending"].as_u64().is_some()
+            && event["scored"].as_u64().is_some()
+    }));
+}
+
+#[test]
 fn runtime_trace_writes_complete_line_without_explicit_flush() {
     let trace_path = std::env::temp_dir().join(format!(
         "vxsort-runtime-trace-live-{}.jsonl",

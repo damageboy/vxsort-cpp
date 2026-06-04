@@ -1,4 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, mpsc},
+    thread,
+};
 
 use asm_exporter::{write_solution_asm_for_assigned_paths, write_solution_asm_for_paths};
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -7,7 +11,7 @@ use json_exporter::{SolutionJsonMetadata, write_solution_json_for_assigned_paths
 pub use json_importer::{ImportedSolutionJson, read_solution_json, solution_json_from_value};
 use runtime::{NullRuntimeSession, RuntimeEvent, RuntimeSession};
 use runtime_trace::RuntimeTrace;
-use scoring::PathCost;
+use scoring::{PathCost, Scorer};
 use serde_json::json;
 pub use uica_data_fetch::{
     FetchUicaDataConfig, FetchUicaDataReport, default_uica_data_base_url, fetch_uica_data,
@@ -504,9 +508,11 @@ pub fn build_run_summary_with_session(
                 "final_top_k": final_top_k,
             }),
         );
-        let rough_scorer = UiPackScorer::from_data_dir(&config.uica_data_dir, target_cpu)?
-            .with_solution_metadata(metadata.clone());
-        let mut engine = WaveEngine::with_scorer(
+        UiPackScorer::from_data_dir(&config.uica_data_dir, target_cpu)?;
+        let rough_uica_data_dir = config.uica_data_dir.clone();
+        let rough_target_cpu = target_cpu.clone();
+        let rough_metadata = metadata.clone();
+        let mut engine = WaveEngine::with_scorer_factory(
             WaveConfig {
                 num_vecs: config.num_vecs,
                 arch: config.arch,
@@ -518,7 +524,14 @@ pub fn build_run_summary_with_session(
                 worker_count: config.worker_count,
                 max_unique_outputs: config.max_gadget_solutions,
             },
-            Box::new(rough_scorer),
+            move || {
+                let scorer = UiPackScorer::from_data_dir(&rough_uica_data_dir, &rough_target_cpu)
+                    .unwrap_or_else(|error| {
+                        panic!("validated uiCA rough scorer failed to load: {error}")
+                    })
+                    .with_solution_metadata(rough_metadata.clone());
+                Box::new(scorer) as Box<dyn Scorer>
+            },
         )
         .map_err(|error| error.to_string())?;
 
@@ -546,18 +559,18 @@ pub fn build_run_summary_with_session(
             }),
         );
 
-        let full_scorer = UiPackScorer::from_data_dir(&config.uica_data_dir, target_cpu)?;
         let final_paths = full_score_and_prune_paths(
             &metadata,
             engine.transition_table(),
             engine.scored_paths(),
-            &full_scorer,
             FinalScoringOptions {
                 final_top_k,
                 target_cpu,
+                uica_data_dir: &config.uica_data_dir,
+                worker_count: config.worker_count,
             },
             session,
-        );
+        )?;
         let assigned_paths = final_paths
             .iter()
             .map(|scored_path| scored_path.assigned_path().clone())
@@ -706,52 +719,81 @@ impl<S: RuntimeSession> RuntimeSession for TargetRuntimeSession<'_, S> {
 struct FinalScoringOptions<'a> {
     final_top_k: usize,
     target_cpu: &'a str,
+    uica_data_dir: &'a Path,
+    worker_count: usize,
+}
+
+#[derive(Clone, Debug)]
+struct FinalScoringJob {
+    rough_path: ScoredPath,
+}
+
+#[derive(Clone, Debug)]
+struct FinalScoringResult {
+    scored_path: ScoredPath,
+    rough_cost: PathCost,
+    selection_key: scoring::AssignedPathKey,
 }
 
 fn full_score_and_prune_paths(
     metadata: &SolutionJsonMetadata,
     table: &transition_table::TransitionTable,
     rough_paths: &[ScoredPath],
-    scorer: &UiPackScorer,
     options: FinalScoringOptions<'_>,
     session: &mut impl RuntimeSession,
-) -> Vec<ScoredPath> {
+) -> Result<Vec<ScoredPath>, String> {
+    let worker_count = final_scoring_worker_count(options.worker_count, rough_paths.len());
     session.on_event(RuntimeEvent::FullScoringStarted {
         target_cpu: options.target_cpu.to_owned(),
         candidate_count: rough_paths.len(),
         final_top_k: options.final_top_k,
     });
 
+    if rough_paths.is_empty() {
+        session.on_event(RuntimeEvent::FullScoringFinished {
+            target_cpu: options.target_cpu.to_owned(),
+            scored_count: 0,
+            kept_count: 0,
+            best_score: None,
+        });
+        return Ok(Vec::new());
+    }
+
+    for (index, rough_path) in rough_paths.iter().enumerate() {
+        session.on_event(RuntimeEvent::FullScoringCandidateStarted {
+            target_cpu: options.target_cpu.to_owned(),
+            candidate_index: index + 1,
+            candidate_count: rough_paths.len(),
+            rough_score: rough_path.cost().score(),
+        });
+    }
+
     let mut best_full_score: Option<f64> = None;
-    let mut scored = rough_paths
-        .iter()
-        .enumerate()
-        .map(|(index, rough_path)| {
-            session.on_event(RuntimeEvent::FullScoringCandidateStarted {
-                target_cpu: options.target_cpu.to_owned(),
-                candidate_index: index + 1,
-                candidate_count: rough_paths.len(),
-                rough_score: rough_path.cost().score(),
-            });
-            let full_cost = full_score_assigned_path(metadata, table, rough_path, scorer);
+    let mut completed_count = 0;
+    let mut scored = score_final_paths_parallel(
+        metadata,
+        table,
+        rough_paths,
+        options,
+        worker_count,
+        |result| {
             best_full_score = Some(
                 best_full_score
-                    .map(|score| score.min(full_cost.score()))
-                    .unwrap_or_else(|| full_cost.score()),
+                    .map(|score| score.min(result.scored_path.cost().score()))
+                    .unwrap_or_else(|| result.scored_path.cost().score()),
             );
+            completed_count += 1;
             session.on_event(RuntimeEvent::FullScoringProgress {
                 target_cpu: options.target_cpu.to_owned(),
-                scored_count: index + 1,
+                scored_count: completed_count,
                 candidate_count: rough_paths.len(),
                 best_score: best_full_score,
             });
-            (
-                rough_path.with_cost(full_cost),
-                rough_path.cost().clone(),
-                rough_path.assigned_path().selection_key(),
-            )
-        })
-        .collect::<Vec<_>>();
+        },
+    )?
+    .into_iter()
+    .map(|result| (result.scored_path, result.rough_cost, result.selection_key))
+    .collect::<Vec<_>>();
 
     scored.sort_by(|left, right| {
         left.0
@@ -770,10 +812,134 @@ fn full_score_and_prune_paths(
         kept_count,
         best_score: best_full_score,
     });
-    scored
+    Ok(scored
         .into_iter()
         .map(|(scored_path, _, _)| scored_path)
-        .collect()
+        .collect())
+}
+
+fn final_scoring_worker_count(requested_workers: usize, candidate_count: usize) -> usize {
+    if candidate_count == 0 {
+        return requested_workers.max(1);
+    }
+    requested_workers.max(1).min(candidate_count)
+}
+
+fn score_final_paths_parallel(
+    metadata: &SolutionJsonMetadata,
+    table: &transition_table::TransitionTable,
+    rough_paths: &[ScoredPath],
+    options: FinalScoringOptions<'_>,
+    worker_count: usize,
+    mut on_result: impl FnMut(&FinalScoringResult),
+) -> Result<Vec<FinalScoringResult>, String> {
+    if worker_count == 1 {
+        let scorer = UiPackScorer::from_data_dir(options.uica_data_dir, options.target_cpu)?;
+        let mut results = Vec::with_capacity(rough_paths.len());
+        for rough_path in rough_paths {
+            let result = score_final_path(metadata, table, rough_path, &scorer);
+            on_result(&result);
+            results.push(result);
+        }
+        return Ok(results);
+    }
+
+    let metadata = Arc::new(metadata.clone());
+    let table = Arc::new(table.clone());
+    let (job_sender, job_receiver) = mpsc::channel::<Option<FinalScoringJob>>();
+    let job_receiver = Arc::new(Mutex::new(job_receiver));
+    let (result_sender, result_receiver) = mpsc::channel::<Result<FinalScoringResult, String>>();
+    let mut workers = Vec::with_capacity(worker_count);
+
+    for _ in 0..worker_count {
+        let metadata = Arc::clone(&metadata);
+        let table = Arc::clone(&table);
+        let job_receiver = Arc::clone(&job_receiver);
+        let result_sender = result_sender.clone();
+        let data_dir = options.uica_data_dir.to_path_buf();
+        let target_cpu = options.target_cpu.to_owned();
+        workers.push(thread::spawn(move || {
+            let scorer = match UiPackScorer::from_data_dir(&data_dir, &target_cpu) {
+                Ok(scorer) => scorer,
+                Err(error) => {
+                    let _ = result_sender.send(Err(error));
+                    return;
+                }
+            };
+            loop {
+                let message = {
+                    let receiver = job_receiver
+                        .lock()
+                        .expect("final scoring job receiver should not be poisoned");
+                    receiver.recv()
+                };
+                match message {
+                    Ok(Some(job)) => {
+                        let result = score_final_path(&metadata, &table, &job.rough_path, &scorer);
+                        if result_sender.send(Ok(result)).is_err() {
+                            return;
+                        }
+                    }
+                    Ok(None) | Err(_) => return,
+                }
+            }
+        }));
+    }
+    drop(result_sender);
+
+    for rough_path in rough_paths {
+        job_sender
+            .send(Some(FinalScoringJob {
+                rough_path: rough_path.clone(),
+            }))
+            .map_err(|error| format!("failed to queue final scoring job: {error}"))?;
+    }
+    for _ in 0..worker_count {
+        job_sender
+            .send(None)
+            .map_err(|error| format!("failed to stop final scoring worker: {error}"))?;
+    }
+    drop(job_sender);
+
+    let mut results = Vec::with_capacity(rough_paths.len());
+    while results.len() < rough_paths.len() {
+        match result_receiver
+            .recv()
+            .map_err(|error| format!("final scoring worker stopped early: {error}"))?
+        {
+            Ok(result) => {
+                on_result(&result);
+                results.push(result);
+            }
+            Err(error) => {
+                for worker in workers {
+                    let _ = worker.join();
+                }
+                return Err(error);
+            }
+        }
+    }
+
+    for worker in workers {
+        worker
+            .join()
+            .map_err(|_| "final scoring worker panicked".to_owned())?;
+    }
+    Ok(results)
+}
+
+fn score_final_path(
+    metadata: &SolutionJsonMetadata,
+    table: &transition_table::TransitionTable,
+    rough_path: &ScoredPath,
+    scorer: &UiPackScorer,
+) -> FinalScoringResult {
+    let full_cost = full_score_assigned_path(metadata, table, rough_path, scorer);
+    FinalScoringResult {
+        scored_path: rough_path.with_cost(full_cost),
+        rough_cost: rough_path.cost().clone(),
+        selection_key: rough_path.assigned_path().selection_key(),
+    }
 }
 
 fn full_score_assigned_path(
@@ -865,4 +1031,149 @@ pub fn build_dry_run_summary(config: &RunConfig) -> Result<DryRunSummary, String
         shallow_candidate_count: engine.shallow_candidates().len(),
         deep_candidate_count: engine.deep_candidates().len(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use uica_data::{
+        DATAPACK_SCHEMA_VERSION, DataPack, UIPACK_VERSION, encode_uipack, read_uipack_header,
+    };
+
+    use super::*;
+    use crate::runtime::RuntimeSession;
+    use crate::scoring::AssignedPath;
+    use crate::transition_table::{CompletePath, PathId};
+
+    #[derive(Default)]
+    struct RecordingRuntimeSession {
+        events: Vec<RuntimeEvent>,
+    }
+
+    impl RuntimeSession for RecordingRuntimeSession {
+        fn on_event(&mut self, event: RuntimeEvent) {
+            self.events.push(event);
+        }
+    }
+
+    fn empty_uica_data_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "vxsort-final-scoring-test-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("arch")).expect("fixture arch dir should be created");
+        let pack = DataPack {
+            schema_version: DATAPACK_SCHEMA_VERSION.to_owned(),
+            all_ports: vec![
+                "0".to_owned(),
+                "1".to_owned(),
+                "5".to_owned(),
+                "6".to_owned(),
+            ],
+            alu_ports: vec![
+                "0".to_owned(),
+                "1".to_owned(),
+                "5".to_owned(),
+                "6".to_owned(),
+            ],
+            instructions: vec![],
+        };
+        let bytes = encode_uipack(&pack, "SKL").expect("fixture uipack should encode");
+        let header = read_uipack_header(&bytes).expect("fixture uipack header should decode");
+        std::fs::write(dir.join("arch/SKL.uipack"), &bytes).expect("fixture pack should write");
+        std::fs::write(
+            dir.join("manifest.json"),
+            format!(
+                r#"{{
+  "schema_version": "uica-datapack-manifest-v2",
+  "uipack_version": {},
+  "architectures": {{
+    "SKL": {{
+      "path": "arch/SKL.uipack",
+      "size": {},
+      "checksum_kind": "fnv1a64",
+      "checksum": "{:016x}",
+      "record_count": {}
+    }}
+  }}
+}}"#,
+                UIPACK_VERSION, header.file_len, header.checksum, header.records_count
+            ),
+        )
+        .expect("fixture manifest should write");
+        dir
+    }
+
+    fn empty_rough_path(discovery_order: usize, rough_score: f64) -> ScoredPath {
+        let path = CompletePath::new(Vec::new());
+        let assigned_path = AssignedPath::new(path.clone(), Vec::new());
+        ScoredPath::new(
+            PathId(discovery_order as u32),
+            path,
+            assigned_path,
+            PathCost::new(0, rough_score, rough_score),
+            discovery_order,
+        )
+    }
+
+    #[test]
+    fn final_scoring_parallelizes_locally_and_keeps_final_events_separate_from_rough_scoring() {
+        let data_dir = empty_uica_data_dir("worker-capacity");
+        let metadata = SolutionJsonMetadata {
+            natural_order: false,
+            arch: ArchArg::Avx2,
+            dtype: DTypeArg::I64,
+            num_vecs: 2,
+        };
+        let table = transition_table::TransitionTable::new(0);
+        let rough_paths = vec![
+            empty_rough_path(0, 3.0),
+            empty_rough_path(1, 2.0),
+            empty_rough_path(2, 1.0),
+        ];
+        let mut session = RecordingRuntimeSession::default();
+
+        let final_paths = full_score_and_prune_paths(
+            &metadata,
+            &table,
+            &rough_paths,
+            FinalScoringOptions {
+                final_top_k: 2,
+                target_cpu: "SKL",
+                uica_data_dir: &data_dir,
+                worker_count: 2,
+            },
+            &mut session,
+        )
+        .expect("final scoring should complete");
+
+        assert_eq!(final_paths.len(), 2);
+        assert_eq!(final_scoring_worker_count(8, 3), 3);
+        assert_eq!(final_scoring_worker_count(0, 3), 1);
+        assert!(matches!(
+            session.events.first(),
+            Some(RuntimeEvent::FullScoringStarted {
+                candidate_count: 3,
+                final_top_k: 2,
+                ..
+            })
+        ));
+        assert!(session.events.iter().any(|event| matches!(
+            event,
+            RuntimeEvent::FullScoringProgress {
+                scored_count: 3,
+                candidate_count: 3,
+                best_score: Some(0.0),
+                ..
+            }
+        )));
+        assert!(
+            session
+                .events
+                .iter()
+                .all(|event| !matches!(event, RuntimeEvent::ScoringProgress(_)))
+        );
+
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
 }

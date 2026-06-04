@@ -1,3 +1,10 @@
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
+
+use vxsort_codegen::scoring::{AssignedPath, GadgetCost, PathCost, Scorer};
+use vxsort_codegen::transition_table::TransitionTable;
 use vxsort_codegen::wave_engine::{WaveConfig, WaveEngine};
 use vxsort_codegen::{ArchArg, DTypeArg};
 
@@ -42,6 +49,29 @@ fn fast_config() -> WaveConfig {
     }
 }
 
+struct CountingScorer;
+
+impl Scorer for CountingScorer {
+    fn score_gadget(&self, gadget: &gadget_synth::PermutationGadget) -> GadgetCost {
+        let instruction_count =
+            (gadget.top_instructions().len() + gadget.bottom_instructions().len()) as u32;
+        GadgetCost::new(
+            instruction_count,
+            instruction_count as f64,
+            instruction_count as f64,
+            instruction_count as f64,
+        )
+    }
+
+    fn score_assigned_path(
+        &self,
+        _assigned_path: &AssignedPath,
+        _table: &TransitionTable,
+    ) -> PathCost {
+        PathCost::new(0, 1.0, 1.0)
+    }
+}
+
 #[test]
 fn construction_matches_python_wave_engine_initial_state() {
     let engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
@@ -55,6 +85,27 @@ fn construction_matches_python_wave_engine_initial_state() {
         engine.transition_table().stages().len(),
         engine.stages().len()
     );
+}
+
+#[test]
+fn scorer_factory_builds_one_rough_scorer_per_scoring_worker() {
+    let constructed = Arc::new(AtomicUsize::new(0));
+    let constructed_by_factory = Arc::clone(&constructed);
+
+    let engine = WaveEngine::with_scorer_factory(
+        WaveConfig {
+            worker_count: 3,
+            ..fast_config()
+        },
+        move || {
+            constructed_by_factory.fetch_add(1, Ordering::SeqCst);
+            Box::new(CountingScorer) as Box<dyn Scorer>
+        },
+    )
+    .expect("wave engine should initialize");
+
+    assert_eq!(constructed.load(Ordering::SeqCst), 3);
+    drop(engine);
 }
 
 #[test]
@@ -669,6 +720,50 @@ fn recording_terminal_transition_discovers_and_scores_complete_paths() {
     assert_eq!(engine.drain_scoring_jobs(), 1);
     assert_eq!(engine.scored_path_count(), 1);
     assert_eq!(engine.best_score(), Some(10.0));
+}
+
+#[test]
+fn recording_new_mid_stage_transition_discovers_paths_through_existing_prefix_and_suffix() {
+    let mut engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
+    let states = [
+        chain_state(0),
+        chain_state(1),
+        chain_state(2),
+        chain_state(3),
+        chain_state(4),
+        chain_state(5),
+        chain_state(6),
+    ];
+    let mid_stage = 2;
+
+    for stage in 0..mid_stage {
+        engine.transition_table_mut().add_transition(
+            stage,
+            &states[stage],
+            &states[stage + 1],
+            empty_gadget(),
+        );
+    }
+    for stage in mid_stage + 1..engine.stages().len() {
+        engine.transition_table_mut().add_transition(
+            stage,
+            &states[stage],
+            &states[stage + 1],
+            empty_gadget(),
+        );
+    }
+
+    let input = engine
+        .transition_table()
+        .lookup_zero_based_tuple(&states[mid_stage].as_tuple())
+        .expect("mid-stage input should already be interned");
+    let result = engine.record_transition(mid_stage, input, &states[mid_stage + 1], empty_gadget());
+
+    assert!(result.transition_added());
+    assert_eq!(result.discovered_paths(), 1);
+    assert_eq!(engine.drain_scoring_jobs(), 1);
+    assert_eq!(engine.scored_path_count(), 1);
+    assert_eq!(engine.scored_paths()[0].path().len(), engine.stages().len());
 }
 
 #[test]

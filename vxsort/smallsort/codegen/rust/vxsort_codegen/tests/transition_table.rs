@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
 
 use gadget_synth::{InstructionArg, InstructionSpec, PermutationGadget, VectorState};
-use vxsort_codegen::transition_table::{CompletePath, State, StateInterner, TransitionTable};
+use vxsort_codegen::transition_table::{
+    CompletePath, PathRegistry, State, StateInterner, TransitionIndex, TransitionRef,
+    TransitionTable,
+};
 
 fn state(top: &[u64], bottom: &[u64]) -> VectorState {
     VectorState::new(top.to_vec(), bottom.to_vec())
@@ -52,6 +55,35 @@ fn interning_same_state_returns_same_id() {
 
     assert_eq!(first, second);
     assert_eq!(interner.len(), 1);
+}
+
+#[test]
+fn path_registry_stores_complete_path_once_and_indexes_transitions_by_id() {
+    let mut registry = PathRegistry::default();
+    let path = CompletePath::new(vec![TransitionIndex(3), TransitionIndex(5)]);
+
+    let first = registry.register(path.clone());
+    let second = registry.register(path.clone());
+
+    assert_eq!(first.id, second.id);
+    assert!(first.was_new);
+    assert!(!second.was_new);
+    assert_eq!(registry.len(), 1);
+    assert_eq!(registry.path(first.id), &path);
+    assert_eq!(
+        registry.paths_for_transition(TransitionRef {
+            stage: 0,
+            transition: TransitionIndex(3),
+        }),
+        &[first.id]
+    );
+    assert_eq!(
+        registry.paths_for_transition(TransitionRef {
+            stage: 1,
+            transition: TransitionIndex(5),
+        }),
+        &[first.id]
+    );
 }
 
 #[test]

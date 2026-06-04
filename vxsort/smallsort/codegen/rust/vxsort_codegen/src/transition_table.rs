@@ -239,6 +239,69 @@ impl CompletePath {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PathRegistration {
+    pub id: PathId,
+    pub was_new: bool,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PathRegistry {
+    paths: Vec<CompletePath>,
+    path_by_transitions: HashMap<CompletePath, PathId>,
+    paths_by_transition: HashMap<TransitionRef, Vec<PathId>>,
+    empty_paths: Vec<PathId>,
+}
+
+impl PathRegistry {
+    pub fn len(&self) -> usize {
+        self.paths.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.paths.is_empty()
+    }
+
+    pub fn register(&mut self, path: CompletePath) -> PathRegistration {
+        if let Some(id) = self.path_by_transitions.get(&path).copied() {
+            return PathRegistration { id, was_new: false };
+        }
+
+        let id = PathId(
+            self.paths
+                .len()
+                .try_into()
+                .expect("path registry should fit in u32"),
+        );
+        for (stage, transition) in path.iter() {
+            let transition_ref = TransitionRef {
+                stage: stage
+                    .try_into()
+                    .expect("stage index should fit in transition ref"),
+                transition,
+            };
+            self.paths_by_transition
+                .entry(transition_ref)
+                .or_default()
+                .push(id);
+        }
+        self.path_by_transitions.insert(path.clone(), id);
+        self.paths.push(path);
+
+        PathRegistration { id, was_new: true }
+    }
+
+    pub fn path(&self, id: PathId) -> &CompletePath {
+        &self.paths[id.0 as usize]
+    }
+
+    pub fn paths_for_transition(&self, transition: TransitionRef) -> &[PathId] {
+        self.paths_by_transition
+            .get(&transition)
+            .unwrap_or(&self.empty_paths)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TransitionRecord {
     input: StateId,
@@ -928,6 +991,73 @@ impl TransitionTable {
         self.trace_paths_ending_at(anchor, max_paths, exclude_paths)
     }
 
+    pub fn trace_paths_through(
+        &self,
+        anchor: TransitionRef,
+        max_paths: Option<usize>,
+        exclude_paths: Option<&HashSet<CompletePath>>,
+    ) -> Vec<CompletePath> {
+        if self.stages.is_empty() {
+            return Vec::new();
+        }
+
+        let anchor_stage = usize::from(anchor.stage);
+        let anchor_record = self.transition(anchor);
+        let prefixes = if anchor_stage == 0 {
+            vec![Vec::new()]
+        } else {
+            let mut prefixes = Vec::new();
+            let mut current = Vec::new();
+            self.collect_prefix_paths(
+                anchor_stage - 1,
+                anchor_record.input,
+                &mut current,
+                &mut prefixes,
+                max_paths,
+            );
+            prefixes
+        };
+        if prefixes.is_empty() {
+            return Vec::new();
+        }
+
+        let suffixes = if anchor_stage + 1 >= self.stages.len() {
+            vec![Vec::new()]
+        } else {
+            let mut suffixes = Vec::new();
+            let mut current = Vec::new();
+            self.collect_suffix_paths(
+                anchor_stage + 1,
+                anchor_record.output,
+                &mut current,
+                &mut suffixes,
+                max_paths,
+            );
+            suffixes
+        };
+        if suffixes.is_empty() {
+            return Vec::new();
+        }
+
+        let mut results = Vec::new();
+        for prefix in &prefixes {
+            for suffix in &suffixes {
+                if max_paths.is_some_and(|limit| results.len() >= limit) {
+                    return results;
+                }
+                let mut transitions = Vec::with_capacity(prefix.len() + 1 + suffix.len());
+                transitions.extend(prefix.iter().copied());
+                transitions.push(anchor.transition);
+                transitions.extend(suffix.iter().copied());
+                let candidate = CompletePath::new(transitions);
+                if !exclude_paths.is_some_and(|exclude| exclude.contains(&candidate)) {
+                    results.push(candidate);
+                }
+            }
+        }
+        results
+    }
+
     fn trace_paths_back(
         &self,
         current_stage: usize,
@@ -969,6 +1099,79 @@ impl TransitionTable {
                 );
             }
             suffix.pop();
+
+            if max_paths.is_some_and(|limit| results.len() >= limit) {
+                return;
+            }
+        }
+    }
+
+    fn collect_prefix_paths(
+        &self,
+        current_stage: usize,
+        required_output: StateId,
+        current: &mut Vec<TransitionIndex>,
+        results: &mut Vec<Vec<TransitionIndex>>,
+        max_paths: Option<usize>,
+    ) {
+        if max_paths.is_some_and(|limit| results.len() >= limit) {
+            return;
+        }
+
+        let mut transitions = self.stages[current_stage]
+            .transitions_by_output
+            .get(&required_output)
+            .cloned()
+            .unwrap_or_default();
+        self.sort_transition_indexes(current_stage, &mut transitions);
+
+        for transition in transitions {
+            let input = self.stages[current_stage].transitions[transition.0 as usize].input;
+            current.push(transition);
+            if current_stage == 0 {
+                let mut path = current.clone();
+                path.reverse();
+                results.push(path);
+            } else {
+                self.collect_prefix_paths(current_stage - 1, input, current, results, max_paths);
+            }
+            current.pop();
+
+            if max_paths.is_some_and(|limit| results.len() >= limit) {
+                return;
+            }
+        }
+    }
+
+    fn collect_suffix_paths(
+        &self,
+        current_stage: usize,
+        required_input: StateId,
+        current: &mut Vec<TransitionIndex>,
+        results: &mut Vec<Vec<TransitionIndex>>,
+        max_paths: Option<usize>,
+    ) {
+        if max_paths.is_some_and(|limit| results.len() >= limit) {
+            return;
+        }
+
+        if current_stage >= self.stages.len() {
+            results.push(current.clone());
+            return;
+        }
+
+        let mut transitions = self.stages[current_stage]
+            .transitions_by_input
+            .get(&required_input)
+            .cloned()
+            .unwrap_or_default();
+        self.sort_transition_indexes(current_stage, &mut transitions);
+
+        for transition in transitions {
+            let output = self.stages[current_stage].transitions[transition.0 as usize].output;
+            current.push(transition);
+            self.collect_suffix_paths(current_stage + 1, output, current, results, max_paths);
+            current.pop();
 
             if max_paths.is_some_and(|limit| results.len() >= limit) {
                 return;

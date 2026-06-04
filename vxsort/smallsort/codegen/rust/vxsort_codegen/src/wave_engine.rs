@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashSet},
     sync::{Arc, Mutex, mpsc},
     thread,
 };
@@ -16,9 +16,11 @@ use crate::runtime::{
 };
 use crate::runtime_trace::RuntimeTrace;
 use crate::scoring::{AssignedPath, AssignedPathKey, DummyScorer, PathCost, Scorer};
-use crate::transition_table::{CompletePath, State, StateId, TransitionRef, TransitionTable};
+use crate::transition_table::{
+    CompletePath, PathId, PathRegistry, State, StateId, TransitionRef, TransitionTable,
+};
 use crate::{ArchArg, DTypeArg};
-use serde_json::json;
+use serde_json::{Value, json};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct WaveConfig {
@@ -57,11 +59,12 @@ pub struct WaveEngine {
     next_scoring_result_order: usize,
     buffered_scoring_results: BTreeMap<usize, ScoringJobResult>,
     submitted_scoring_signatures: HashSet<PathScoringSignature>,
-    complete_paths_by_transition: HashMap<TransitionRef, Vec<CompletePath>>,
+    path_registry: PathRegistry,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScoredPath {
+    path_id: PathId,
     path: CompletePath,
     assigned_path: AssignedPath,
     cost: PathCost,
@@ -70,17 +73,23 @@ pub struct ScoredPath {
 
 impl ScoredPath {
     pub fn new(
+        path_id: PathId,
         path: CompletePath,
         assigned_path: AssignedPath,
         cost: PathCost,
         discovery_order: usize,
     ) -> Self {
         Self {
+            path_id,
             path,
             assigned_path,
             cost,
             discovery_order,
         }
+    }
+
+    pub fn path_id(&self) -> PathId {
+        self.path_id
     }
 
     pub fn path(&self) -> &CompletePath {
@@ -101,6 +110,7 @@ impl ScoredPath {
 
     pub fn with_cost(&self, cost: PathCost) -> Self {
         Self {
+            path_id: self.path_id,
             path: self.path.clone(),
             assigned_path: self.assigned_path.clone(),
             cost,
@@ -173,11 +183,13 @@ enum WorkerPoolEvent {
 }
 
 type SharedScorer = Arc<Mutex<Box<dyn Scorer>>>;
+type ScorerFactory = Arc<dyn Fn() -> Box<dyn Scorer> + Send + Sync + 'static>;
 type PathScoringSignature = Vec<(TransitionRef, usize)>;
 
 #[derive(Clone, Debug)]
 struct ScoringJob {
     order: usize,
+    path_id: PathId,
     path: CompletePath,
     table: Arc<TransitionTable>,
     assignment_limit: usize,
@@ -186,7 +198,17 @@ struct ScoringJob {
 #[derive(Clone, Debug)]
 struct ScoringJobResult {
     order: usize,
+    path_id: PathId,
+    path_length: usize,
     scored_paths: Vec<ScoredPath>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ScoringJobTraceFields {
+    order: usize,
+    path_id: PathId,
+    path_length: usize,
+    assigned_candidates: usize,
 }
 
 struct ScoringPool {
@@ -244,6 +266,7 @@ pub struct StageRunResult {
     valid_outputs: usize,
     new_outputs: usize,
     new_transitions: usize,
+    discovered_paths: usize,
 }
 
 impl StageRunResult {
@@ -265,6 +288,10 @@ impl StageRunResult {
 
     pub fn new_transitions(&self) -> usize {
         self.new_transitions
+    }
+
+    pub fn discovered_paths(&self) -> usize {
+        self.discovered_paths
     }
 }
 
@@ -326,7 +353,7 @@ impl WaveSearchResult {
 }
 
 impl ScoringPool {
-    fn new(worker_count: usize, scorer: SharedScorer) -> Self {
+    fn new_shared(worker_count: usize, scorer: SharedScorer) -> Self {
         let worker_count = worker_count.max(1);
         let (sender, job_receiver) = mpsc::channel::<Option<ScoringJob>>();
         let job_receiver = Arc::new(Mutex::new(job_receiver));
@@ -368,6 +395,44 @@ impl ScoringPool {
         }
     }
 
+    fn new_factory(worker_count: usize, scorer_factory: ScorerFactory) -> Self {
+        let worker_count = worker_count.max(1);
+        let (sender, job_receiver) = mpsc::channel::<Option<ScoringJob>>();
+        let job_receiver = Arc::new(Mutex::new(job_receiver));
+        let (result_sender, receiver) = mpsc::channel::<ScoringJobResult>();
+        let workers = (0..worker_count)
+            .map(|_| {
+                let scorer = scorer_factory();
+                let job_receiver = Arc::clone(&job_receiver);
+                let result_sender = result_sender.clone();
+                thread::spawn(move || {
+                    loop {
+                        let message = {
+                            let receiver = job_receiver
+                                .lock()
+                                .expect("scoring job receiver lock should not be poisoned");
+                            receiver.recv()
+                        };
+                        let Ok(Some(job)) = message else {
+                            break;
+                        };
+                        let result = score_job(scorer.as_ref(), job);
+                        if result_sender.send(result).is_err() {
+                            break;
+                        }
+                    }
+                })
+            })
+            .collect();
+
+        Self {
+            sender,
+            receiver,
+            workers,
+            pending_jobs: 0,
+        }
+    }
+
     fn submit(&mut self, job: ScoringJob) {
         self.sender
             .send(Some(job))
@@ -388,6 +453,7 @@ impl Drop for ScoringPool {
 }
 
 fn score_job(scorer: &dyn Scorer, job: ScoringJob) -> ScoringJobResult {
+    let path_length = job.path.len();
     let scored_paths = scorer
         .assign_path_gadgets_k_best(&job.path, &job.table, job.assignment_limit)
         .into_iter()
@@ -395,6 +461,7 @@ fn score_job(scorer: &dyn Scorer, job: ScoringJob) -> ScoringJobResult {
         .map(|(assignment_index, assigned_path)| {
             let cost = scorer.score_assigned_path(&assigned_path, &job.table);
             ScoredPath::new(
+                job.path_id,
                 job.path.clone(),
                 assigned_path,
                 cost,
@@ -405,24 +472,48 @@ fn score_job(scorer: &dyn Scorer, job: ScoringJob) -> ScoringJobResult {
 
     ScoringJobResult {
         order: job.order,
+        path_id: job.path_id,
+        path_length,
         scored_paths,
     }
 }
 
 impl WaveEngine {
     pub fn new(config: WaveConfig) -> Result<Self, SynthesisError> {
-        Self::with_scorer(config, Box::new(DummyScorer))
+        Self::with_scorer_factory(config, || Box::new(DummyScorer) as Box<dyn Scorer>)
     }
 
     pub fn with_scorer(
         config: WaveConfig,
         scorer: Box<dyn Scorer>,
     ) -> Result<Self, SynthesisError> {
+        let scorer = Arc::new(Mutex::new(scorer));
+        Self::with_scoring_pool_factory(config, move |worker_count| {
+            ScoringPool::new_shared(worker_count, scorer)
+        })
+    }
+
+    pub fn with_scorer_factory<F>(
+        config: WaveConfig,
+        scorer_factory: F,
+    ) -> Result<Self, SynthesisError>
+    where
+        F: Fn() -> Box<dyn Scorer> + Send + Sync + 'static,
+    {
+        let scorer_factory: ScorerFactory = Arc::new(scorer_factory);
+        Self::with_scoring_pool_factory(config, move |worker_count| {
+            ScoringPool::new_factory(worker_count, scorer_factory)
+        })
+    }
+
+    fn with_scoring_pool_factory(
+        config: WaveConfig,
+        scoring_pool_factory: impl FnOnce(usize) -> ScoringPool,
+    ) -> Result<Self, SynthesisError> {
         let config = WaveConfig {
             worker_count: config.worker_count.max(1),
             ..config
         };
-        let scorer = Arc::new(Mutex::new(scorer));
         let elements_per_vector = register_bits(config.arch) / dtype_bits(config.dtype);
         let total_elements = config.num_vecs * elements_per_vector;
 
@@ -484,12 +575,12 @@ impl WaveEngine {
             stalled_stages: HashSet::new(),
             scored_path_keys: HashSet::new(),
             scored_paths: Vec::new(),
-            scoring_pool: ScoringPool::new(config.worker_count, scorer),
+            scoring_pool: scoring_pool_factory(config.worker_count),
             next_scoring_job_order: 0,
             next_scoring_result_order: 0,
             buffered_scoring_results: BTreeMap::new(),
             submitted_scoring_signatures: HashSet::new(),
-            complete_paths_by_transition: HashMap::new(),
+            path_registry: PathRegistry::default(),
         })
     }
 
@@ -565,29 +656,94 @@ impl WaveEngine {
         transition: TransitionRef,
         max_paths: Option<usize>,
     ) -> usize {
+        let mut trace = RuntimeTrace::disabled();
+        self.discover_paths_for_transition_with_trace(transition, max_paths, &mut trace)
+    }
+
+    pub fn discover_paths_for_transition_with_trace(
+        &mut self,
+        transition: TransitionRef,
+        max_paths: Option<usize>,
+        trace: &mut RuntimeTrace,
+    ) -> usize {
+        self.discover_paths_through_transition_with_trace(
+            transition,
+            max_paths,
+            trace,
+            "manual_discovery",
+        )
+    }
+
+    pub fn discover_paths_through_transition(
+        &mut self,
+        transition: TransitionRef,
+        max_paths: Option<usize>,
+    ) -> usize {
+        let mut trace = RuntimeTrace::disabled();
+        self.discover_paths_through_transition_with_trace(
+            transition,
+            max_paths,
+            &mut trace,
+            "manual_discovery",
+        )
+    }
+
+    fn discover_paths_through_transition_with_trace(
+        &mut self,
+        transition: TransitionRef,
+        max_paths: Option<usize>,
+        trace: &mut RuntimeTrace,
+        reason: &str,
+    ) -> usize {
         let paths = self
             .transition_table
-            .trace_paths_ending_at(transition, max_paths, None);
-        self.enqueue_scoring_paths(paths)
+            .trace_paths_through(transition, max_paths, None);
+        self.enqueue_scoring_paths_with_trace(paths, trace, reason)
     }
 
     pub fn poll_scoring_jobs(&mut self) -> usize {
-        while let Ok(result) = self.scoring_pool.receiver.try_recv() {
-            self.buffered_scoring_results.insert(result.order, result);
-        }
-        self.apply_ready_scoring_results()
+        let mut trace = RuntimeTrace::disabled();
+        self.poll_scoring_jobs_with_trace(&mut trace, "manual_poll")
     }
 
     pub fn drain_scoring_jobs(&mut self) -> usize {
-        let mut scored = self.poll_scoring_jobs();
+        let mut trace = RuntimeTrace::disabled();
+        self.drain_scoring_jobs_with_trace(&mut trace, "manual_drain")
+    }
+
+    fn poll_scoring_jobs_with_trace(&mut self, trace: &mut RuntimeTrace, reason: &str) -> usize {
+        while let Ok(result) = self.scoring_pool.receiver.try_recv() {
+            self.buffer_scoring_result_with_trace(result, trace, reason);
+        }
+        self.apply_ready_scoring_results_with_trace(trace, reason)
+    }
+
+    fn drain_scoring_jobs_with_trace(&mut self, trace: &mut RuntimeTrace, reason: &str) -> usize {
+        let mut scored = self.poll_scoring_jobs_with_trace(trace, reason);
         while self.scoring_pool.pending_jobs > 0 {
             let Ok(result) = self.scoring_pool.receiver.recv() else {
                 break;
             };
-            self.buffered_scoring_results.insert(result.order, result);
-            scored += self.apply_ready_scoring_results();
+            self.buffer_scoring_result_with_trace(result, trace, reason);
+            scored += self.apply_ready_scoring_results_with_trace(trace, reason);
         }
         scored
+    }
+
+    fn buffer_scoring_result_with_trace(
+        &mut self,
+        result: ScoringJobResult,
+        trace: &mut RuntimeTrace,
+        reason: &str,
+    ) {
+        let fields = ScoringJobTraceFields {
+            order: result.order,
+            path_id: result.path_id,
+            path_length: result.path_length,
+            assigned_candidates: result.scored_paths.len(),
+        };
+        self.buffered_scoring_results.insert(fields.order, result);
+        self.trace_scoring_job_completed(trace, reason, fields);
     }
 
     pub fn record_transition(
@@ -597,16 +753,37 @@ impl WaveEngine {
         output_state: &VectorState,
         gadget: PermutationGadget,
     ) -> TransitionRecordResult {
+        let mut trace = RuntimeTrace::disabled();
+        self.record_transition_with_trace(stage, input, output_state, gadget, &mut trace)
+    }
+
+    fn record_transition_with_trace(
+        &mut self,
+        stage: usize,
+        input: StateId,
+        output_state: &VectorState,
+        gadget: PermutationGadget,
+        trace: &mut RuntimeTrace,
+    ) -> TransitionRecordResult {
         let output = State::try_from_zero_based_u64(output_state.top(), output_state.bottom())
             .expect("synthesized output labels should fit in compact state storage");
         let insert = self
             .transition_table
             .add_transition_by_id(stage, input, output, gadget);
         let discovered_paths = if insert.gadget_was_new {
-            if stage + 1 == self.stages.len() {
-                self.discover_paths_for_transition(insert.transition, None)
+            if insert.transition_was_new {
+                self.discover_paths_through_transition_with_trace(
+                    insert.transition,
+                    None,
+                    trace,
+                    "new_transition",
+                )
             } else {
-                self.enqueue_registered_paths_for_transition(insert.transition)
+                self.enqueue_registered_paths_for_transition_with_trace(
+                    insert.transition,
+                    trace,
+                    "new_gadget_on_registered_transition",
+                )
             }
         } else {
             0
@@ -723,6 +900,15 @@ impl WaveEngine {
         &mut self,
         job: &SynthesisJob,
     ) -> Result<JobExecutionResult, SynthesisError> {
+        let mut trace = RuntimeTrace::disabled();
+        self.execute_job_with_trace(job, &mut trace)
+    }
+
+    fn execute_job_with_trace(
+        &mut self,
+        job: &SynthesisJob,
+        trace: &mut RuntimeTrace,
+    ) -> Result<JobExecutionResult, SynthesisError> {
         let output = synthesize_worker_job(
             self.config,
             WorkerSynthesisJob {
@@ -737,10 +923,14 @@ impl WaveEngine {
             },
         )?;
 
-        Ok(self.apply_synthesis_output(output))
+        Ok(self.apply_synthesis_output_with_trace(output, trace))
     }
 
-    fn apply_synthesis_output(&mut self, output: SynthesisJobOutput) -> JobExecutionResult {
+    fn apply_synthesis_output_with_trace(
+        &mut self,
+        output: SynthesisJobOutput,
+        trace: &mut RuntimeTrace,
+    ) -> JobExecutionResult {
         let job = output.job;
 
         self.transition_table.record_attempt(job.stage, 1);
@@ -754,7 +944,13 @@ impl WaveEngine {
         let mut new_transition_count = 0;
         let mut discovered_paths = 0;
         for (gadget, output_state) in output.results {
-            let result = self.record_transition(job.stage, job.input, &output_state, gadget);
+            let result = self.record_transition_with_trace(
+                job.stage,
+                job.input,
+                &output_state,
+                gadget,
+                trace,
+            );
             if result.transition_added() {
                 new_transition_count += 1;
                 discovered_paths += result.discovered_paths();
@@ -826,7 +1022,7 @@ impl WaveEngine {
             .select_target_stage()
             .expect("wave engine should have at least one stage");
         let last_stage = self.stages.len() - 1;
-        self.poll_scoring_jobs();
+        self.poll_scoring_jobs_with_trace(trace, "wave_started");
         let last_outputs_before = self.transition_table.unique_output_count(last_stage);
         let target = self.run_stage_sync_with_session_and_trace(
             target_stage,
@@ -903,13 +1099,18 @@ impl WaveEngine {
         }
 
         self.wave_count += 1;
-        let scored_paths = self.poll_scoring_jobs();
+        let scored_paths = self.poll_scoring_jobs_with_trace(trace, "wave_finished");
+        let discovered_paths = target.discovered_paths()
+            + propagation
+                .iter()
+                .map(StageRunResult::discovered_paths)
+                .sum::<usize>();
         Ok(WaveRunResult {
             wave,
             target_stage,
             target,
             propagation,
-            discovered_paths: scored_paths,
+            discovered_paths,
             scored_paths,
         })
     }
@@ -967,7 +1168,7 @@ impl WaveEngine {
         for snapshot in self.stage_progress_snapshots() {
             session.on_event(RuntimeEvent::StageUpdated(snapshot));
         }
-        self.emit_scoring_update(session);
+        self.emit_scoring_update_with_trace(session, trace, "run_started");
 
         let mut waves = Vec::new();
         while !self.search_exhausted() {
@@ -1026,12 +1227,12 @@ impl WaveEngine {
                     }),
                 );
             }
-            self.emit_scoring_update(session);
+            self.emit_scoring_update_with_trace(session, trace, "wave_finished");
             waves.push(wave);
         }
 
-        self.drain_scoring_jobs();
-        self.emit_scoring_update(session);
+        self.drain_scoring_jobs_with_trace(trace, "run_finished_drain");
+        self.emit_scoring_update_with_trace(session, trace, "run_finished_drain");
         let result = WaveSearchResult {
             wave_count: self.wave_count,
             search_exhausted: self.search_exhausted(),
@@ -1076,10 +1277,139 @@ impl WaveEngine {
         ));
     }
 
+    fn emit_scoring_update_with_trace(
+        &self,
+        session: &mut impl RuntimeSession,
+        trace: &mut RuntimeTrace,
+        reason: &str,
+    ) {
+        self.emit_scoring_update(session);
+        self.trace_scoring_queue_snapshot(trace, reason);
+    }
+
     fn scoring_progress_snapshot(&self) -> ScoringProgressSnapshot {
         ScoringProgressSnapshot::new(
             self.next_scoring_result_order,
             self.next_scoring_job_order,
+            self.pending_scoring_job_count(),
+            self.scored_path_count(),
+        )
+    }
+
+    fn trace_scoring_job_queued(
+        &self,
+        trace: &mut RuntimeTrace,
+        reason: &str,
+        order: usize,
+        path_id: PathId,
+        path: &CompletePath,
+    ) {
+        if !trace.is_enabled() {
+            return;
+        }
+        let (queued, submitted, completed, pending, scored) = self.scoring_trace_counts();
+        trace.event(
+            "scoring_job_queued",
+            json!({
+                "reason": reason,
+                "order": order,
+                "path_id": path_id.0,
+                "path_length": path.len(),
+                "path_transitions": path_transitions_json(path),
+                "queued": queued,
+                "submitted": submitted,
+                "completed": completed,
+                "pending": pending,
+                "scored": scored,
+            }),
+        );
+    }
+
+    fn trace_scoring_job_completed(
+        &self,
+        trace: &mut RuntimeTrace,
+        reason: &str,
+        fields: ScoringJobTraceFields,
+    ) {
+        if !trace.is_enabled() {
+            return;
+        }
+        let (queued, submitted, completed, pending, scored) = self.scoring_trace_counts();
+        trace.event(
+            "scoring_job_completed",
+            json!({
+                "reason": reason,
+                "order": fields.order,
+                "path_id": fields.path_id.0,
+                "path_length": fields.path_length,
+                "assigned_candidates": fields.assigned_candidates,
+                "received": self.next_scoring_result_order + self.buffered_scoring_results.len(),
+                "queued": queued,
+                "submitted": submitted,
+                "completed": completed,
+                "pending": pending,
+                "scored": scored,
+            }),
+        );
+    }
+
+    fn trace_scoring_job_applied(
+        &self,
+        trace: &mut RuntimeTrace,
+        reason: &str,
+        fields: ScoringJobTraceFields,
+        applied_candidates: usize,
+    ) {
+        if !trace.is_enabled() {
+            return;
+        }
+        let (queued, submitted, completed, pending, scored) = self.scoring_trace_counts();
+        trace.event(
+            "scoring_job_applied",
+            json!({
+                "reason": reason,
+                "order": fields.order,
+                "path_id": fields.path_id.0,
+                "path_length": fields.path_length,
+                "assigned_candidates": fields.assigned_candidates,
+                "applied_candidates": applied_candidates,
+                "queued": queued,
+                "submitted": submitted,
+                "completed": completed,
+                "pending": pending,
+                "scored": scored,
+            }),
+        );
+    }
+
+    fn trace_scoring_queue_snapshot(&self, trace: &mut RuntimeTrace, reason: &str) {
+        if !trace.is_enabled() {
+            return;
+        }
+        let snapshot = self.scoring_progress_snapshot();
+        let (queued, submitted, completed, pending, scored) = self.scoring_trace_counts();
+        trace.event(
+            "scoring_queue_snapshot",
+            json!({
+                "reason": reason,
+                "queued": queued,
+                "submitted": submitted,
+                "completed": completed,
+                "pending": pending,
+                "scored": scored,
+                "total_paths": snapshot.total_paths(),
+                "completed_paths": snapshot.completed_paths(),
+                "pending_paths": snapshot.pending_paths(),
+                "scored_paths": snapshot.scored_paths(),
+            }),
+        );
+    }
+
+    fn scoring_trace_counts(&self) -> (usize, usize, usize, usize, usize) {
+        (
+            self.next_scoring_job_order,
+            self.next_scoring_job_order,
+            self.next_scoring_result_order,
             self.pending_scoring_job_count(),
             self.scored_path_count(),
         )
@@ -1129,7 +1459,12 @@ impl WaveEngine {
         self.scored_paths.truncate(top_k);
     }
 
-    fn enqueue_scoring_paths(&mut self, paths: Vec<CompletePath>) -> usize {
+    fn enqueue_scoring_paths_with_trace(
+        &mut self,
+        paths: Vec<CompletePath>,
+        trace: &mut RuntimeTrace,
+        reason: &str,
+    ) -> usize {
         if paths.is_empty() {
             return 0;
         }
@@ -1137,22 +1472,57 @@ impl WaveEngine {
         let table = Arc::new(self.transition_table.clone());
         let mut enqueued = 0;
         for path in paths {
-            self.register_complete_path(&path);
-            if self.submit_scoring_path(path, Arc::clone(&table)) {
+            let registration = self.path_registry.register(path);
+            if self.submit_scoring_path_with_trace(
+                registration.id,
+                Arc::clone(&table),
+                trace,
+                reason,
+            ) {
                 enqueued += 1;
             }
         }
         enqueued
     }
 
-    fn enqueue_registered_paths_for_transition(&mut self, transition: TransitionRef) -> usize {
-        let Some(paths) = self.complete_paths_by_transition.get(&transition).cloned() else {
-            return 0;
-        };
-        self.enqueue_scoring_paths(paths)
+    fn enqueue_registered_paths_for_transition_with_trace(
+        &mut self,
+        transition: TransitionRef,
+        trace: &mut RuntimeTrace,
+        reason: &str,
+    ) -> usize {
+        let path_ids = self.path_registry.paths_for_transition(transition).to_vec();
+        self.enqueue_scoring_path_ids_with_trace(path_ids, trace, reason)
     }
 
-    fn submit_scoring_path(&mut self, path: CompletePath, table: Arc<TransitionTable>) -> bool {
+    fn enqueue_scoring_path_ids_with_trace(
+        &mut self,
+        path_ids: Vec<PathId>,
+        trace: &mut RuntimeTrace,
+        reason: &str,
+    ) -> usize {
+        if path_ids.is_empty() {
+            return 0;
+        }
+
+        let table = Arc::new(self.transition_table.clone());
+        let mut enqueued = 0;
+        for path_id in path_ids {
+            if self.submit_scoring_path_with_trace(path_id, Arc::clone(&table), trace, reason) {
+                enqueued += 1;
+            }
+        }
+        enqueued
+    }
+
+    fn submit_scoring_path_with_trace(
+        &mut self,
+        path_id: PathId,
+        table: Arc<TransitionTable>,
+        trace: &mut RuntimeTrace,
+        reason: &str,
+    ) -> bool {
+        let path = self.path_registry.path(path_id).clone();
         let signature = self.path_scoring_signature(&path);
         if !self.submitted_scoring_signatures.insert(signature) {
             return false;
@@ -1162,29 +1532,13 @@ impl WaveEngine {
         self.next_scoring_job_order += 1;
         self.scoring_pool.submit(ScoringJob {
             order,
-            path,
+            path_id,
+            path: path.clone(),
             table,
             assignment_limit: self.config.top_k.unwrap_or(1),
         });
+        self.trace_scoring_job_queued(trace, reason, order, path_id, &path);
         true
-    }
-
-    fn register_complete_path(&mut self, path: &CompletePath) {
-        for (stage, transition) in path.iter() {
-            let transition_ref = TransitionRef {
-                stage: stage
-                    .try_into()
-                    .expect("stage index should fit in transition ref"),
-                transition,
-            };
-            let paths = self
-                .complete_paths_by_transition
-                .entry(transition_ref)
-                .or_default();
-            if !paths.contains(path) {
-                paths.push(path.clone());
-            }
-        }
     }
 
     fn path_scoring_signature(&self, path: &CompletePath) -> PathScoringSignature {
@@ -1206,12 +1560,23 @@ impl WaveEngine {
             .collect()
     }
 
-    fn apply_ready_scoring_results(&mut self) -> usize {
+    fn apply_ready_scoring_results_with_trace(
+        &mut self,
+        trace: &mut RuntimeTrace,
+        reason: &str,
+    ) -> usize {
         let mut scored = 0;
         while let Some(result) = self
             .buffered_scoring_results
             .remove(&self.next_scoring_result_order)
         {
+            let fields = ScoringJobTraceFields {
+                order: result.order,
+                path_id: result.path_id,
+                path_length: result.path_length,
+                assigned_candidates: result.scored_paths.len(),
+            };
+            let mut applied_candidates = 0;
             self.next_scoring_result_order += 1;
             self.scoring_pool.pending_jobs = self.scoring_pool.pending_jobs.saturating_sub(1);
             for scored_path in result.scored_paths {
@@ -1222,7 +1587,9 @@ impl WaveEngine {
                 self.scored_paths.push(scored_path);
                 self.retain_top_k_paths();
                 scored += 1;
+                applied_candidates += 1;
             }
+            self.trace_scoring_job_applied(trace, reason, fields, applied_candidates);
         }
         scored
     }
@@ -1303,6 +1670,7 @@ impl WaveEngine {
         let mut attempts = 0;
         let mut valid_outputs = 0;
         let mut new_transitions = 0;
+        let mut discovered_paths = 0;
 
         let job_count = jobs.len();
         for (job_index, job) in jobs.into_iter().enumerate() {
@@ -1314,12 +1682,13 @@ impl WaveEngine {
             }
             self.set_stage_worker_state(stage, 1, 1, job_count.saturating_sub(job_index + 1));
             self.emit_stage_update(stage, session);
-            let result = self.execute_job(&job)?;
+            let result = self.execute_job_with_trace(&job, trace)?;
             attempts += result.attempts();
             valid_outputs += result.valid_output_count();
             new_transitions += result.new_transition_count();
-            self.poll_scoring_jobs();
-            self.emit_scoring_update(session);
+            discovered_paths += result.discovered_paths();
+            self.poll_scoring_jobs_with_trace(trace, "stage_job_finished");
+            self.emit_scoring_update_with_trace(session, trace, "stage_job_finished");
             self.set_stage_worker_state(stage, 0, 1, job_count.saturating_sub(job_index + 1));
             self.emit_stage_update(stage, session);
 
@@ -1333,6 +1702,7 @@ impl WaveEngine {
                     valid_outputs,
                     new_outputs,
                     new_transitions,
+                    discovered_paths,
                 });
             }
         }
@@ -1345,6 +1715,7 @@ impl WaveEngine {
             valid_outputs,
             new_outputs: self.transition_table.unique_output_count(stage) - outputs_at_start,
             new_transitions,
+            discovered_paths,
         })
     }
 
@@ -1416,6 +1787,7 @@ impl WaveEngine {
             let mut attempts = 0;
             let mut valid_outputs = 0;
             let mut new_transitions = 0;
+            let mut discovered_paths = 0;
 
             while !session.should_stop() && in_flight < worker_count && next_to_send < jobs.len() {
                 let job_index = next_to_send;
@@ -1604,12 +1976,18 @@ impl WaveEngine {
                                     }),
                                 );
                             }
-                            let apply_result = self.apply_synthesis_output(output);
+                            let apply_result =
+                                self.apply_synthesis_output_with_trace(output, trace);
                             attempts += apply_result.attempts();
                             valid_outputs += apply_result.valid_output_count();
                             new_transitions += apply_result.new_transition_count();
-                            self.poll_scoring_jobs();
-                            self.emit_scoring_update(session);
+                            discovered_paths += apply_result.discovered_paths();
+                            self.poll_scoring_jobs_with_trace(trace, "job_apply_finished");
+                            self.emit_scoring_update_with_trace(
+                                session,
+                                trace,
+                                "job_apply_finished",
+                            );
                             next_to_apply += 1;
                             self.emit_stage_update(stage, session);
                             if trace.is_enabled() {
@@ -1805,6 +2183,7 @@ impl WaveEngine {
                     "valid_outputs": valid_outputs,
                     "new_outputs": new_outputs,
                     "new_transitions": new_transitions,
+                    "discovered_paths": discovered_paths,
                     "job_count": jobs.len(),
                     "submitted_jobs": next_to_send,
                     "applied_jobs": next_to_apply,
@@ -1817,6 +2196,7 @@ impl WaveEngine {
                 valid_outputs,
                 new_outputs,
                 new_transitions,
+                discovered_paths,
             })
         })
     }
@@ -1970,6 +2350,17 @@ fn trace_job_submitted(
             "buffered_results": counters.buffered_results,
         }),
     );
+}
+
+fn path_transitions_json(path: &CompletePath) -> Vec<Value> {
+    path.iter()
+        .map(|(stage, transition)| {
+            json!({
+                "stage": stage,
+                "transition": transition.0,
+            })
+        })
+        .collect()
 }
 
 fn synthesize_worker_job(
