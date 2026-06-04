@@ -109,6 +109,22 @@ fn add_transition_tracks_unique_inputs_outputs_and_deduplicates_gadgets() {
 }
 
 #[test]
+fn cloned_transition_table_snapshots_keep_prior_gadget_lists() {
+    let mut table = TransitionTable::new(1);
+    let input = state(&[3, 2, 1, 0], &[7, 6, 5, 4]);
+    let output = state(&[0, 1, 2, 3], &[4, 5, 6, 7]);
+
+    assert!(table.add_transition(0, &input, &output, gadget_with_imm(1)));
+    let snapshot = table.clone();
+    assert!(table.add_transition(0, &input, &output, gadget_with_imm(2)));
+
+    let live_transitions = table.get_transitions(0, &input.as_tuple());
+    let snapshot_transitions = snapshot.get_transitions(0, &input.as_tuple());
+    assert_eq!(live_transitions[&output.as_tuple()].len(), 2);
+    assert_eq!(snapshot_transitions[&output.as_tuple()].len(), 1);
+}
+
+#[test]
 fn records_attempts_attempted_pairs_and_forwarded_outputs() {
     let mut table = TransitionTable::new(2);
     let input = state(&[1, 2, 3, 4], &[5, 6, 7, 8]);

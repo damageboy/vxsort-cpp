@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use gadget_synth::{PermutationGadget, VectorState};
 
@@ -306,7 +309,7 @@ impl PathRegistry {
 pub struct TransitionRecord {
     input: StateId,
     output: StateId,
-    gadgets: Vec<PermutationGadget>,
+    gadgets: Arc<Vec<PermutationGadget>>,
 }
 
 impl TransitionRecord {
@@ -319,7 +322,7 @@ impl TransitionRecord {
     }
 
     pub fn gadgets(&self) -> &[PermutationGadget] {
-        &self.gadgets
+        self.gadgets.as_slice()
     }
 
     pub fn gadget(&self, index: GadgetIndex) -> &PermutationGadget {
@@ -579,7 +582,7 @@ impl TransitionTable {
                     .try_into()
                     .expect("gadget index should fit in u16"),
             );
-            record.gadgets.push(gadget);
+            Arc::make_mut(&mut record.gadgets).push(gadget);
             stage_data.dirty = true;
             return TransitionInsertResult {
                 transition: TransitionRef {
@@ -602,7 +605,7 @@ impl TransitionTable {
         stage_data.transitions.push(TransitionRecord {
             input,
             output,
-            gadgets: vec![gadget],
+            gadgets: Arc::new(vec![gadget]),
         });
         stage_data
             .transition_by_pair
@@ -743,7 +746,7 @@ impl TransitionTable {
             let record = &self.stages[stage].transitions[transition.0 as usize];
             transitions.insert(
                 self.state_as_zero_based_tuple(record.output),
-                record.gadgets.clone(),
+                record.gadgets.as_ref().clone(),
             );
         }
         transitions
@@ -762,7 +765,7 @@ impl TransitionTable {
                         self.state_as_zero_based_tuple(record.input),
                         self.state_as_zero_based_tuple(record.output),
                     ),
-                    record.gadgets.clone(),
+                    record.gadgets.as_ref().clone(),
                 )
             })
             .collect()
