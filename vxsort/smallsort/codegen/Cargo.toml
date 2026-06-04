@@ -13,4 +13,4 @@ edition = "2024"
 license = "MIT"
 
 [workspace.dependencies]
-z3 = "0.20"
+z3 = { version = "0.20", features = ["vendored"] }
