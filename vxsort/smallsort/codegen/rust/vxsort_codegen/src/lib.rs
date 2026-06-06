@@ -1,25 +1,28 @@
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, mpsc},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread,
 };
 
 use asm_exporter::{write_solution_asm_for_assigned_paths, write_solution_asm_for_paths};
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use instruction_stream::{LoweringOptions, lower_assigned_paths};
+use instruction_stream::{InstructionBlock, LoweringOptions, lower_assigned_paths};
 use json_exporter::{SolutionJsonMetadata, write_solution_json_for_assigned_paths};
 pub use json_importer::{ImportedSolutionJson, read_solution_json, solution_json_from_value};
-use runtime::{NullRuntimeSession, RuntimeEvent, RuntimeSession};
+use runtime::{FullScoringProgressSnapshot, RuntimeEvent, RuntimeSession};
 use runtime_trace::RuntimeTrace;
-use scoring::{PathCost, Scorer};
+use scoring::PathCost;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 pub use uica_data_fetch::{
     FetchUicaDataConfig, FetchUicaDataReport, default_uica_data_base_url, fetch_uica_data,
 };
 pub use uica_estimator::{EstimateOptions, EstimateReport, EstimateResult, estimate_solution_json};
 use uica_scoring::UiPackScorer;
-use wave_engine::{ScoredPath, WaveConfig, WaveEngine};
+use wave_engine::{ScoredPath, WaveConfig, WaveEngine, WaveProgressObserver};
 
 pub mod asm_exporter;
 pub mod bitonic_sorter;
@@ -30,6 +33,7 @@ pub mod runtime;
 pub mod runtime_trace;
 pub mod runtime_tui;
 pub mod scoring;
+pub mod stable_vec;
 pub mod transition_table;
 pub mod uica_data_fetch;
 pub mod uica_estimator;
@@ -67,6 +71,12 @@ pub enum RuntimeUiArg {
     Auto,
     Textual,
     None,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum, Serialize, Deserialize)]
+pub enum PruneScoreArg {
+    Rough,
+    Uica,
 }
 
 impl ArchArg {
@@ -111,6 +121,15 @@ impl WorkerBackendArg {
             WorkerBackendArg::Auto => "auto",
             WorkerBackendArg::InProcess => "in-process",
             WorkerBackendArg::Process => "process",
+        }
+    }
+}
+
+impl PruneScoreArg {
+    pub fn cli_name(self) -> &'static str {
+        match self {
+            PruneScoreArg::Rough => "rough",
+            PruneScoreArg::Uica => "uica",
         }
     }
 }
@@ -162,6 +181,9 @@ pub struct SolveArgs {
 
     #[arg(long = "top-k")]
     pub top_k: Option<usize>,
+
+    #[arg(long = "prune-score", value_enum, ignore_case = true, default_value_t = PruneScoreArg::Rough)]
+    pub prune_score: PruneScoreArg,
 
     #[arg(long = "gadget-depth", default_value_t = 1, value_parser = clap::value_parser!(u8).range(1..=3))]
     pub gadget_depth: u8,
@@ -306,6 +328,7 @@ pub struct RunConfig {
     pub dtype: DTypeArg,
     pub depth_limit: Option<usize>,
     pub top_k: Option<usize>,
+    pub prune_score: PruneScoreArg,
     pub gadget_depth: u8,
     pub natural_order: bool,
     pub retroactive_input: bool,
@@ -367,7 +390,10 @@ pub fn parse_run_config(args: CliArgs) -> Result<RunConfig, String> {
         CliCommand::Solve(solve_args) => solve_args,
         _ => return Err("utility subcommands are not solver run configurations".to_owned()),
     };
+    parse_solve_run_config(solve_args)
+}
 
+pub fn parse_solve_run_config(solve_args: SolveArgs) -> Result<RunConfig, String> {
     let arch = solve_args
         .arch
         .ok_or_else(|| "--vector-machine is required".to_owned())?;
@@ -404,6 +430,7 @@ pub fn parse_run_config(args: CliArgs) -> Result<RunConfig, String> {
         dtype,
         depth_limit: solve_args.depth_limit,
         top_k: solve_args.top_k,
+        prune_score: solve_args.prune_score,
         gadget_depth: solve_args.gadget_depth,
         natural_order: solve_args.natural_order,
         retroactive_input: solve_args.retroactive_input,
@@ -432,11 +459,6 @@ pub fn resolve_worker_count(requested_workers: usize) -> usize {
         .map(usize::from)
         .unwrap_or(1)
         .max(1)
-}
-
-pub fn build_run_summary(config: &RunConfig) -> Result<RunSummary, String> {
-    let mut session = NullRuntimeSession;
-    build_run_summary_with_session(config, &mut session)
 }
 
 pub fn convert_solution_json_to_asm(
@@ -476,7 +498,11 @@ pub fn verify_solution_json(
     Ok(report)
 }
 
-pub fn build_run_summary_with_session(
+/// Runs the solver while emitting progress events to `session`.
+///
+/// Line logging, the threaded TUI, tests, and other runtime observers all use
+/// this entry point so the core solve remains independent of presentation.
+pub fn run_solver_with_session(
     config: &RunConfig,
     session: &mut impl RuntimeSession,
 ) -> Result<RunSummary, String> {
@@ -500,9 +526,7 @@ pub fn build_run_summary_with_session(
         return Err("--target-cpu is required for scored solving".to_owned());
     }
     let mut trace = RuntimeTrace::from_path(config.runtime_trace_path.as_deref())?;
-    trace.event(
-        "run_started",
-        json!({
+    crate::trace!(trace, "run_started", {
             "num_vecs": config.num_vecs,
             "arch": config.arch.cli_name(),
             "dtype": config.dtype.cli_name(),
@@ -513,13 +537,13 @@ pub fn build_run_summary_with_session(
             "target_cpus": config.target_cpus.clone(),
             "final_top_k": final_top_k,
             "rough_top_k": rough_top_k,
+            "prune_score": config.prune_score.cli_name(),
             "max_waves": config.max_waves,
             "wave_attempts": config.wave_attempts,
             "wave_outputs": config.wave_outputs,
             "worker_count": config.worker_count,
             "worker_backend": config.worker_backend.cli_name(),
-        }),
-    );
+    });
 
     let mut total_wave_count = 0;
     let mut search_exhausted = true;
@@ -529,19 +553,15 @@ pub fn build_run_summary_with_session(
     let multi_target = config.target_cpus.len() > 1;
 
     for target_cpu in &config.target_cpus {
-        trace.event(
-            "target_started",
-            json!({
+        crate::trace!(trace, "target_started", {
                 "target_cpu": target_cpu,
                 "rough_top_k": rough_top_k,
                 "final_top_k": final_top_k,
-            }),
-        );
-        UiPackScorer::from_data_dir(&config.uica_data_dir, target_cpu)?;
-        let rough_uica_data_dir = config.uica_data_dir.clone();
-        let rough_target_cpu = target_cpu.clone();
-        let rough_metadata = metadata.clone();
-        let mut engine = WaveEngine::with_scorer_factory(
+                "prune_score": config.prune_score.cli_name(),
+        });
+        let rough_scorer = UiPackScorer::from_data_dir(&config.uica_data_dir, target_cpu)?
+            .with_solution_metadata(metadata.clone());
+        let mut engine = WaveEngine::with_scorer(
             WaveConfig {
                 num_vecs: config.num_vecs,
                 arch: config.arch,
@@ -554,53 +574,65 @@ pub fn build_run_summary_with_session(
                 worker_backend: config.worker_backend,
                 max_unique_outputs: config.max_gadget_solutions,
             },
-            move || {
-                let scorer = UiPackScorer::from_data_dir(&rough_uica_data_dir, &rough_target_cpu)
-                    .unwrap_or_else(|error| {
-                        panic!("validated uiCA rough scorer failed to load: {error}")
-                    })
-                    .with_solution_metadata(rough_metadata.clone());
-                Box::new(scorer) as Box<dyn Scorer>
-            },
+            rough_scorer,
         )
         .map_err(|error| error.to_string())?;
 
-        let result = {
-            let mut target_session =
-                TargetRuntimeSession::new(session, target_cpu, rough_top_k, final_top_k);
-            engine
-                .run_sync_with_session_and_trace(
-                    config.max_waves,
-                    config.wave_attempts,
-                    config.wave_outputs,
-                    &mut target_session,
-                    &mut trace,
-                )
-                .map_err(|error| error.to_string())?
-        };
-        trace.event(
-            "target_rough_finished",
-            json!({
-                "target_cpu": target_cpu,
-                "wave_count": result.wave_count(),
-                "search_exhausted": result.search_exhausted(),
-                "rough_candidate_count": engine.scored_paths().len(),
-                "best_rough_score": engine.best_score(),
-            }),
-        );
-
-        let final_paths = full_score_and_prune_paths(
+        let mut live_full_scorer = LiveFullScorer::new(
             &metadata,
-            engine.transition_table(),
-            engine.scored_paths(),
             FinalScoringOptions {
                 final_top_k,
                 target_cpu,
                 uica_data_dir: &config.uica_data_dir,
                 worker_count: config.worker_count,
             },
-            session,
+            match config.prune_score {
+                PruneScoreArg::Rough => LiveFullScoringInput::RetainedRough,
+                PruneScoreArg::Uica => LiveFullScoringInput::RecentRough,
+            },
         )?;
+        let result = {
+            let mut target_session =
+                TargetRuntimeSession::new(session, target_cpu, rough_top_k, final_top_k);
+            engine
+                .run_sync_with_session_trace_and_observer(
+                    config.max_waves,
+                    config.wave_attempts,
+                    config.wave_outputs,
+                    &mut target_session,
+                    &mut trace,
+                    &mut live_full_scorer,
+                )
+                .map_err(|error| error.to_string())?
+        };
+        crate::trace!(trace, "target_rough_finished", {
+                "target_cpu": target_cpu,
+                "wave_count": result.wave_count(),
+                "search_exhausted": result.search_exhausted(),
+                "rough_candidate_count": engine.scored_paths().len(),
+                "best_rough_score": engine.best_score(),
+        });
+
+        let final_paths = match config.prune_score {
+            PruneScoreArg::Rough => {
+                drop(live_full_scorer);
+                full_score_and_prune_paths(
+                    &metadata,
+                    engine.transition_table(),
+                    engine.scored_paths(),
+                    FinalScoringOptions {
+                        final_top_k,
+                        target_cpu,
+                        uica_data_dir: &config.uica_data_dir,
+                        worker_count: config.worker_count,
+                    },
+                    session,
+                )?
+            }
+            PruneScoreArg::Uica => {
+                live_full_scorer.finish(session, &mut trace, "target_finished")?
+            }
+        };
         let assigned_paths = final_paths
             .iter()
             .map(|scored_path| scored_path.assigned_path().clone())
@@ -665,15 +697,12 @@ pub fn build_run_summary_with_session(
         scored_paths: total_scored_paths,
         best_score,
     });
-    trace.event(
-        "run_finished",
-        json!({
+    crate::trace!(trace, "run_finished", {
             "wave_count": total_wave_count,
             "search_exhausted": search_exhausted,
             "scored_paths": total_scored_paths,
             "best_score": best_score,
-        }),
-    );
+    });
     trace.flush()?;
 
     Ok(RunSummary {
@@ -756,6 +785,7 @@ struct FinalScoringOptions<'a> {
 #[derive(Clone, Debug)]
 struct FinalScoringJob {
     rough_path: ScoredPath,
+    block: InstructionBlock,
 }
 
 #[derive(Clone, Debug)]
@@ -763,6 +793,321 @@ struct FinalScoringResult {
     scored_path: ScoredPath,
     rough_cost: PathCost,
     selection_key: scoring::AssignedPathKey,
+}
+
+fn compare_final_scoring_results(
+    left: &FinalScoringResult,
+    right: &FinalScoringResult,
+) -> std::cmp::Ordering {
+    left.scored_path
+        .cost()
+        .score()
+        .total_cmp(&right.scored_path.cost().score())
+        .then_with(|| left.rough_cost.score().total_cmp(&right.rough_cost.score()))
+        .then_with(|| left.selection_key.cmp(&right.selection_key))
+        .then_with(|| {
+            left.scored_path
+                .discovery_order()
+                .cmp(&right.scored_path.discovery_order())
+        })
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LiveFullScoringInput {
+    RetainedRough,
+    RecentRough,
+}
+
+struct LiveFullScorer {
+    target_cpu: String,
+    metadata: SolutionJsonMetadata,
+    input: LiveFullScoringInput,
+    final_top_k: usize,
+    sender: mpsc::Sender<Option<FinalScoringJob>>,
+    receiver: mpsc::Receiver<Result<FinalScoringResult, String>>,
+    workers: Vec<thread::JoinHandle<()>>,
+    stop: Arc<AtomicBool>,
+    submitted: std::collections::HashSet<scoring::AssignedPathKey>,
+    completed: std::collections::HashMap<scoring::AssignedPathKey, FinalScoringResult>,
+    retained: Vec<FinalScoringResult>,
+    submitted_count: usize,
+    completed_count: usize,
+    pending_count: usize,
+    best_retained: Option<FinalScoringResult>,
+}
+
+impl LiveFullScorer {
+    fn new(
+        metadata: &SolutionJsonMetadata,
+        options: FinalScoringOptions<'_>,
+        input: LiveFullScoringInput,
+    ) -> Result<Self, String> {
+        let worker_count = options
+            .worker_count
+            .max(1)
+            .min(options.final_top_k.max(1) * 10);
+        let (sender, job_receiver) = mpsc::channel::<Option<FinalScoringJob>>();
+        let job_receiver = Arc::new(Mutex::new(job_receiver));
+        let (result_sender, receiver) = mpsc::channel::<Result<FinalScoringResult, String>>();
+        let metadata = metadata.clone();
+        let stop = Arc::new(AtomicBool::new(false));
+        let scorer = Arc::new(UiPackScorer::from_data_dir(
+            options.uica_data_dir,
+            options.target_cpu,
+        )?);
+        let mut workers = Vec::with_capacity(worker_count);
+
+        for _ in 0..worker_count {
+            let job_receiver = Arc::clone(&job_receiver);
+            let result_sender = result_sender.clone();
+            let stop = Arc::clone(&stop);
+            let scorer = Arc::clone(&scorer);
+            workers.push(thread::spawn(move || {
+                loop {
+                    let message = {
+                        let receiver = job_receiver
+                            .lock()
+                            .expect("live full scoring job receiver should not be poisoned");
+                        receiver.recv()
+                    };
+                    match message {
+                        Ok(Some(job)) => {
+                            if stop.load(Ordering::Relaxed) {
+                                return;
+                            }
+                            let result = score_final_job(job, scorer.as_ref());
+                            if result_sender.send(Ok(result)).is_err() {
+                                return;
+                            }
+                        }
+                        Ok(None) | Err(_) => return,
+                    }
+                }
+            }));
+        }
+        drop(result_sender);
+
+        Ok(Self {
+            target_cpu: options.target_cpu.to_owned(),
+            metadata,
+            input,
+            final_top_k: options.final_top_k,
+            sender,
+            receiver,
+            workers,
+            stop,
+            submitted: std::collections::HashSet::new(),
+            completed: std::collections::HashMap::new(),
+            retained: Vec::new(),
+            submitted_count: 0,
+            completed_count: 0,
+            pending_count: 0,
+            best_retained: None,
+        })
+    }
+
+    fn enqueue_retained_paths(
+        &mut self,
+        table: &transition_table::TransitionTable,
+        rough_paths: &[ScoredPath],
+        trace: &mut RuntimeTrace,
+        reason: &str,
+    ) -> Result<(), String> {
+        for rough_path in rough_paths {
+            let key = rough_path.assigned_path().selection_key();
+            if !self.submitted.insert(key.clone()) {
+                continue;
+            }
+            let block = final_scoring_block(&self.metadata, table, rough_path);
+            self.sender
+                .send(Some(FinalScoringJob {
+                    rough_path: rough_path.clone(),
+                    block,
+                }))
+                .map_err(|error| format!("failed to queue live full scoring job: {error}"))?;
+            self.submitted_count += 1;
+            self.pending_count += 1;
+            crate::trace!(trace, "live_full_scoring_job_queued", {
+                        "reason": reason,
+                        "target_cpu": self.target_cpu,
+                        "submitted": self.submitted_count,
+                        "pending": self.pending_count,
+                        "rough_score": rough_path.cost().score(),
+            });
+        }
+        Ok(())
+    }
+
+    fn handle_completed_result(
+        &mut self,
+        result: FinalScoringResult,
+        trace: &mut RuntimeTrace,
+        reason: &str,
+    ) {
+        self.pending_count = self.pending_count.saturating_sub(1);
+        self.completed_count += 1;
+        match self.input {
+            LiveFullScoringInput::RetainedRough => {
+                self.completed.insert(result.selection_key.clone(), result);
+            }
+            LiveFullScoringInput::RecentRough => {
+                self.retain_final_result(result);
+            }
+        }
+        crate::trace!(trace, "live_full_scoring_job_completed", {
+                    "reason": reason,
+                    "target_cpu": self.target_cpu,
+                    "completed": self.completed_count,
+                    "pending": self.pending_count,
+        });
+    }
+
+    fn retain_final_result(&mut self, result: FinalScoringResult) {
+        self.retained.push(result);
+        self.retained.sort_by(compare_final_scoring_results);
+        self.retained.truncate(self.final_top_k);
+        self.best_retained = self.retained.first().cloned();
+    }
+
+    fn poll(
+        &mut self,
+        retained_paths: &[ScoredPath],
+        session: &mut dyn RuntimeSession,
+        trace: &mut RuntimeTrace,
+        reason: &str,
+    ) -> Result<(), String> {
+        while let Ok(result) = self.receiver.try_recv() {
+            let result = result?;
+            self.handle_completed_result(result, trace, reason);
+        }
+
+        if self.input == LiveFullScoringInput::RetainedRough {
+            self.refresh_best_retained(retained_paths);
+        }
+        let snapshot = self.snapshot();
+        session.on_event(RuntimeEvent::LiveFullScoringProgress(snapshot.clone()));
+        crate::trace!(trace, "live_full_scoring_snapshot", {
+                    "reason": reason,
+                    "target_cpu": self.target_cpu,
+                    "submitted": self.submitted_count,
+                    "completed": snapshot.completed_paths(),
+                    "pending": snapshot.pending_paths(),
+                    "scored": snapshot.scored_paths(),
+                    "best_score": snapshot.best_score(),
+                    "best_estimated_cycles": snapshot.best_estimated_cycles(),
+        });
+        Ok(())
+    }
+
+    fn finish(
+        &mut self,
+        session: &mut dyn RuntimeSession,
+        trace: &mut RuntimeTrace,
+        reason: &str,
+    ) -> Result<Vec<ScoredPath>, String> {
+        while self.pending_count > 0 {
+            let result = self
+                .receiver
+                .recv()
+                .map_err(|error| format!("live full scoring worker stopped early: {error}"))??;
+            self.handle_completed_result(result, trace, reason);
+            let snapshot = self.snapshot();
+            session.on_event(RuntimeEvent::LiveFullScoringProgress(snapshot.clone()));
+        }
+
+        self.retained.sort_by(compare_final_scoring_results);
+        session.on_event(RuntimeEvent::FullScoringFinished {
+            target_cpu: self.target_cpu.clone(),
+            scored_count: self.completed_count,
+            kept_count: self.retained.len(),
+            best_score: self
+                .retained
+                .first()
+                .map(|result| result.scored_path.cost().score()),
+        });
+        Ok(self
+            .retained
+            .iter()
+            .map(|result| result.scored_path.clone())
+            .collect())
+    }
+
+    fn refresh_best_retained(&mut self, retained_paths: &[ScoredPath]) {
+        let retained_keys = retained_paths
+            .iter()
+            .map(|path| path.assigned_path().selection_key())
+            .collect::<std::collections::HashSet<_>>();
+        self.best_retained = self
+            .completed
+            .values()
+            .filter(|result| retained_keys.contains(&result.selection_key))
+            .min_by(|left, right| {
+                left.scored_path
+                    .cost()
+                    .score()
+                    .total_cmp(&right.scored_path.cost().score())
+                    .then_with(|| left.rough_cost.score().total_cmp(&right.rough_cost.score()))
+                    .then_with(|| left.selection_key.cmp(&right.selection_key))
+                    .then_with(|| {
+                        left.scored_path
+                            .discovery_order()
+                            .cmp(&right.scored_path.discovery_order())
+                    })
+            })
+            .cloned();
+    }
+
+    fn snapshot(&self) -> FullScoringProgressSnapshot {
+        let best_score = self
+            .best_retained
+            .as_ref()
+            .map(|result| result.scored_path.cost().score());
+        let best_estimated_cycles = self
+            .best_retained
+            .as_ref()
+            .map(|result| result.scored_path.cost().estimated_cycles());
+        FullScoringProgressSnapshot::new(
+            self.completed_count,
+            self.submitted_count,
+            self.pending_count,
+            match self.input {
+                LiveFullScoringInput::RetainedRough => self.completed.len(),
+                LiveFullScoringInput::RecentRough => self.retained.len(),
+            },
+            best_score,
+            best_estimated_cycles,
+        )
+    }
+}
+
+impl Drop for LiveFullScorer {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        for _ in &self.workers {
+            let _ = self.sender.send(None);
+        }
+        while let Some(worker) = self.workers.pop() {
+            let _ = worker.join();
+        }
+    }
+}
+
+impl WaveProgressObserver for LiveFullScorer {
+    fn on_wave_progress(
+        &mut self,
+        engine: &WaveEngine,
+        recent_scored_paths: &[ScoredPath],
+        session: &mut dyn RuntimeSession,
+        trace: &mut RuntimeTrace,
+        reason: &str,
+    ) -> Result<(), String> {
+        let candidate_paths = match self.input {
+            LiveFullScoringInput::RetainedRough => engine.scored_paths(),
+            LiveFullScoringInput::RecentRough => recent_scored_paths,
+        };
+        self.enqueue_retained_paths(engine.transition_table(), candidate_paths, trace, reason)?;
+        self.poll(engine.scored_paths(), session, trace, reason)
+    }
 }
 
 fn full_score_and_prune_paths(
@@ -820,20 +1165,9 @@ fn full_score_and_prune_paths(
                 best_score: best_full_score,
             });
         },
-    )?
-    .into_iter()
-    .map(|result| (result.scored_path, result.rough_cost, result.selection_key))
-    .collect::<Vec<_>>();
+    )?;
 
-    scored.sort_by(|left, right| {
-        left.0
-            .cost()
-            .score()
-            .total_cmp(&right.0.cost().score())
-            .then_with(|| left.1.score().total_cmp(&right.1.score()))
-            .then_with(|| left.2.cmp(&right.2))
-            .then_with(|| left.0.discovery_order().cmp(&right.0.discovery_order()))
-    });
+    scored.sort_by(compare_final_scoring_results);
     scored.truncate(options.final_top_k);
     let kept_count = scored.len();
     session.on_event(RuntimeEvent::FullScoringFinished {
@@ -844,7 +1178,7 @@ fn full_score_and_prune_paths(
     });
     Ok(scored
         .into_iter()
-        .map(|(scored_path, _, _)| scored_path)
+        .map(|result| result.scored_path)
         .collect())
 }
 
@@ -863,39 +1197,38 @@ fn score_final_paths_parallel(
     worker_count: usize,
     mut on_result: impl FnMut(&FinalScoringResult),
 ) -> Result<Vec<FinalScoringResult>, String> {
+    let scorer = Arc::new(UiPackScorer::from_data_dir(
+        options.uica_data_dir,
+        options.target_cpu,
+    )?);
+
     if worker_count == 1 {
-        let scorer = UiPackScorer::from_data_dir(options.uica_data_dir, options.target_cpu)?;
         let mut results = Vec::with_capacity(rough_paths.len());
         for rough_path in rough_paths {
-            let result = score_final_path(metadata, table, rough_path, &scorer);
+            let block = final_scoring_block(metadata, table, rough_path);
+            let result = score_final_job(
+                FinalScoringJob {
+                    rough_path: rough_path.clone(),
+                    block,
+                },
+                scorer.as_ref(),
+            );
             on_result(&result);
             results.push(result);
         }
         return Ok(results);
     }
 
-    let metadata = Arc::new(metadata.clone());
-    let table = Arc::new(table.clone());
     let (job_sender, job_receiver) = mpsc::channel::<Option<FinalScoringJob>>();
     let job_receiver = Arc::new(Mutex::new(job_receiver));
     let (result_sender, result_receiver) = mpsc::channel::<Result<FinalScoringResult, String>>();
     let mut workers = Vec::with_capacity(worker_count);
 
     for _ in 0..worker_count {
-        let metadata = Arc::clone(&metadata);
-        let table = Arc::clone(&table);
         let job_receiver = Arc::clone(&job_receiver);
         let result_sender = result_sender.clone();
-        let data_dir = options.uica_data_dir.to_path_buf();
-        let target_cpu = options.target_cpu.to_owned();
+        let scorer = Arc::clone(&scorer);
         workers.push(thread::spawn(move || {
-            let scorer = match UiPackScorer::from_data_dir(&data_dir, &target_cpu) {
-                Ok(scorer) => scorer,
-                Err(error) => {
-                    let _ = result_sender.send(Err(error));
-                    return;
-                }
-            };
             loop {
                 let message = {
                     let receiver = job_receiver
@@ -905,7 +1238,7 @@ fn score_final_paths_parallel(
                 };
                 match message {
                     Ok(Some(job)) => {
-                        let result = score_final_path(&metadata, &table, &job.rough_path, &scorer);
+                        let result = score_final_job(job, scorer.as_ref());
                         if result_sender.send(Ok(result)).is_err() {
                             return;
                         }
@@ -918,9 +1251,11 @@ fn score_final_paths_parallel(
     drop(result_sender);
 
     for rough_path in rough_paths {
+        let block = final_scoring_block(metadata, table, rough_path);
         job_sender
             .send(Some(FinalScoringJob {
                 rough_path: rough_path.clone(),
+                block,
             }))
             .map_err(|error| format!("failed to queue final scoring job: {error}"))?;
     }
@@ -958,37 +1293,34 @@ fn score_final_paths_parallel(
     Ok(results)
 }
 
-fn score_final_path(
+fn final_scoring_block(
     metadata: &SolutionJsonMetadata,
     table: &transition_table::TransitionTable,
     rough_path: &ScoredPath,
-    scorer: &UiPackScorer,
-) -> FinalScoringResult {
-    let full_cost = full_score_assigned_path(metadata, table, rough_path, scorer);
-    FinalScoringResult {
-        scored_path: rough_path.with_cost(full_cost),
-        rough_cost: rough_path.cost().clone(),
-        selection_key: rough_path.assigned_path().selection_key(),
-    }
-}
-
-fn full_score_assigned_path(
-    metadata: &SolutionJsonMetadata,
-    table: &transition_table::TransitionTable,
-    rough_path: &ScoredPath,
-    scorer: &UiPackScorer,
-) -> PathCost {
+) -> InstructionBlock {
     let assigned_path = rough_path.assigned_path().clone();
-    let stream = lower_assigned_paths(
+    let mut stream = lower_assigned_paths(
         metadata,
         table,
         std::slice::from_ref(&assigned_path),
         LoweringOptions::default(),
     );
-    let Some(block) = stream.blocks.first() else {
-        return PathCost::new(0, f64::INFINITY, f64::INFINITY);
-    };
+    stream.blocks.pop().unwrap_or(InstructionBlock {
+        label: None,
+        instructions: Vec::new(),
+    })
+}
 
+fn score_final_job(job: FinalScoringJob, scorer: &UiPackScorer) -> FinalScoringResult {
+    let full_cost = full_score_block(&job.block, scorer);
+    FinalScoringResult {
+        scored_path: job.rough_path.with_cost(full_cost),
+        rough_cost: job.rough_path.cost().clone(),
+        selection_key: job.rough_path.assigned_path().selection_key(),
+    }
+}
+
+fn full_score_block(block: &InstructionBlock, scorer: &UiPackScorer) -> PathCost {
     scorer
         .full_score_block(block)
         .unwrap_or_else(|_| unsupported_block_cost(block))
@@ -1073,7 +1405,7 @@ mod tests {
     use super::*;
     use crate::runtime::RuntimeSession;
     use crate::scoring::AssignedPath;
-    use crate::transition_table::{CompletePath, PathId};
+    use crate::transition_table::{CompletePath, GadgetIndex, PathId, TransitionIndex};
 
     #[derive(Default)]
     struct RecordingRuntimeSession {
@@ -1147,6 +1479,18 @@ mod tests {
         )
     }
 
+    fn keyed_rough_path(discovery_order: usize, rough_score: f64) -> ScoredPath {
+        let path = CompletePath::new(vec![TransitionIndex(discovery_order as u32)]);
+        let assigned_path = AssignedPath::new(path.clone(), vec![GadgetIndex(0)]);
+        ScoredPath::new(
+            PathId(discovery_order as u32),
+            path,
+            assigned_path,
+            PathCost::new(0, rough_score, rough_score),
+            discovery_order,
+        )
+    }
+
     #[test]
     fn final_scoring_parallelizes_locally_and_keeps_final_events_separate_from_rough_scoring() {
         let data_dir = empty_uica_data_dir("worker-capacity");
@@ -1203,6 +1547,131 @@ mod tests {
                 .events
                 .iter()
                 .all(|event| !matches!(event, RuntimeEvent::ScoringProgress(_)))
+        );
+
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    fn live_full_scoring_deduplicates_retained_rough_paths_and_reports_progress() {
+        let data_dir = empty_uica_data_dir("live-full");
+        let metadata = SolutionJsonMetadata {
+            natural_order: false,
+            arch: ArchArg::Avx2,
+            dtype: DTypeArg::I64,
+            num_vecs: 2,
+        };
+        let table = transition_table::TransitionTable::new(0);
+        let rough_path = empty_rough_path(0, 1.0);
+        let mut scorer = LiveFullScorer::new(
+            &metadata,
+            FinalScoringOptions {
+                final_top_k: 1,
+                target_cpu: "SKL",
+                uica_data_dir: &data_dir,
+                worker_count: 1,
+            },
+            LiveFullScoringInput::RetainedRough,
+        )
+        .expect("live full scorer should initialize");
+        let mut trace = RuntimeTrace::disabled();
+        let mut session = RecordingRuntimeSession::default();
+
+        scorer
+            .enqueue_retained_paths(
+                &table,
+                std::slice::from_ref(&rough_path),
+                &mut trace,
+                "test",
+            )
+            .expect("first retained rough path should enqueue");
+        scorer
+            .enqueue_retained_paths(
+                &table,
+                std::slice::from_ref(&rough_path),
+                &mut trace,
+                "test",
+            )
+            .expect("duplicate retained rough path should be ignored");
+
+        assert_eq!(scorer.submitted_count, 1);
+        assert_eq!(scorer.pending_count, 1);
+
+        for _ in 0..50 {
+            scorer
+                .poll(
+                    std::slice::from_ref(&rough_path),
+                    &mut session,
+                    &mut trace,
+                    "test",
+                )
+                .expect("live full scorer poll should succeed");
+            if scorer.completed_count == 1 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        assert_eq!(scorer.submitted_count, 1);
+        assert_eq!(scorer.completed_count, 1);
+        assert_eq!(scorer.pending_count, 0);
+        assert!(session.events.iter().any(|event| matches!(
+            event,
+            RuntimeEvent::LiveFullScoringProgress(snapshot)
+                if snapshot.completed_paths() == 1
+                    && snapshot.total_paths() == 1
+                    && snapshot.pending_paths() == 0
+                    && snapshot.best_score() == Some(0.0)
+        )));
+
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    fn live_full_scoring_recent_mode_retains_global_final_top_k() {
+        let data_dir = empty_uica_data_dir("live-full-global");
+        let metadata = SolutionJsonMetadata {
+            natural_order: false,
+            arch: ArchArg::Avx2,
+            dtype: DTypeArg::I64,
+            num_vecs: 2,
+        };
+        let mut scorer = LiveFullScorer::new(
+            &metadata,
+            FinalScoringOptions {
+                final_top_k: 2,
+                target_cpu: "SKL",
+                uica_data_dir: &data_dir,
+                worker_count: 1,
+            },
+            LiveFullScoringInput::RecentRough,
+        )
+        .expect("live full scorer should initialize");
+
+        for (discovery_order, rough_score, full_score) in
+            [(0, 1.0, 30.0), (1, 100.0, 20.0), (2, 2.0, 40.0)]
+        {
+            let rough_path = keyed_rough_path(discovery_order, rough_score);
+            scorer.retain_final_result(FinalScoringResult {
+                scored_path: rough_path.with_cost(PathCost::new(0, full_score, full_score)),
+                rough_cost: rough_path.cost().clone(),
+                selection_key: rough_path.assigned_path().selection_key(),
+            });
+        }
+
+        let retained_scores = scorer
+            .retained
+            .iter()
+            .map(|result| result.scored_path.cost().score())
+            .collect::<Vec<_>>();
+
+        assert_eq!(retained_scores, vec![20.0, 30.0]);
+        assert_eq!(
+            scorer
+                .best_retained
+                .as_ref()
+                .map(|result| result.rough_cost.score()),
+            Some(100.0)
         );
 
         let _ = std::fs::remove_dir_all(data_dir);

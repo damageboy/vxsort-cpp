@@ -50,6 +50,12 @@ pub struct TuiState {
     scoring_completed_paths: usize,
     scoring_total_paths: usize,
     scoring_pending_paths: usize,
+    full_scoring_completed_paths: usize,
+    full_scoring_total_paths: usize,
+    full_scoring_pending_paths: usize,
+    full_scored_paths: usize,
+    best_full_score: Option<f64>,
+    best_full_estimated_cycles: Option<f64>,
     best_score: Option<f64>,
     current_phase: String,
     log_lines: Vec<String>,
@@ -112,6 +118,12 @@ impl TuiState {
             scoring_completed_paths: 0,
             scoring_total_paths: 0,
             scoring_pending_paths: 0,
+            full_scoring_completed_paths: 0,
+            full_scoring_total_paths: 0,
+            full_scoring_pending_paths: 0,
+            full_scored_paths: 0,
+            best_full_score: None,
+            best_full_estimated_cycles: None,
             best_score: None,
             current_phase: "starting".to_owned(),
             log_lines: Vec::new(),
@@ -162,6 +174,17 @@ impl TuiState {
                 self.scoring_total_paths = snapshot.total_paths();
                 self.scoring_pending_paths = snapshot.pending_paths();
                 self.scored_paths = snapshot.scored_paths();
+            }
+            RuntimeEvent::LiveFullScoringProgress(snapshot) => {
+                self.full_scoring_completed_paths = snapshot.completed_paths();
+                self.full_scoring_total_paths = snapshot.total_paths();
+                self.full_scoring_pending_paths = snapshot.pending_paths();
+                self.full_scored_paths = snapshot.scored_paths();
+                self.best_full_score = snapshot.best_score();
+                self.best_full_estimated_cycles = snapshot.best_estimated_cycles();
+                if self.best_full_score.is_some() {
+                    self.best_score = self.best_full_score;
+                }
             }
             RuntimeEvent::WaveFinished {
                 wave,
@@ -371,6 +394,30 @@ impl TuiState {
 
     pub fn scoring_pending_paths(&self) -> usize {
         self.scoring_pending_paths
+    }
+
+    pub fn full_scoring_completed_paths(&self) -> usize {
+        self.full_scoring_completed_paths
+    }
+
+    pub fn full_scoring_total_paths(&self) -> usize {
+        self.full_scoring_total_paths
+    }
+
+    pub fn full_scoring_pending_paths(&self) -> usize {
+        self.full_scoring_pending_paths
+    }
+
+    pub fn full_scored_paths(&self) -> usize {
+        self.full_scored_paths
+    }
+
+    pub fn best_full_score(&self) -> Option<f64> {
+        self.best_full_score
+    }
+
+    pub fn best_full_estimated_cycles(&self) -> Option<f64> {
+        self.best_full_estimated_cycles
     }
 
     pub fn best_score(&self) -> Option<f64> {
@@ -611,7 +658,7 @@ pub fn render_tui(frame: &mut Frame<'_>, state: &TuiState) {
         .split(root[1]);
     let progress = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(7), Constraint::Length(3)])
+        .constraints([Constraint::Min(7), Constraint::Length(4)])
         .split(body[0]);
     render_stage_table(frame, progress[0], state);
     render_scoring_progress(frame, progress[1], state);
@@ -741,12 +788,30 @@ fn render_scoring_progress(frame: &mut Frame<'_>, area: Rect, state: &TuiState) 
     let completed = state.scoring_completed_paths();
     let total = state.scoring_total_paths();
     let pending = state.scoring_pending_paths();
-    let mut line = render_scoring_progress_bar(completed, total, bar_width);
-    line.spans.push(Span::raw(format!(
+    let mut rough_line = render_scoring_progress_bar(completed, total, bar_width);
+    rough_line.spans.push(Span::raw(format!(
         " {completed}/{total} paths | pending {pending} | scored candidates {}",
         state.scored_paths()
     )));
-    let paragraph = Paragraph::new(vec![line]).block(
+
+    let full_completed = state.full_scoring_completed_paths();
+    let full_total = state.full_scoring_total_paths();
+    let full_pending = state.full_scoring_pending_paths();
+    let best_cycles = state
+        .best_full_estimated_cycles()
+        .map(format_score)
+        .unwrap_or_else(|| "none".to_owned());
+    let best_score = state
+        .best_full_score()
+        .map(format_score)
+        .unwrap_or_else(|| "none".to_owned());
+    let mut full_line = render_scoring_progress_bar(full_completed, full_total, bar_width);
+    full_line.spans.push(Span::raw(format!(
+        " full uiCA {full_completed}/{full_total} paths | pending {full_pending} | scored candidates {} | best cycles/tp {best_cycles} | best score {best_score}",
+        state.full_scored_paths()
+    )));
+
+    let paragraph = Paragraph::new(vec![rough_line, full_line]).block(
         Block::default()
             .title("Scoring Progress")
             .borders(Borders::ALL)
@@ -801,6 +866,14 @@ fn format_total_rate(rate: Option<f64>) -> String {
         format!("{rate:.0}/s")
     } else {
         format!("{:.1}k/s", rate / 1000.0)
+    }
+}
+
+fn format_score(score: f64) -> String {
+    if score.is_finite() {
+        format!("{score:.2}")
+    } else {
+        score.to_string()
     }
 }
 

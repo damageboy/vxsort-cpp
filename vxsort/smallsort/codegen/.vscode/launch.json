@@ -1,0 +1,178 @@
+{
+    // Requires the VSCode CodeLLDB extension: vadimcn.vscode-lldb.
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "vxsort_codegen solve AVX2/i64 small (debug, in-process)",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--package",
+                    "vxsort_codegen",
+                    "--bin",
+                    "vxsort_codegen"
+                ],
+                "filter": {
+                    "name": "vxsort_codegen",
+                    "kind": "bin"
+                }
+            },
+            "args": [
+                "solve",
+                "--vector-machine",
+                "AVX2",
+                "--datatype",
+                "i64",
+                "--max-waves",
+                "1",
+                "--wave-attempts",
+                "128",
+                "--wave-outputs",
+                "20",
+                "--retroactive-input",
+                "--workers",
+                "1",
+                "--worker-backend",
+                "in-process",
+                "--max-gadget-solutions",
+                "10",
+                "--output-path",
+                "${workspaceFolder}/debug-avx2-i64.json",
+                "--top-k",
+                "10",
+                "--target-cpu",
+                "SKL",
+                "--runtime-ui",
+                "none",
+                "--runtime-trace",
+                "${workspaceFolder}/debug-avx2-i64-trace.jsonl"
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "RUST_BACKTRACE": "1"
+            },
+            "sourceLanguages": [
+                "rust"
+            ],
+            "terminal": "integrated"
+        },
+        {
+            "name": "vxsort_codegen solve AVX2/i32 stress (release+debuginfo, process workers)",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--release",
+                    "--config",
+                    "profile.release.debug=2",
+                    "--package",
+                    "vxsort_codegen",
+                    "--bin",
+                    "vxsort_codegen"
+                ],
+                "filter": {
+                    "name": "vxsort_codegen",
+                    "kind": "bin"
+                }
+            },
+            "args": [
+                "solve",
+                "--vector-machine",
+                "AVX2",
+                "--datatype",
+                "i32",
+                "--wave-attempts",
+                "5000",
+                "--wave-outputs",
+                "100",
+                "--retroactive-input",
+                "--workers",
+                "64",
+                "--worker-backend",
+                "process",
+                "--max-gadget-solutions",
+                "50",
+                "--output-path",
+                "${workspaceFolder}/debug-avx2-i32.json",
+                "--top-k",
+                "10",
+                "--target-cpu",
+                "SKL",
+                "--runtime-ui",
+                "none",
+                "--runtime-trace",
+                "${workspaceFolder}/debug-avx2-i32-trace.jsonl"
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "RUST_BACKTRACE": "1"
+            },
+            "sourceLanguages": [
+                "rust"
+            ],
+            "terminal": "integrated"
+        },
+        {
+            "name": "vxsort_codegen estimate JSON (release+debuginfo)",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--release",
+                    "--config",
+                    "profile.release.debug=2",
+                    "--package",
+                    "vxsort_codegen",
+                    "--bin",
+                    "vxsort_codegen"
+                ],
+                "filter": {
+                    "name": "vxsort_codegen",
+                    "kind": "bin"
+                }
+            },
+            "args": [
+                "estimate",
+                "--input",
+                "${input:solutionJson}",
+                "--target-cpu",
+                "SKL",
+                "--uica-data-dir",
+                "${workspaceFolder}/uica-data",
+                "--top-k",
+                "10",
+                "--output-dir",
+                "${workspaceFolder}/debug-estimate"
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "RUST_BACKTRACE": "1"
+            },
+            "sourceLanguages": [
+                "rust"
+            ],
+            "terminal": "integrated"
+        },
+        {
+            "name": "Attach to vxsort_codegen or worker",
+            "type": "lldb",
+            "request": "attach",
+            "pid": "${command:pickProcess}",
+            "sourceLanguages": [
+                "rust"
+            ]
+        }
+    ],
+    "inputs": [
+        {
+            "id": "solutionJson",
+            "type": "promptString",
+            "description": "Solution JSON path",
+            "default": "${workspaceFolder}/debug-avx2-i32.json"
+        }
+    ]
+}

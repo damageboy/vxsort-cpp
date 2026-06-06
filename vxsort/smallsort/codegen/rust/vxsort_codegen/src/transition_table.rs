@@ -5,10 +5,14 @@ use std::{
 
 use gadget_synth::{PermutationGadget, VectorState};
 
+use crate::stable_vec::{StableVec, StableVecSnapshot};
+
 pub type LaneLabel = u8;
 /// Compatibility state representation used at import/export/verifier/comment boundaries.
 pub type StateTuple = (Vec<u64>, Vec<u64>);
 pub type TransitionKey = (StateTuple, StateTuple);
+pub type GadgetList = StableVec<PermutationGadget, 1, 16>;
+pub type GadgetListSnapshot = StableVecSnapshot<PermutationGadget, 1, 16>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct StateId(pub u32);
@@ -303,13 +307,38 @@ impl PathRegistry {
             .get(&transition)
             .unwrap_or(&self.empty_paths)
     }
+
+    pub fn indexed_transition_count(&self) -> usize {
+        self.paths_by_transition.len()
+    }
+
+    pub fn indexed_path_ref_count(&self) -> usize {
+        self.paths_by_transition
+            .values()
+            .map(|path_ids| path_ids.len())
+            .sum()
+    }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct TransitionRecord {
     input: StateId,
     output: StateId,
-    gadgets: Arc<Vec<PermutationGadget>>,
+    gadgets: Arc<GadgetList>,
+}
+
+impl Clone for TransitionRecord {
+    fn clone(&self) -> Self {
+        let gadgets = Arc::new(GadgetList::new());
+        for gadget in self.gadgets().iter().cloned() {
+            gadgets.push(gadget);
+        }
+        Self {
+            input: self.input,
+            output: self.output,
+            gadgets,
+        }
+    }
 }
 
 impl TransitionRecord {
@@ -321,12 +350,16 @@ impl TransitionRecord {
         self.output
     }
 
-    pub fn gadgets(&self) -> &[PermutationGadget] {
-        self.gadgets.as_slice()
+    pub fn gadgets(&self) -> GadgetListSnapshot {
+        self.gadgets.snapshot()
+    }
+
+    pub fn gadget_count(&self) -> usize {
+        self.gadgets.len()
     }
 
     pub fn gadget(&self, index: GadgetIndex) -> &PermutationGadget {
-        &self.gadgets[index.0 as usize]
+        self.gadgets.get(index.0 as usize)
     }
 }
 
@@ -391,6 +424,47 @@ impl StageData {
     pub fn unproductive_waves(&self) -> usize {
         self.unproductive_waves
     }
+
+    pub fn transition_count(&self) -> usize {
+        self.transitions.len()
+    }
+
+    pub fn total_gadget_count(&self) -> usize {
+        self.transitions
+            .iter()
+            .map(TransitionRecord::gadget_count)
+            .sum()
+    }
+
+    pub fn attempted_pair_count(&self) -> usize {
+        self.attempted_pairs.len()
+    }
+
+    pub fn forwarded_output_count(&self) -> usize {
+        self.forwarded_outputs.len()
+    }
+
+    pub fn transitions_by_input_entry_count(&self) -> usize {
+        self.transitions_by_input.len()
+    }
+
+    pub fn transitions_by_input_ref_count(&self) -> usize {
+        self.transitions_by_input
+            .values()
+            .map(|transitions| transitions.len())
+            .sum()
+    }
+
+    pub fn transitions_by_output_entry_count(&self) -> usize {
+        self.transitions_by_output.len()
+    }
+
+    pub fn transitions_by_output_ref_count(&self) -> usize {
+        self.transitions_by_output
+            .values()
+            .map(|transitions| transitions.len())
+            .sum()
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -400,14 +474,14 @@ pub struct TransitionTable {
 }
 
 #[derive(Debug)]
-pub struct ResolvedPathStep<'a> {
+pub struct ResolvedPathStep {
     pub stage: usize,
     pub transition: TransitionRef,
     pub input: StateId,
     pub output: StateId,
     pub input_state: StateTuple,
     pub output_state: StateTuple,
-    pub gadgets: &'a [PermutationGadget],
+    pub gadgets: GadgetListSnapshot,
 }
 
 impl TransitionTable {
@@ -484,7 +558,7 @@ impl TransitionTable {
         &self.stages[usize::from(reference.stage)].transitions[reference.transition.0 as usize]
     }
 
-    pub fn transition_gadgets(&self, reference: TransitionRef) -> &[PermutationGadget] {
+    pub fn transition_gadgets(&self, reference: TransitionRef) -> GadgetListSnapshot {
         self.transition(reference).gadgets()
     }
 
@@ -557,6 +631,7 @@ impl TransitionTable {
             let record = &mut stage_data.transitions[transition.0 as usize];
             if let Some(existing_index) = record
                 .gadgets
+                .snapshot()
                 .iter()
                 .position(|existing| existing == &gadget)
             {
@@ -582,7 +657,7 @@ impl TransitionTable {
                     .try_into()
                     .expect("gadget index should fit in u16"),
             );
-            Arc::make_mut(&mut record.gadgets).push(gadget);
+            record.gadgets.push(gadget);
             stage_data.dirty = true;
             return TransitionInsertResult {
                 transition: TransitionRef {
@@ -605,7 +680,11 @@ impl TransitionTable {
         stage_data.transitions.push(TransitionRecord {
             input,
             output,
-            gadgets: Arc::new(vec![gadget]),
+            gadgets: {
+                let gadgets = Arc::new(GadgetList::new());
+                gadgets.push(gadget);
+                gadgets
+            },
         });
         stage_data
             .transition_by_pair
@@ -746,7 +825,7 @@ impl TransitionTable {
             let record = &self.stages[stage].transitions[transition.0 as usize];
             transitions.insert(
                 self.state_as_zero_based_tuple(record.output),
-                record.gadgets.as_ref().clone(),
+                record.gadgets().to_vec(),
             );
         }
         transitions
@@ -765,7 +844,7 @@ impl TransitionTable {
                         self.state_as_zero_based_tuple(record.input),
                         self.state_as_zero_based_tuple(record.output),
                     ),
-                    record.gadgets.as_ref().clone(),
+                    record.gadgets().to_vec(),
                 )
             })
             .collect()
@@ -1182,7 +1261,7 @@ impl TransitionTable {
         }
     }
 
-    pub fn resolve_complete_path(&self, path: &CompletePath) -> Vec<ResolvedPathStep<'_>> {
+    pub fn resolve_complete_path(&self, path: &CompletePath) -> Vec<ResolvedPathStep> {
         path.iter()
             .map(|(stage, transition)| {
                 let reference = TransitionRef {

@@ -3,9 +3,13 @@ use std::collections::{BinaryHeap, HashSet};
 
 use gadget_synth::PermutationGadget;
 
-use crate::transition_table::{CompletePath, GadgetIndex, TransitionRef, TransitionTable};
+use crate::transition_table::{
+    CompletePath, GadgetIndex, GadgetListSnapshot, StateTuple, TransitionRef, TransitionTable,
+};
 
 pub type AssignedPathKey = Vec<(TransitionRef, GadgetIndex)>;
+
+const K_BEST_TIE_EXPANSION_FACTOR: usize = 10;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct GadgetCost {
@@ -122,7 +126,101 @@ impl AssignedPath {
     }
 }
 
-pub trait Scorer: Send {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PathScoringStep {
+    stage: usize,
+    transition: TransitionRef,
+    input: StateTuple,
+    output: StateTuple,
+    gadgets: GadgetListSnapshot,
+}
+
+impl PathScoringStep {
+    pub fn new(
+        stage: usize,
+        transition: TransitionRef,
+        input: StateTuple,
+        output: StateTuple,
+        gadgets: GadgetListSnapshot,
+    ) -> Self {
+        Self {
+            stage,
+            transition,
+            input,
+            output,
+            gadgets,
+        }
+    }
+
+    pub fn stage(&self) -> usize {
+        self.stage
+    }
+
+    pub fn transition(&self) -> TransitionRef {
+        self.transition
+    }
+
+    pub fn input(&self) -> &StateTuple {
+        &self.input
+    }
+
+    pub fn output(&self) -> &StateTuple {
+        &self.output
+    }
+
+    pub fn gadgets(&self) -> &GadgetListSnapshot {
+        &self.gadgets
+    }
+
+    pub fn gadget(&self, index: GadgetIndex) -> &PermutationGadget {
+        self.gadgets.get(index.0 as usize)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PathScoringSnapshot {
+    path: CompletePath,
+    steps: Vec<PathScoringStep>,
+}
+
+impl PathScoringSnapshot {
+    pub fn new(path: CompletePath, steps: Vec<PathScoringStep>) -> Self {
+        Self { path, steps }
+    }
+
+    pub fn from_table(path: &CompletePath, table: &TransitionTable) -> Self {
+        let steps = path
+            .iter()
+            .map(|(stage, transition)| {
+                let transition_ref = TransitionRef {
+                    stage: stage
+                        .try_into()
+                        .expect("stage index should fit in transition ref"),
+                    transition,
+                };
+                let record = table.transition(transition_ref);
+                PathScoringStep::new(
+                    stage,
+                    transition_ref,
+                    table.state_as_zero_based_tuple(record.input()),
+                    table.state_as_zero_based_tuple(record.output()),
+                    record.gadgets(),
+                )
+            })
+            .collect();
+        Self::new(path.clone(), steps)
+    }
+
+    pub fn path(&self) -> &CompletePath {
+        &self.path
+    }
+
+    pub fn steps(&self) -> &[PathScoringStep] {
+        &self.steps
+    }
+}
+
+pub trait Scorer: Send + Sync {
     fn score_gadget(&self, gadget: &PermutationGadget) -> GadgetCost;
 
     fn assign_path_gadgets(
@@ -163,23 +261,26 @@ pub trait Scorer: Send {
         table: &TransitionTable,
         limit: usize,
     ) -> Vec<AssignedPath> {
+        let snapshot = PathScoringSnapshot::from_table(path, table);
+        self.assign_path_gadgets_k_best_snapshot(&snapshot, limit)
+    }
+
+    fn assign_path_gadgets_k_best_snapshot(
+        &self,
+        snapshot: &PathScoringSnapshot,
+        limit: usize,
+    ) -> Vec<AssignedPath> {
         if limit == 0 {
             return Vec::new();
         }
-        if path.is_empty() {
+        if snapshot.path().is_empty() {
             return vec![AssignedPath::new(CompletePath::new(Vec::new()), Vec::new())];
         }
 
-        let mut choices = Vec::with_capacity(path.len());
-        for (stage, transition) in path.iter() {
-            let transition_ref = TransitionRef {
-                stage: stage
-                    .try_into()
-                    .expect("stage index should fit in transition ref"),
-                transition,
-            };
-            let mut scored = table
-                .transition_gadgets(transition_ref)
+        let mut choices = Vec::with_capacity(snapshot.path().len());
+        for step in snapshot.steps() {
+            let mut scored = step
+                .gadgets()
                 .iter()
                 .enumerate()
                 .map(|(gadget_index, gadget)| {
@@ -217,10 +318,21 @@ pub trait Scorer: Send {
         });
 
         let mut next_serial = 1;
+        let max_assigned = limit.saturating_mul(K_BEST_TIE_EXPANSION_FACTOR).max(limit);
+        let mut cutoff_score = None;
         let mut assigned = Vec::with_capacity(limit);
         while let Some(entry) = heap.pop() {
-            assigned.push(build_assignment(path, &choices, &entry.indices));
-            if assigned.len() >= limit {
+            if let Some(cutoff_score) = cutoff_score
+                && entry.score.total_cmp(&cutoff_score).is_gt()
+            {
+                break;
+            }
+            assigned.push(build_assignment(snapshot.path(), &choices, &entry.indices));
+
+            if assigned.len() >= limit && cutoff_score.is_none() {
+                cutoff_score = Some(entry.score);
+            }
+            if assigned.len() >= max_assigned {
                 break;
             }
 
@@ -248,6 +360,29 @@ pub trait Scorer: Send {
         assigned_path: &AssignedPath,
         table: &TransitionTable,
     ) -> PathCost;
+
+    fn score_assigned_path_snapshot(
+        &self,
+        assigned_path: &AssignedPath,
+        snapshot: &PathScoringSnapshot,
+    ) -> PathCost {
+        let instruction_count = snapshot
+            .steps()
+            .iter()
+            .zip(assigned_path.gadgets())
+            .map(|(step, gadget_index)| {
+                self.score_gadget(step.gadget(*gadget_index))
+                    .instruction_count()
+            })
+            .sum();
+        let score = snapshot
+            .steps()
+            .iter()
+            .zip(assigned_path.gadgets())
+            .map(|(step, gadget_index)| self.score_gadget(step.gadget(*gadget_index)).score())
+            .sum();
+        PathCost::new(instruction_count, score, score)
+    }
 
     fn score_path(&self, path: &CompletePath, table: &TransitionTable) -> PathCost {
         self.assign_path_gadgets(path, table)
@@ -339,6 +474,23 @@ impl Scorer for DummyScorer {
                     transition,
                 };
                 self.score_gadget(table.transition(transition_ref).gadget(*gadget_index))
+                    .instruction_count()
+            })
+            .sum();
+        PathCost::new(instruction_count, 10.0, 10.0)
+    }
+
+    fn score_assigned_path_snapshot(
+        &self,
+        assigned_path: &AssignedPath,
+        snapshot: &PathScoringSnapshot,
+    ) -> PathCost {
+        let instruction_count = snapshot
+            .steps()
+            .iter()
+            .zip(assigned_path.gadgets())
+            .map(|(step, gadget_index)| {
+                self.score_gadget(step.gadget(*gadget_index))
                     .instruction_count()
             })
             .sum();

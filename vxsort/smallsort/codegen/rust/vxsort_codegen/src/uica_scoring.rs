@@ -3,8 +3,8 @@ use std::fs;
 use std::path::Path;
 
 use uica_core::{
-    InstructionPortUsage, SimulationInput, SimulationOptions, SimulationRequest, UipackSource,
-    compute_issue_limit, compute_port_usage_limit, get_micro_arch,
+    SimulationInput, SimulationOptions, SimulationRequest, UipackSource, compute_issue_limit,
+    get_micro_arch,
 };
 use uica_data::{
     DataPackManifest, InstructionRecord, MappedUiPackRuntime, load_manifest_runtime,
@@ -14,9 +14,11 @@ use uica_decode_ir::DecodedInstruction;
 use uica_model::{Invocation, ReportBundle};
 
 use crate::instruction_stream::{InstructionBlock, ModeledInstruction, Operand, Register};
-use crate::instruction_stream::{LoweringOptions, lower_assigned_paths};
+use crate::instruction_stream::{
+    LoweringOptions, lower_assigned_path_snapshot, lower_assigned_paths,
+};
 use crate::json_exporter::SolutionJsonMetadata;
-use crate::scoring::{AssignedPath, GadgetCost, PathCost, Scorer};
+use crate::scoring::{AssignedPath, GadgetCost, PathCost, PathScoringSnapshot, Scorer};
 use crate::transition_table::{TransitionRef, TransitionTable};
 
 pub struct UiPackScorer {
@@ -99,7 +101,7 @@ impl UiPackScorer {
     pub fn rough_score_block(&self, block: &InstructionBlock) -> PathCost {
         let mut instruction_count = 0;
         let mut retire_slots = 0;
-        let mut port_inputs = Vec::new();
+        let mut port_usage = Vec::new();
 
         for instruction in &block.instructions {
             if instruction.mnemonic.is_empty() {
@@ -113,14 +115,11 @@ impl UiPackScorer {
                 return PathCost::new(instruction_count, f64::INFINITY, f64::INFINITY);
             };
             retire_slots += record.perf.retire_slots.max(1);
-            port_inputs.push(InstructionPortUsage {
-                port_data: record.perf.ports.clone(),
-                uops: record.perf.uops.max(0),
-            });
+            add_port_usage(&mut port_usage, &record.perf.ports);
         }
 
         let issue = compute_issue_limit(retire_slots, self.issue_width);
-        let ports = compute_port_usage_limit(&port_inputs);
+        let ports = compute_aggregated_port_usage_limit(&port_usage);
         let score = issue.max(ports);
         PathCost::new(instruction_count, score, score)
     }
@@ -259,7 +258,7 @@ impl Scorer for UiPackScorer {
         let instruction_count =
             gadget.top_instructions().len() + gadget.bottom_instructions().len();
         let mut retire_slots = 0;
-        let mut port_inputs = Vec::new();
+        let mut port_usage = Vec::new();
         let mut synthetic_unknowns = 0;
 
         for instruction in gadget
@@ -289,14 +288,11 @@ impl Scorer for UiPackScorer {
                 );
             };
             retire_slots += record.perf.retire_slots.max(1);
-            port_inputs.push(InstructionPortUsage {
-                port_data: record.perf.ports.clone(),
-                uops: record.perf.uops.max(0),
-            });
+            add_port_usage(&mut port_usage, &record.perf.ports);
         }
 
         let issue = compute_issue_limit(retire_slots, self.issue_width);
-        let ports = compute_port_usage_limit(&port_inputs);
+        let ports = compute_aggregated_port_usage_limit(&port_usage);
         let score = if synthetic_unknowns == instruction_count {
             synthetic_unknowns as f64
         } else {
@@ -356,6 +352,88 @@ impl Scorer for UiPackScorer {
             .sum();
         PathCost::new(instruction_count, score, score)
     }
+
+    fn score_assigned_path_snapshot(
+        &self,
+        assigned_path: &AssignedPath,
+        snapshot: &PathScoringSnapshot,
+    ) -> PathCost {
+        if let Some(metadata) = &self.solution_metadata {
+            let block = lower_assigned_path_snapshot(
+                metadata,
+                snapshot,
+                assigned_path,
+                LoweringOptions {
+                    include_comments: false,
+                },
+            );
+            return self.rough_score_block(&block);
+        }
+
+        let instruction_count = snapshot
+            .steps()
+            .iter()
+            .zip(assigned_path.gadgets())
+            .map(|(step, gadget_index)| {
+                self.score_gadget(step.gadget(*gadget_index))
+                    .instruction_count()
+            })
+            .sum();
+        let score = snapshot
+            .steps()
+            .iter()
+            .zip(assigned_path.gadgets())
+            .map(|(step, gadget_index)| self.score_gadget(step.gadget(*gadget_index)).score())
+            .sum();
+        PathCost::new(instruction_count, score, score)
+    }
+}
+
+fn add_port_usage(port_usage: &mut Vec<(u128, i32)>, port_data: &BTreeMap<String, i32>) {
+    for (ports, n_uops) in port_data {
+        let port_set = normalize_port_mask(ports);
+        if port_set == 0 {
+            continue;
+        }
+
+        if let Some((_, total)) = port_usage.iter_mut().find(|(set, _)| *set == port_set) {
+            *total += *n_uops;
+        } else {
+            port_usage.push((port_set, *n_uops));
+        }
+    }
+}
+
+fn compute_aggregated_port_usage_limit(port_usage: &[(u128, i32)]) -> f64 {
+    if port_usage.is_empty() {
+        return 0.0;
+    }
+
+    let mut limit: f64 = 0.0;
+    for (left_set, _) in port_usage {
+        for (right_set, _) in port_usage {
+            let candidate = left_set | right_set;
+            if candidate == 0 {
+                continue;
+            }
+
+            let total_uops: i32 = port_usage
+                .iter()
+                .filter(|(set, _)| (*set & !candidate) == 0)
+                .map(|(_, n_uops)| *n_uops)
+                .sum();
+            limit = limit.max(total_uops as f64 / candidate.count_ones() as f64);
+        }
+    }
+
+    limit
+}
+
+fn normalize_port_mask(ports: &str) -> u128 {
+    ports
+        .bytes()
+        .filter(|byte| byte.is_ascii() && !byte.is_ascii_whitespace())
+        .fold(0_u128, |mask, byte| mask | (1_u128 << u32::from(byte)))
 }
 
 pub fn uops_key_for_instruction(instruction: &ModeledInstruction) -> Option<String> {

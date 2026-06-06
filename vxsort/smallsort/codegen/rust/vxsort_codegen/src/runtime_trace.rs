@@ -7,6 +7,44 @@ use std::{
 
 use serde_json::{Map, Value, json};
 
+/// Emits a runtime trace event only when tracing is enabled.
+///
+/// The macro deliberately guards the `json!` construction so expensive field
+/// expressions are not evaluated for normal runs without a runtime trace.
+///
+/// Use the guarded form when a call site has an additional sampling/detail
+/// condition:
+///
+/// ```ignore
+/// trace!(trace, "wave_started", { "wave": wave });
+/// trace!(trace, if should_sample(order), "scoring_job", { "order": order });
+/// ```
+#[macro_export]
+macro_rules! trace {
+    ($trace:expr, if $guard:expr, $event:literal, [ $($prep:stmt;)* ], { $($fields:tt)* }) => {{
+        if ($guard) && $trace.is_enabled() {
+            $($prep)*
+            $trace.event($event, ::serde_json::json!({ $($fields)* }));
+        }
+    }};
+    ($trace:expr, $event:literal, [ $($prep:stmt;)* ], { $($fields:tt)* }) => {{
+        if $trace.is_enabled() {
+            $($prep)*
+            $trace.event($event, ::serde_json::json!({ $($fields)* }));
+        }
+    }};
+    ($trace:expr, if $guard:expr, $event:literal, { $($fields:tt)* }) => {{
+        if ($guard) && $trace.is_enabled() {
+            $trace.event($event, ::serde_json::json!({ $($fields)* }));
+        }
+    }};
+    ($trace:expr, $event:literal, { $($fields:tt)* }) => {{
+        if $trace.is_enabled() {
+            $trace.event($event, ::serde_json::json!({ $($fields)* }));
+        }
+    }};
+}
+
 pub struct RuntimeTrace {
     writer: Option<LineWriter<File>>,
     started_at: Instant,

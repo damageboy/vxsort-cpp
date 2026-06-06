@@ -12,6 +12,22 @@ use crate::transition_table::StageStats;
 
 const LINE_STAGE_UPDATE_INTERVAL: usize = 250;
 
+/// Point-in-time progress for one synthesis stage.
+///
+/// The wave engine emits this snapshot through [`RuntimeEvent::StageUpdated`]
+/// whenever stage-local synthesis state changes. Counters are cumulative for
+/// the stage within the current run: `attempts` is the number of candidate
+/// synthesis jobs applied to the transition table, `distinct_outputs` is the
+/// number of unique states produced by this stage, and `transition_count` /
+/// `total_gadgets` describe the current transition-table contents for the
+/// stage.
+///
+/// Worker fields describe scheduler state at the instant the snapshot was
+/// captured. They are especially useful when diagnosing process-backed worker
+/// under-utilization: `active_workers` is the number of workers currently
+/// holding jobs, `worker_capacity` is the configured worker capacity for this
+/// stage, and `queued_jobs` is the amount of synthesis work known to the
+/// coordinator.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StageProgressSnapshot {
     stage: usize,
@@ -26,6 +42,13 @@ pub struct StageProgressSnapshot {
 }
 
 impl StageProgressSnapshot {
+    /// Builds a snapshot from stage statistics without explicit scheduler
+    /// state.
+    ///
+    /// The progress denominator is inferred from whichever of attempts or
+    /// distinct outputs is larger. Prefer [`Self::with_progress_total`] or
+    /// [`Self::with_worker_state`] when the caller knows the intended progress
+    /// denominator.
     pub fn new(stage: usize, stats: StageStats) -> Self {
         Self::with_progress_total(
             stage,
@@ -34,10 +57,20 @@ impl StageProgressSnapshot {
         )
     }
 
+    /// Builds a snapshot with an explicit progress denominator.
+    ///
+    /// `progress_total` is clamped up to at least the current attempts and
+    /// distinct-output count, so renderers can safely display `attempts /
+    /// progress_total` without showing impossible over-complete progress.
     pub fn with_progress_total(stage: usize, stats: StageStats, progress_total: usize) -> Self {
         Self::with_worker_state(stage, stats, progress_total, 0, 0, 0)
     }
 
+    /// Builds a snapshot with explicit scheduler state.
+    ///
+    /// This is the normal constructor used by the wave engine while synthesis
+    /// workers are running. The worker counters are sampled values, not
+    /// cumulative totals.
     pub fn with_worker_state(
         stage: usize,
         stats: StageStats,
@@ -61,43 +94,63 @@ impl StageProgressSnapshot {
         }
     }
 
+    /// Zero-based synthesis stage index.
     pub fn stage(&self) -> usize {
         self.stage
     }
 
+    /// Number of candidate synthesis jobs applied to this stage so far.
     pub fn attempts(&self) -> usize {
         self.attempts
     }
 
+    /// Number of unique output states discovered at this stage.
     pub fn distinct_outputs(&self) -> usize {
         self.distinct_outputs
     }
 
+    /// Number of distinct `(input_state, output_state)` transitions at this
+    /// stage.
     pub fn transition_count(&self) -> usize {
         self.transition_count
     }
 
+    /// Total number of concrete gadgets stored across this stage's
+    /// transitions.
     pub fn total_gadgets(&self) -> usize {
         self.total_gadgets
     }
 
+    /// Denominator used by progress renderers for this stage.
+    ///
+    /// This is usually the number of known synthesis jobs for the current pass,
+    /// but it is always at least the current attempts and output counts.
     pub fn progress_total(&self) -> usize {
         self.progress_total
     }
 
+    /// Workers currently executing synthesis jobs for this stage.
     pub fn active_workers(&self) -> usize {
         self.active_workers
     }
 
+    /// Configured worker capacity available to this stage.
     pub fn worker_capacity(&self) -> usize {
         self.worker_capacity
     }
 
+    /// Known synthesis jobs waiting or in flight for this stage.
     pub fn queued_jobs(&self) -> usize {
         self.queued_jobs
     }
 }
 
+/// Progress for asynchronous rough scoring.
+///
+/// Rough scoring is the cheap, online pruning phase that runs while synthesis
+/// discovers complete paths. A "path" in this snapshot is a transition-table
+/// path submitted for rough scoring; one path may produce multiple scored
+/// candidates when equal-cost or near-tie gadget assignments are expanded.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScoringProgressSnapshot {
     completed_paths: usize,
@@ -107,6 +160,11 @@ pub struct ScoringProgressSnapshot {
 }
 
 impl ScoringProgressSnapshot {
+    /// Builds a rough-scoring progress snapshot.
+    ///
+    /// `total_paths` is clamped to at least `completed_paths + pending_paths`
+    /// because new complete paths can be discovered while scoring is already
+    /// running.
     pub fn new(
         completed_paths: usize,
         total_paths: usize,
@@ -121,39 +179,135 @@ impl ScoringProgressSnapshot {
         }
     }
 
+    /// Number of submitted path-scoring jobs whose results have been applied.
     pub fn completed_paths(&self) -> usize {
         self.completed_paths
     }
 
+    /// Current denominator for submitted plus known rough-scoring path work.
     pub fn total_paths(&self) -> usize {
         self.total_paths
     }
 
+    /// Path-scoring jobs waiting to be submitted or waiting for a result.
     pub fn pending_paths(&self) -> usize {
         self.pending_paths
     }
 
+    /// Number of scored candidate assignments retained by rough scoring.
     pub fn scored_paths(&self) -> usize {
         self.scored_paths
     }
 }
 
+/// Progress for live full uiCA scoring after rough pruning.
+///
+/// This snapshot tracks the expensive scoring phase that evaluates rough
+/// survivors with uiCA. It exists separately from [`ScoringProgressSnapshot`]
+/// because full scoring has a different cost model, a different candidate set,
+/// and exposes the best full-score/cycles estimate found so far.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FullScoringProgressSnapshot {
+    completed_paths: usize,
+    total_paths: usize,
+    pending_paths: usize,
+    scored_paths: usize,
+    best_score: Option<f64>,
+    best_estimated_cycles: Option<f64>,
+}
+
+impl FullScoringProgressSnapshot {
+    /// Builds a live full-scoring progress snapshot.
+    ///
+    /// `total_paths` is clamped to at least `completed_paths + pending_paths`
+    /// for the same reason as rough scoring: the producer can discover and
+    /// enqueue additional candidates while scoring workers are active.
+    pub fn new(
+        completed_paths: usize,
+        total_paths: usize,
+        pending_paths: usize,
+        scored_paths: usize,
+        best_score: Option<f64>,
+        best_estimated_cycles: Option<f64>,
+    ) -> Self {
+        Self {
+            completed_paths,
+            total_paths: total_paths.max(completed_paths + pending_paths),
+            pending_paths,
+            scored_paths,
+            best_score,
+            best_estimated_cycles,
+        }
+    }
+
+    /// Number of full-scoring jobs whose results have been applied.
+    pub fn completed_paths(&self) -> usize {
+        self.completed_paths
+    }
+
+    /// Current denominator for known full-scoring work.
+    pub fn total_paths(&self) -> usize {
+        self.total_paths
+    }
+
+    /// Full-scoring jobs waiting to be submitted or waiting for a result.
+    pub fn pending_paths(&self) -> usize {
+        self.pending_paths
+    }
+
+    /// Number of fully scored candidates available to the top-k reducer.
+    pub fn scored_paths(&self) -> usize {
+        self.scored_paths
+    }
+
+    /// Best full-score value observed so far, if any candidate has completed.
+    pub fn best_score(&self) -> Option<f64> {
+        self.best_score
+    }
+
+    /// Best uiCA cycles/throughput estimate observed so far, if available.
+    pub fn best_estimated_cycles(&self) -> Option<f64> {
+        self.best_estimated_cycles
+    }
+}
+
+/// Runtime notification emitted by the solver pipeline.
+///
+/// Runtime events are the boundary between the core solver and presentation
+/// layers such as line logging, the TUI, tests, and trace-oriented tooling.
+/// Events are intentionally higher-level than internal trace JSON events:
+/// they describe the user-visible phase of a solve, progress snapshots for
+/// synthesis and scoring, and export milestones.
+///
+/// The rough-search phase is driven by waves of Z3 synthesis work. Complete
+/// paths discovered during that phase can be rough-scored asynchronously via
+/// [`RuntimeEvent::ScoringProgress`]. After rough search finishes, the final
+/// uiCA phase emits the `FullScoring*` events and may also emit
+/// [`RuntimeEvent::LiveFullScoringProgress`] while live full scoring runs
+/// concurrently with late rough-scoring results.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RuntimeEvent {
-    RunStarted {
-        stage_count: usize,
-    },
+    /// A solver run has started and initialized `stage_count` synthesis stages.
+    RunStarted { stage_count: usize },
+    /// Work for one target CPU has started.
+    ///
+    /// Multi-target runs emit this once per CPU. `rough_candidate_limit` is
+    /// the expanded top-k used for rough pruning before final scoring trims to
+    /// `final_top_k`.
     TargetStarted {
         target_cpu: String,
         rough_candidate_limit: usize,
         final_top_k: usize,
     },
-    WaveStarted {
-        wave: usize,
-        target_stage: usize,
-    },
+    /// A synthesis wave has started and will prioritize `target_stage`.
+    WaveStarted { wave: usize, target_stage: usize },
+    /// Updated synthesis progress for a single stage.
     StageUpdated(StageProgressSnapshot),
+    /// Updated progress for asynchronous rough scoring.
     ScoringProgress(ScoringProgressSnapshot),
+    /// Updated progress for live full uiCA scoring.
+    LiveFullScoringProgress(FullScoringProgressSnapshot),
+    /// A synthesis wave has finished applying its generated worker results.
     WaveFinished {
         wave: usize,
         target_stage: usize,
@@ -163,6 +317,10 @@ pub enum RuntimeEvent {
         discovered_paths: usize,
         scored_paths: usize,
     },
+    /// Rough search for a target CPU has finished.
+    ///
+    /// This event summarizes synthesis waves and rough-scored candidates before
+    /// final uiCA scoring begins.
     RoughSearchFinished {
         target_cpu: String,
         wave_count: usize,
@@ -170,39 +328,49 @@ pub enum RuntimeEvent {
         rough_candidate_count: usize,
         best_rough_score: Option<f64>,
     },
+    /// Final uiCA scoring has started for the rough-pruned candidate set.
     FullScoringStarted {
         target_cpu: String,
         candidate_count: usize,
         final_top_k: usize,
     },
+    /// A specific final-scoring candidate is about to be evaluated.
     FullScoringCandidateStarted {
         target_cpu: String,
         candidate_index: usize,
         candidate_count: usize,
         rough_score: f64,
     },
+    /// Synchronous final-scoring progress update.
+    ///
+    /// Live/asynchronous full scoring uses
+    /// [`RuntimeEvent::LiveFullScoringProgress`] instead.
     FullScoringProgress {
         target_cpu: String,
         scored_count: usize,
         candidate_count: usize,
         best_score: Option<f64>,
     },
+    /// Final uiCA scoring has finished and the best candidates have been kept.
     FullScoringFinished {
         target_cpu: String,
         scored_count: usize,
         kept_count: usize,
         best_score: Option<f64>,
     },
+    /// Writing an output artifact has started.
     ExportStarted {
         target_cpu: String,
         kind: String,
         path: String,
     },
+    /// Writing an output artifact has completed.
     ExportFinished {
         target_cpu: String,
         kind: String,
         path: String,
     },
+    /// The full run has completed.
     RunFinished {
         wave_count: usize,
         search_exhausted: bool,
@@ -211,14 +379,24 @@ pub enum RuntimeEvent {
     },
 }
 
+/// Consumer interface for runtime progress events.
+///
+/// The solver takes a mutable [`RuntimeSession`] rather than hard-coding a UI.
+/// Implementations can ignore events, print line-oriented logs, forward events
+/// to a TUI thread, or record them in tests. `should_stop` is polled by the
+/// solver so interactive sessions can request cooperative cancellation.
 pub trait RuntimeSession {
+    /// Handles one runtime event emitted by the solver.
     fn on_event(&mut self, event: RuntimeEvent);
 
+    /// Returns whether the solver should stop at the next cooperative
+    /// cancellation point.
     fn should_stop(&self) -> bool {
         false
     }
 }
 
+/// Runtime session that discards all events and never cancels.
 #[derive(Default)]
 pub struct NullRuntimeSession;
 
@@ -232,6 +410,10 @@ pub struct ChannelRuntimeSession {
 }
 
 impl ChannelRuntimeSession {
+    /// Creates a session that forwards events over `sender`.
+    ///
+    /// `cancel_flag` is shared with the UI/controller thread and is read by
+    /// [`RuntimeSession::should_stop`].
     pub fn new(sender: Sender<RuntimeEvent>, cancel_flag: Arc<AtomicBool>) -> Self {
         Self {
             sender,
@@ -250,6 +432,10 @@ impl RuntimeSession for ChannelRuntimeSession {
     }
 }
 
+/// Runtime session that writes human-readable progress lines to a writer.
+///
+/// This is the non-interactive logging implementation. It coalesces frequent
+/// stage updates so stdout does not dominate long synthesis runs.
 pub struct LineRuntimeSession<W: Write> {
     writer: W,
     last_stage_attempts: BTreeMap<usize, usize>,
@@ -352,6 +538,23 @@ impl<W: Write> RuntimeSession for LineRuntimeSession<W> {
             RuntimeEvent::ScoringProgress(snapshot) => {
                 self.write_line(format!(
                     "runtime: rough scoring paths {}/{} pending {} scored candidates {}",
+                    snapshot.completed_paths(),
+                    snapshot.total_paths(),
+                    snapshot.pending_paths(),
+                    snapshot.scored_paths()
+                ));
+            }
+            RuntimeEvent::LiveFullScoringProgress(snapshot) => {
+                let best_score = snapshot
+                    .best_score()
+                    .map(|score| score.to_string())
+                    .unwrap_or_else(|| "none".to_owned());
+                let best_cycles = snapshot
+                    .best_estimated_cycles()
+                    .map(|cycles| cycles.to_string())
+                    .unwrap_or_else(|| "none".to_owned());
+                self.write_line(format!(
+                    "runtime: live full scoring paths {}/{} pending {} scored candidates {}, best score {best_score}, best cycles/tp {best_cycles}",
                     snapshot.completed_paths(),
                     snapshot.total_paths(),
                     snapshot.pending_paths(),

@@ -7,7 +7,9 @@ use gadget_synth::{InstructionArg, InstructionSpec, PermutationGadget};
 use serde_json::{Map, Value, json};
 
 use crate::scoring::AssignedPath;
-use crate::transition_table::{CompletePath, StateTuple, TransitionRef, TransitionTable};
+use crate::transition_table::{
+    CompletePath, GadgetIndex, StateTuple, TransitionRef, TransitionTable,
+};
 use crate::{ArchArg, DTypeArg};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -118,6 +120,7 @@ pub fn solution_json_for_assigned_paths(
     let mut node_order = Vec::<StepKey>::new();
     let mut children = BTreeMap::<StepKey, BTreeSet<String>>::new();
     let mut node_gadgets = BTreeMap::<StepKey, Vec<PermutationGadget>>::new();
+    let mut node_gadget_indices = BTreeMap::<(StepKey, GadgetIndex), usize>::new();
     let mut root_ids = Vec::new();
 
     for path in paths {
@@ -126,12 +129,18 @@ pub fn solution_json_for_assigned_paths(
         }
 
         let keys = assigned_path_keys(table, path);
-        for (key, gadget) in &keys {
+        for (key, original_gadget_index, gadget) in &keys {
             ensure_node_id(key, &mut node_ids, &mut node_order);
             let gadgets = node_gadgets.entry(key.clone()).or_default();
-            if !gadgets.contains(gadget) {
+            let exported_gadget_index = gadgets.iter().position(|existing| existing == *gadget);
+            let exported_gadget_index = if let Some(index) = exported_gadget_index {
+                index
+            } else {
                 gadgets.push((*gadget).clone());
-            }
+                gadgets.len() - 1
+            };
+            node_gadget_indices
+                .insert((key.clone(), *original_gadget_index), exported_gadget_index);
         }
 
         root_ids.push(
@@ -185,9 +194,13 @@ pub fn solution_json_for_assigned_paths(
                     let node_id = node_ids
                         .get(&key)
                         .expect("assigned path step should have a node id");
+                    let exported_gadget_index = node_gadget_indices
+                        .get(&(key, *gadget_index))
+                        .copied()
+                        .expect("assigned path step should have an exported gadget index");
                     json!({
                         "node_id": node_id,
-                        "gadget_index": gadget_index.0,
+                        "gadget_index": exported_gadget_index,
                     })
                 })
                 .collect::<Vec<_>>();
@@ -256,7 +269,7 @@ fn complete_path_keys(
 fn assigned_path_keys<'a>(
     table: &'a TransitionTable,
     path: &'a AssignedPath,
-) -> Vec<(StepKey, &'a PermutationGadget)> {
+) -> Vec<(StepKey, GadgetIndex, &'a PermutationGadget)> {
     path.path()
         .iter()
         .zip(path.gadgets())
@@ -269,6 +282,7 @@ fn assigned_path_keys<'a>(
             };
             (
                 step_key_for_transition(table, transition_ref),
+                *gadget_index,
                 table.transition(transition_ref).gadget(*gadget_index),
             )
         })

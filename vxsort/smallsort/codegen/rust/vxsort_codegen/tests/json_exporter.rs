@@ -7,7 +7,7 @@ use vxsort_codegen::json_exporter::{
 };
 use vxsort_codegen::scoring::AssignedPath;
 use vxsort_codegen::transition_table::{GadgetIndex, TransitionTable};
-use vxsort_codegen::{ArchArg, DTypeArg};
+use vxsort_codegen::{ArchArg, DTypeArg, solution_json_from_value};
 
 fn state(top: &[u64], bottom: &[u64]) -> VectorState {
     VectorState::new(top.to_vec(), bottom.to_vec())
@@ -126,5 +126,44 @@ fn assigned_solution_json_records_concrete_gadget_indices() {
             {"steps": [{"node_id": "n0", "gadget_index": 0}]},
             {"steps": [{"node_id": "n0", "gadget_index": 1}]}
         ])
+    );
+}
+
+#[test]
+fn assigned_solution_json_remaps_pruned_gadget_indices() {
+    let input = state(&[0, 2, 4, 6], &[1, 3, 5, 7]);
+    let output = state(&[0, 1, 4, 5], &[2, 3, 6, 7]);
+    let identity = PermutationGadget::new(Vec::new(), Vec::new());
+    let permute = PermutationGadget::new(
+        vec![inst(
+            "_mm256_permute4x64_epi64",
+            &[
+                ("a", InstructionArg::Input("top".to_owned())),
+                ("imm8", InstructionArg::U64(0x4e)),
+            ],
+        )],
+        Vec::new(),
+    );
+    let mut table = TransitionTable::new(1);
+    table.add_transition(0, &input, &output, identity);
+    table.add_transition(0, &input, &output, permute);
+    let path = table
+        .complete_path_from_zero_based_steps(&[(0, input.as_tuple(), output.as_tuple())])
+        .expect("path should resolve");
+    let assigned = AssignedPath::new(path, vec![GadgetIndex(1)]);
+
+    let json = solution_json_for_assigned_paths(&metadata(), &table, &[assigned]);
+
+    assert_eq!(json["nodes"]["n0"]["gadget_count"], 1);
+    assert_eq!(
+        json["paths"],
+        serde_json::json!([
+            {"steps": [{"node_id": "n0", "gadget_index": 0}]}
+        ])
+    );
+    let imported = solution_json_from_value(&json).expect("exported assigned JSON should import");
+    assert_eq!(
+        imported.assigned_paths[0].gadget_at_stage(0),
+        GadgetIndex(0)
     );
 }

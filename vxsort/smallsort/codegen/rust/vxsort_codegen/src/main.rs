@@ -15,14 +15,14 @@ use clap::Parser;
 use comfy_table::{Cell, Table, modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL};
 use vxsort_codegen::{
     CliArgs, CliCommand, DryRunSummary, EstimateReport, FetchUicaDataConfig, RunConfig, RunSummary,
-    RuntimeUiArg, build_dry_run_summary, build_run_summary, build_run_summary_with_session,
-    convert_solution_json_to_asm, estimate_solution_json, fetch_uica_data,
+    RuntimeUiArg, build_dry_run_summary, convert_solution_json_to_asm, estimate_solution_json,
+    fetch_uica_data,
     instruction_stream::{
         InstructionBlock, LoweringOptions, ModeledInstruction, lower_assigned_paths,
         lower_solution_paths,
     },
-    parse_run_config, read_solution_json,
-    runtime::{ChannelRuntimeSession, LineRuntimeSession},
+    read_solution_json, run_solver_with_session,
+    runtime::{ChannelRuntimeSession, LineRuntimeSession, NullRuntimeSession},
     runtime_tui::run_tui_event_loop,
     uica_scoring::{UiPackScorer, uops_key_for_instruction},
     verify_solution_json,
@@ -30,11 +30,21 @@ use vxsort_codegen::{
 
 fn main() {
     let args = CliArgs::parse();
-    match &args.command {
-        CliCommand::Solve(_) => {}
+    match args.command {
+        CliCommand::Solve(solve_args) => {
+            let config = exit_on_error(vxsort_codegen::parse_solve_run_config(solve_args));
+
+            if config.dry_run {
+                let summary = exit_on_error(build_dry_run_summary(&config));
+                print_dry_run_summary(&config, &summary);
+                return;
+            }
+
+            let summary = run_with_runtime_ui(&config);
+            print_run_summary(&config, &summary);
+        }
         CliCommand::SynthesisWorker(_) => {
             exit_on_error(vxsort_codegen::wave_engine::run_synthesis_worker_stdio());
-            return;
         }
         CliCommand::Verify(verify_args) => {
             let report = exit_on_error(verify_solution_json(
@@ -43,7 +53,6 @@ fn main() {
                 verify_args.workers,
             ));
             println!("All {} paths verified correct.", report.path_count);
-            return;
         }
         CliCommand::Estimate(estimate_args) => {
             let report = exit_on_error(estimate_solution_json(
@@ -57,7 +66,6 @@ fn main() {
                 },
             ));
             print_estimate_report(&report);
-            return;
         }
         CliCommand::FetchUicaData(fetch_args) => {
             let report = exit_on_error(fetch_uica_data(&FetchUicaDataConfig {
@@ -69,7 +77,6 @@ fn main() {
             for arch in report.arches {
                 println!("fetched uiCA arch pack: {arch}");
             }
-            return;
         }
         CliCommand::JsonToAsm(json_to_asm_args) => {
             exit_on_error(convert_solution_json_to_asm(
@@ -80,24 +87,11 @@ fn main() {
                 "wrote solution assembly: {}",
                 json_to_asm_args.output.display()
             );
-            return;
         }
         CliCommand::ScoreJson(score_args) => {
-            exit_on_error(score_solution_json(score_args));
-            return;
+            exit_on_error(score_solution_json(&score_args));
         }
     }
-
-    let config = exit_on_error(parse_run_config(args));
-
-    if config.dry_run {
-        let summary = exit_on_error(build_dry_run_summary(&config));
-        print_dry_run_summary(&config, &summary);
-        return;
-    }
-
-    let summary = run_with_runtime_ui(&config);
-    print_run_summary(&config, &summary);
 }
 
 fn score_solution_json(args: &vxsort_codegen::ScoreJsonArgs) -> Result<(), String> {
@@ -325,25 +319,23 @@ fn local_file_url(path: &Path) -> String {
 
 fn run_with_runtime_ui(config: &RunConfig) -> RunSummary {
     match config.runtime_ui {
-        RuntimeUiArg::None => exit_on_error(build_run_summary(config)),
-        RuntimeUiArg::Textual => run_with_textual_runtime(config),
+        RuntimeUiArg::None => {
+            let mut session = NullRuntimeSession;
+            exit_on_error(run_solver_with_session(config, &mut session))
+        }
+        RuntimeUiArg::Textual => {
+            let mut session = LineRuntimeSession::stdout();
+            exit_on_error(run_solver_with_session(config, &mut session))
+        }
         RuntimeUiArg::Auto => {
             if std::io::stdout().is_terminal() {
                 run_with_threaded_tui(config)
             } else {
-                run_with_line_runtime(config)
+                let mut session = LineRuntimeSession::stdout();
+                exit_on_error(run_solver_with_session(config, &mut session))
             }
         }
     }
-}
-
-fn run_with_textual_runtime(config: &RunConfig) -> RunSummary {
-    run_with_line_runtime(config)
-}
-
-fn run_with_line_runtime(config: &RunConfig) -> RunSummary {
-    let mut session = LineRuntimeSession::stdout();
-    exit_on_error(build_run_summary_with_session(config, &mut session))
 }
 
 fn run_with_threaded_tui(config: &RunConfig) -> RunSummary {
@@ -355,7 +347,7 @@ fn run_with_threaded_tui(config: &RunConfig) -> RunSummary {
 
     let engine = thread::spawn(move || {
         let mut session = ChannelRuntimeSession::new(sender, engine_cancel_flag);
-        build_run_summary_with_session(&engine_config, &mut session)
+        run_solver_with_session(&engine_config, &mut session)
     });
 
     let tui_result = run_tui_event_loop(receiver, cancel_flag)

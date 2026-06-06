@@ -1,10 +1,11 @@
 use std::{
-    collections::{BTreeMap, HashSet},
-    env,
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
+    env, fs,
     io::{self, ErrorKind, Read, Write},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     sync::{Arc, Mutex, mpsc},
     thread,
+    time::Duration,
 };
 
 use gadget_synth::{
@@ -18,7 +19,9 @@ use crate::runtime::{
     StageProgressSnapshot,
 };
 use crate::runtime_trace::RuntimeTrace;
-use crate::scoring::{AssignedPath, AssignedPathKey, DummyScorer, PathCost, Scorer};
+use crate::scoring::{
+    AssignedPath, AssignedPathKey, DummyScorer, PathCost, PathScoringSnapshot, Scorer,
+};
 use crate::transition_table::{
     CompletePath, PathId, PathRegistry, State, StateId, TransitionRef, TransitionTable,
 };
@@ -27,21 +30,62 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
 const SYNTHESIS_WORKER_COMMAND: &str = "__synthesis-worker";
+const ROUGH_TIE_EXPANSION_FACTOR: usize = 10;
+const SCORING_RESULT_POLL_INTERVAL_PER_SYNTHESIS_JOBS: usize = 1024;
+const SCORING_RESULT_POLL_LIMIT_PER_SYNTHESIS_INTERVAL: usize = 1024;
+const SCORING_RESULT_POLL_LIMIT_PER_WAVE_BOUNDARY: usize = 1024;
+const SCORING_OUTSTANDING_JOBS_PER_WORKER: usize = 4;
+const MIN_SCORING_OUTSTANDING_JOBS: usize = 64;
+const MAX_SCORING_OUTSTANDING_JOBS: usize = 512;
+const SCORING_TRACE_DETAIL_LIMIT: usize = 1024;
+const SCORING_TRACE_DETAIL_INTERVAL: usize = 1024;
+const PROCESS_WORKER_RECYCLE_JOB_LIMIT: usize = 50_000;
+const PROCESS_WORKER_RSS_TRACE_INTERVAL: usize = 16_384;
+const PROCESS_WORKER_RSS_TRACE_IDLE_INTERVAL: Duration = Duration::from_secs(10);
 
+/// Configuration for one wave-engine solve.
+///
+/// The wave engine owns the iterative search over bitonic-sort stages. It uses
+/// this configuration to choose the vector lane shape, the Z3 gadget search
+/// depth, worker scheduling mode, and how aggressively each transition may
+/// retain concrete gadgets.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct WaveConfig {
+    /// Number of vector registers sorted together.
     pub num_vecs: usize,
+    /// Target SIMD instruction set.
     pub arch: ArchArg,
+    /// Element type being sorted.
     pub dtype: DTypeArg,
+    /// Maximum candidate gadget depth passed to the synthesizer.
     pub gadget_depth: u8,
+    /// Whether to append the final reorder stage that restores natural lane
+    /// order.
     pub natural_order: bool,
+    /// Whether stage 0 should be prepopulated from retroactive inputs instead
+    /// of only forwarding from the initial state.
     pub retroactive_input: bool,
+    /// Number of rough-scored paths to keep. `None` means no top-k pruning.
     pub top_k: Option<usize>,
+    /// Requested synthesis/scoring worker count after CLI resolution.
     pub worker_count: usize,
+    /// In-process vs subprocess synthesis worker strategy.
     pub worker_backend: WorkerBackendArg,
+    /// Maximum concrete gadget solutions retained for a single transition.
     pub max_unique_outputs: usize,
 }
 
+/// Stateful wave-search engine for synthesizing and scoring sorter paths.
+///
+/// `WaveEngine` maintains the transition table, bitonic stage definitions,
+/// precomputed candidate gadget graphs, process-backed synthesis workers, and
+/// asynchronous rough-scoring pool. A run proceeds in waves: each wave tries to
+/// expand one target stage, propagates any new states forward, registers newly
+/// complete paths, and schedules those paths for scoring.
+///
+/// The engine is intentionally stateful. Most counters and queues represent
+/// live scheduler state, so callers should use the public snapshot/result APIs
+/// instead of trying to infer progress from individual fields.
 pub struct WaveEngine {
     config: WaveConfig,
     elements_per_vector: usize,
@@ -61,14 +105,25 @@ pub struct WaveEngine {
     stalled_stages: HashSet<usize>,
     scored_path_keys: HashSet<AssignedPathKey>,
     scored_paths: Vec<ScoredPath>,
+    recent_scored_paths: Vec<ScoredPath>,
     scoring_pool: ScoringPool,
     next_scoring_job_order: usize,
     next_scoring_result_order: usize,
     buffered_scoring_results: BTreeMap<usize, ScoringJobResult>,
-    submitted_scoring_signatures: HashSet<PathScoringSignature>,
+    latest_scoring_signatures: HashMap<PathId, PathScoringSignature>,
+    pending_scoring_path_ids: VecDeque<PathId>,
+    pending_scoring_path_set: HashSet<PathId>,
+    pending_registered_rescore_transitions: BTreeSet<TransitionRef>,
     path_registry: PathRegistry,
+    process_workers: Vec<ProcessSynthesisWorker>,
 }
 
+/// A complete path with one selected gadget per transition and its score.
+///
+/// Rough scoring can expand a single [`CompletePath`] into multiple
+/// [`ScoredPath`] values when several gadget choices tie or are close enough
+/// to survive top-k expansion. `discovery_order` preserves deterministic
+/// ordering across asynchronous scoring completion.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScoredPath {
     path_id: PathId,
@@ -126,6 +181,11 @@ impl ScoredPath {
     }
 }
 
+/// Result of inserting one synthesized transition output.
+///
+/// This is the narrow result returned after a `(gadget, output_state)` pair is
+/// applied to the transition table. It separates "a transition edge was new"
+/// from "this edge completed one or more full paths".
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TransitionRecordResult {
     transition_added: bool,
@@ -142,6 +202,12 @@ impl TransitionRecordResult {
     }
 }
 
+/// One synthesis unit scheduled against a stage input and candidate graph.
+///
+/// A job identifies the stage being expanded, the input state at that stage,
+/// and the candidate graph index to ask Z3 to synthesize. The graph itself is
+/// attached later by the internal worker job wrapper so the public job identity
+/// stays compact and serializable through process-worker wrappers.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SynthesisJob {
     stage: usize,
@@ -168,6 +234,11 @@ impl SynthesisJob {
     }
 }
 
+/// In-process representation of a synthesis job with all execution payloads.
+///
+/// This is produced from [`SynthesisJob`] before handing work to either a
+/// thread-backed worker or subprocess-backed worker. `target_pairs` is the
+/// stage comparator set in zero-based lane labels.
 #[derive(Clone, Debug, PartialEq)]
 struct WorkerSynthesisJob {
     index: usize,
@@ -177,6 +248,11 @@ struct WorkerSynthesisJob {
     stage_count: usize,
 }
 
+/// Static configuration sent once to each synthesis subprocess.
+///
+/// Worker processes rebuild their own synthesizer and candidate graph cache
+/// from this compact config. Keeping this separate from [`WaveConfig`] avoids
+/// sending coordinator-only fields such as top-k and worker counts.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 struct ProcessWorkerConfig {
     arch: ArchArg,
@@ -198,6 +274,11 @@ impl From<WaveConfig> for ProcessWorkerConfig {
     }
 }
 
+/// Serializable synthesis job sent from the coordinator to a worker process.
+///
+/// This mirrors [`WorkerSynthesisJob`] but stores only data that can cross the
+/// bincode IPC boundary. The worker reconstructs the candidate graph from
+/// `candidate_index` and its local candidate cache.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct ProcessWorkerJob {
     index: usize,
@@ -232,6 +313,11 @@ impl ProcessWorkerJob {
     }
 }
 
+/// Serializable worker-process response for a completed synthesis job.
+///
+/// Results are raw synthesized gadgets paired with their output states. The
+/// coordinator is still responsible for applying them to the transition table
+/// in candidate order.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct ProcessWorkerOutput {
     job: ProcessWorkerJob,
@@ -247,6 +333,7 @@ impl ProcessWorkerOutput {
     }
 }
 
+/// Framed request protocol from the coordinator to a synthesis subprocess.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 enum ProcessWorkerRequest {
     Init(ProcessWorkerConfig),
@@ -254,6 +341,7 @@ enum ProcessWorkerRequest {
     Shutdown,
 }
 
+/// Framed response protocol from a synthesis subprocess to the coordinator.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 enum ProcessWorkerResponse {
     Ready(Result<(), String>),
@@ -263,31 +351,76 @@ enum ProcessWorkerResponse {
     },
 }
 
+/// Non-serialized synthesis output used inside the coordinator.
+///
+/// Both in-process and subprocess worker paths normalize into this type before
+/// the coordinator applies results to the transition table.
 #[derive(Clone, Debug, PartialEq)]
 struct SynthesisJobOutput {
     job: SynthesisJob,
     results: Vec<(PermutationGadget, VectorState)>,
 }
 
+/// Completion event emitted by an in-process worker thread.
+///
+/// Subprocess-backed execution has its own polling loop, but both paths track
+/// start/finish events to maintain worker utilization counters.
 #[derive(Clone, Debug, PartialEq)]
 enum WorkerPoolEvent {
     Started(usize),
     Finished(usize, Result<SynthesisJobOutput, SynthesisError>),
 }
 
-type SharedScorer = Arc<Mutex<Box<dyn Scorer>>>;
-type ScorerFactory = Arc<dyn Fn() -> Box<dyn Scorer> + Send + Sync + 'static>;
+/// Shared scorer instance used by asynchronous rough-scoring workers.
+type SharedScorer = Arc<dyn Scorer>;
+
+/// Compact fingerprint of a path's current gadget-list lengths.
+///
+/// The engine uses this to detect when an already-discovered path should be
+/// rescored because a transition gained additional equal/near-tie gadgets.
 type PathScoringSignature = Vec<(TransitionRef, usize)>;
 
+/// Hook for observing wave progress and optionally scheduling additional work.
+///
+/// The production path uses this to bridge rough-search progress into live
+/// full scoring. Tests can install custom observers to assert ordering and
+/// cancellation behavior without coupling to the TUI.
+pub trait WaveProgressObserver {
+    fn on_wave_progress(
+        &mut self,
+        _engine: &WaveEngine,
+        _recent_scored_paths: &[ScoredPath],
+        _session: &mut dyn RuntimeSession,
+        _trace: &mut RuntimeTrace,
+        _reason: &str,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+/// Default observer used when no extra wave-progress behavior is needed.
+struct NullWaveProgressObserver;
+
+impl WaveProgressObserver for NullWaveProgressObserver {}
+
+/// Work item for asynchronous rough scoring.
+///
+/// The job owns a [`PathScoringSnapshot`] so scorer threads can evaluate a
+/// stable view of transition gadgets without cloning the full transition
+/// table. `assignment_limit` is the per-path k-best expansion limit.
 #[derive(Clone, Debug)]
 struct ScoringJob {
     order: usize,
     path_id: PathId,
     path: CompletePath,
-    table: Arc<TransitionTable>,
+    snapshot: PathScoringSnapshot,
     assignment_limit: usize,
 }
 
+/// Result returned by a rough-scoring worker.
+///
+/// Results are buffered and applied in `order`, so scoring completion order
+/// does not change deterministic top-k/discovery behavior.
 #[derive(Clone, Debug)]
 struct ScoringJobResult {
     order: usize,
@@ -296,6 +429,10 @@ struct ScoringJobResult {
     scored_paths: Vec<ScoredPath>,
 }
 
+/// Small trace payload derived from a scoring result.
+///
+/// Keeping these fields separate avoids retaining full [`ScoredPath`] values
+/// only for trace emission.
 #[derive(Clone, Copy, Debug)]
 struct ScoringJobTraceFields {
     order: usize,
@@ -304,13 +441,23 @@ struct ScoringJobTraceFields {
     assigned_candidates: usize,
 }
 
+/// Fixed-size thread pool for asynchronous rough scoring.
+///
+/// The pool intentionally bounds outstanding jobs so rough-scoring submission
+/// cannot consume unbounded memory while synthesis continues to discover new
+/// complete paths.
 struct ScoringPool {
     sender: mpsc::Sender<Option<ScoringJob>>,
     receiver: mpsc::Receiver<ScoringJobResult>,
     workers: Vec<thread::JoinHandle<()>>,
     pending_jobs: usize,
+    max_pending_jobs: usize,
 }
 
+/// Result of executing one synthesis job and applying its outputs.
+///
+/// This is the smallest execution result: it is per stage input/candidate
+/// graph pair, before aggregation into stage or wave summaries.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct JobExecutionResult {
     stage: usize,
@@ -352,6 +499,11 @@ impl JobExecutionResult {
     }
 }
 
+/// Aggregated result for one stage pass.
+///
+/// A stage pass can execute many [`JobExecutionResult`] values. The aggregate
+/// records the amount of synthesis attempted, how much new transition-table
+/// state was found, and how many complete paths were discovered as a result.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StageRunResult {
     stage: usize,
@@ -388,6 +540,11 @@ impl StageRunResult {
     }
 }
 
+/// Result for one complete wave.
+///
+/// A wave has one target-stage expansion plus zero or more propagation stage
+/// passes caused by newly discovered outputs. `scored_paths` counts rough
+/// scoring results applied during the wave.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WaveRunResult {
     wave: usize,
@@ -424,6 +581,11 @@ impl WaveRunResult {
     }
 }
 
+/// Summary returned after running waves until exhaustion or a configured stop.
+///
+/// `search_exhausted` is true only when all stages are exhausted or stalled
+/// according to the wave scheduler; a `max_waves` limit can end the search
+/// with this set to false.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WaveSearchResult {
     wave_count: usize,
@@ -448,54 +610,15 @@ impl WaveSearchResult {
 impl ScoringPool {
     fn new_shared(worker_count: usize, scorer: SharedScorer) -> Self {
         let worker_count = worker_count.max(1);
+        let max_pending_jobs = worker_count
+            .saturating_mul(SCORING_OUTSTANDING_JOBS_PER_WORKER)
+            .clamp(MIN_SCORING_OUTSTANDING_JOBS, MAX_SCORING_OUTSTANDING_JOBS);
         let (sender, job_receiver) = mpsc::channel::<Option<ScoringJob>>();
         let job_receiver = Arc::new(Mutex::new(job_receiver));
         let (result_sender, receiver) = mpsc::channel::<ScoringJobResult>();
         let workers = (0..worker_count)
             .map(|_| {
                 let scorer = Arc::clone(&scorer);
-                let job_receiver = Arc::clone(&job_receiver);
-                let result_sender = result_sender.clone();
-                thread::spawn(move || {
-                    loop {
-                        let message = {
-                            let receiver = job_receiver
-                                .lock()
-                                .expect("scoring job receiver lock should not be poisoned");
-                            receiver.recv()
-                        };
-                        let Ok(Some(job)) = message else {
-                            break;
-                        };
-                        let result = {
-                            let scorer =
-                                scorer.lock().expect("scoring lock should not be poisoned");
-                            score_job(scorer.as_ref(), job)
-                        };
-                        if result_sender.send(result).is_err() {
-                            break;
-                        }
-                    }
-                })
-            })
-            .collect();
-
-        Self {
-            sender,
-            receiver,
-            workers,
-            pending_jobs: 0,
-        }
-    }
-
-    fn new_factory(worker_count: usize, scorer_factory: ScorerFactory) -> Self {
-        let worker_count = worker_count.max(1);
-        let (sender, job_receiver) = mpsc::channel::<Option<ScoringJob>>();
-        let job_receiver = Arc::new(Mutex::new(job_receiver));
-        let (result_sender, receiver) = mpsc::channel::<ScoringJobResult>();
-        let workers = (0..worker_count)
-            .map(|_| {
-                let scorer = scorer_factory();
                 let job_receiver = Arc::clone(&job_receiver);
                 let result_sender = result_sender.clone();
                 thread::spawn(move || {
@@ -523,6 +646,7 @@ impl ScoringPool {
             receiver,
             workers,
             pending_jobs: 0,
+            max_pending_jobs,
         }
     }
 
@@ -531,6 +655,10 @@ impl ScoringPool {
             .send(Some(job))
             .expect("scoring worker channel should stay open while engine is active");
         self.pending_jobs += 1;
+    }
+
+    fn has_capacity(&self) -> bool {
+        self.pending_jobs < self.max_pending_jobs
     }
 }
 
@@ -545,10 +673,17 @@ impl Drop for ScoringPool {
     }
 }
 
+/// Long-lived synthesis subprocess managed by the coordinator.
+///
+/// The worker is spawned as the same executable with the hidden
+/// `__synthesis-worker` subcommand. The coordinator talks to it over framed
+/// stdin/stdout messages and recycles it after a large number of jobs to bound
+/// any external allocator/Z3 growth.
 struct ProcessSynthesisWorker {
     child: Child,
     stdin: ChildStdin,
     stdout: ChildStdout,
+    jobs_since_spawn: usize,
 }
 
 impl ProcessSynthesisWorker {
@@ -586,6 +721,7 @@ impl ProcessSynthesisWorker {
                 child,
                 stdin,
                 stdout,
+                jobs_since_spawn: 0,
             }),
             Some(ProcessWorkerResponse::Ready(Err(error))) => {
                 Err(SynthesisError::WorkerProcess(error))
@@ -603,6 +739,7 @@ impl ProcessSynthesisWorker {
         &mut self,
         worker_job: WorkerSynthesisJob,
     ) -> Result<SynthesisJobOutput, SynthesisError> {
+        self.jobs_since_spawn += 1;
         let request = ProcessWorkerRequest::Run(ProcessWorkerJob::from_worker_job(worker_job));
         write_frame(&mut self.stdin, &request).map_err(|error| {
             SynthesisError::WorkerProcess(format!("failed to send worker job: {error}"))
@@ -630,8 +767,30 @@ impl ProcessSynthesisWorker {
         drop(self.stdin);
         let _ = self.child.wait();
     }
+
+    fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
+    fn jobs_since_spawn(&self) -> usize {
+        self.jobs_since_spawn
+    }
+
+    fn should_recycle(&self) -> bool {
+        self.jobs_since_spawn >= PROCESS_WORKER_RECYCLE_JOB_LIMIT
+    }
+
+    fn rss_kb(&self) -> Option<u64> {
+        process_rss_kb(self.pid())
+    }
 }
 
+/// Runs the hidden synthesis-worker subprocess protocol on stdin/stdout.
+///
+/// This is invoked by the main executable through the private
+/// `__synthesis-worker` subcommand. It is public so the CLI layer can dispatch
+/// to it, but normal callers should create a [`WaveEngine`] and use the
+/// process worker backend instead of calling this directly.
 pub fn run_synthesis_worker_stdio() -> Result<(), String> {
     let stdin = io::stdin();
     let stdout = io::stdout();
@@ -682,6 +841,12 @@ fn run_synthesis_worker_stdio_impl<R: Read, W: Write>(
     Ok(())
 }
 
+/// Runtime state owned inside a synthesis subprocess.
+///
+/// Each subprocess builds its own [`GadgetSynthesizer`] and candidate graph
+/// cache. This is the point of the process-backed backend: expensive Z3 state
+/// and process-global locks are isolated per worker process rather than shared
+/// inside the main coordinator process.
 struct ProcessWorkerRuntime {
     config: ProcessWorkerConfig,
     candidates: Vec<GadgetGraph>,
@@ -751,11 +916,11 @@ fn read_frame<R: Read, T: DeserializeOwned>(reader: &mut R) -> io::Result<Option
 fn score_job(scorer: &dyn Scorer, job: ScoringJob) -> ScoringJobResult {
     let path_length = job.path.len();
     let scored_paths = scorer
-        .assign_path_gadgets_k_best(&job.path, &job.table, job.assignment_limit)
+        .assign_path_gadgets_k_best_snapshot(&job.snapshot, job.assignment_limit)
         .into_iter()
         .enumerate()
         .map(|(assignment_index, assigned_path)| {
-            let cost = scorer.score_assigned_path(&assigned_path, &job.table);
+            let cost = scorer.score_assigned_path_snapshot(&assigned_path, &job.snapshot);
             ScoredPath::new(
                 job.path_id,
                 job.path.clone(),
@@ -779,13 +944,13 @@ impl WaveEngine {
         Self::with_scorer_factory(config, || Box::new(DummyScorer) as Box<dyn Scorer>)
     }
 
-    pub fn with_scorer(
-        config: WaveConfig,
-        scorer: Box<dyn Scorer>,
-    ) -> Result<Self, SynthesisError> {
-        let scorer = Arc::new(Mutex::new(scorer));
+    pub fn with_scorer<S>(config: WaveConfig, scorer: S) -> Result<Self, SynthesisError>
+    where
+        S: Scorer + 'static,
+    {
+        let scorer: SharedScorer = Arc::new(scorer);
         Self::with_scoring_pool_factory(config, move |worker_count| {
-            ScoringPool::new_shared(worker_count, scorer)
+            ScoringPool::new_shared(worker_count, Arc::clone(&scorer))
         })
     }
 
@@ -796,9 +961,9 @@ impl WaveEngine {
     where
         F: Fn() -> Box<dyn Scorer> + Send + Sync + 'static,
     {
-        let scorer_factory: ScorerFactory = Arc::new(scorer_factory);
+        let scorer: SharedScorer = Arc::from(scorer_factory());
         Self::with_scoring_pool_factory(config, move |worker_count| {
-            ScoringPool::new_factory(worker_count, scorer_factory)
+            ScoringPool::new_shared(worker_count, Arc::clone(&scorer))
         })
     }
 
@@ -871,12 +1036,17 @@ impl WaveEngine {
             stalled_stages: HashSet::new(),
             scored_path_keys: HashSet::new(),
             scored_paths: Vec::new(),
+            recent_scored_paths: Vec::new(),
             scoring_pool: scoring_pool_factory(config.worker_count),
             next_scoring_job_order: 0,
             next_scoring_result_order: 0,
             buffered_scoring_results: BTreeMap::new(),
-            submitted_scoring_signatures: HashSet::new(),
+            latest_scoring_signatures: HashMap::new(),
+            pending_scoring_path_ids: VecDeque::new(),
+            pending_scoring_path_set: HashSet::new(),
+            pending_registered_rescore_transitions: BTreeSet::new(),
             path_registry: PathRegistry::default(),
+            process_workers: Vec::new(),
         })
     }
 
@@ -944,7 +1114,19 @@ impl WaveEngine {
         self.scored_paths.len()
     }
 
+    pub fn recent_scored_paths(&self) -> &[ScoredPath] {
+        &self.recent_scored_paths
+    }
+
+    pub fn scored_path_key_count(&self) -> usize {
+        self.scored_path_keys.len()
+    }
+
     pub fn pending_scoring_job_count(&self) -> usize {
+        self.scoring_pool.pending_jobs + self.pending_scoring_path_ids.len()
+    }
+
+    fn in_flight_scoring_job_count(&self) -> usize {
         self.scoring_pool.pending_jobs
     }
 
@@ -1016,20 +1198,55 @@ impl WaveEngine {
     }
 
     fn poll_scoring_jobs_with_trace(&mut self, trace: &mut RuntimeTrace, reason: &str) -> usize {
-        while let Ok(result) = self.scoring_pool.receiver.try_recv() {
-            self.buffer_scoring_result_with_trace(result, trace, reason);
+        self.poll_scoring_jobs_limited_with_trace(trace, reason, None)
+    }
+
+    fn poll_some_scoring_jobs_with_trace(
+        &mut self,
+        trace: &mut RuntimeTrace,
+        reason: &str,
+        result_limit: usize,
+    ) -> usize {
+        if result_limit == 0 {
+            return 0;
         }
-        self.apply_ready_scoring_results_with_trace(trace, reason)
+        self.poll_scoring_jobs_limited_with_trace(trace, reason, Some(result_limit))
+    }
+
+    fn poll_scoring_jobs_limited_with_trace(
+        &mut self,
+        trace: &mut RuntimeTrace,
+        reason: &str,
+        result_limit: Option<usize>,
+    ) -> usize {
+        let mut received = 0;
+        while result_limit.is_none_or(|limit| received < limit) {
+            let Ok(result) = self.scoring_pool.receiver.try_recv() else {
+                break;
+            };
+            self.buffer_scoring_result_with_trace(result, trace, reason);
+            received += 1;
+        }
+        let scored = self.apply_ready_scoring_results_with_trace(trace, reason, result_limit);
+        self.top_off_scoring_jobs_with_trace(trace, reason);
+        scored
     }
 
     fn drain_scoring_jobs_with_trace(&mut self, trace: &mut RuntimeTrace, reason: &str) -> usize {
+        self.flush_pending_registered_path_rescores_with_trace(trace, reason);
+        self.top_off_scoring_jobs_with_trace(trace, reason);
         let mut scored = self.poll_scoring_jobs_with_trace(trace, reason);
-        while self.scoring_pool.pending_jobs > 0 {
+        while self.scoring_pool.pending_jobs > 0 || !self.pending_scoring_path_ids.is_empty() {
+            self.top_off_scoring_jobs_with_trace(trace, reason);
+            if self.scoring_pool.pending_jobs == 0 {
+                break;
+            }
             let Ok(result) = self.scoring_pool.receiver.recv() else {
                 break;
             };
             self.buffer_scoring_result_with_trace(result, trace, reason);
-            scored += self.apply_ready_scoring_results_with_trace(trace, reason);
+            scored += self.apply_ready_scoring_results_with_trace(trace, reason, None);
+            self.top_off_scoring_jobs_with_trace(trace, reason);
         }
         scored
     }
@@ -1083,7 +1300,7 @@ impl WaveEngine {
                     "new_transition",
                 )
             } else {
-                self.enqueue_registered_paths_for_transition_with_trace(
+                self.defer_registered_paths_for_transition_rescore_with_trace(
                     insert.transition,
                     trace,
                     "new_gadget_on_registered_transition",
@@ -1230,6 +1447,42 @@ impl WaveEngine {
         Ok(self.apply_synthesis_output_with_trace(output, trace))
     }
 
+    fn take_process_workers(
+        &mut self,
+        worker_count: usize,
+        trace: &mut RuntimeTrace,
+    ) -> Result<Vec<ProcessSynthesisWorker>, SynthesisError> {
+        while self.process_workers.len() < worker_count {
+            let worker = ProcessSynthesisWorker::spawn(self.config)?;
+            self.trace_process_worker_spawned(trace, "spawn", &worker);
+            self.process_workers.push(worker);
+        }
+
+        let workers = self
+            .process_workers
+            .drain(0..worker_count)
+            .collect::<Vec<_>>();
+        self.trace_process_worker_pool_snapshot(trace, "checkout", &workers);
+        Ok(workers)
+    }
+
+    fn return_process_workers(
+        &mut self,
+        workers: Vec<ProcessSynthesisWorker>,
+        trace: &mut RuntimeTrace,
+    ) {
+        self.trace_process_worker_pool_snapshot(trace, "return", &workers);
+        for worker in workers {
+            if worker.should_recycle() {
+                self.trace_process_worker_recycled(trace, &worker);
+                worker.shutdown();
+            } else {
+                self.process_workers.push(worker);
+            }
+        }
+        self.trace_process_worker_pool_snapshot(trace, "idle", &self.process_workers);
+    }
+
     fn apply_synthesis_output_with_trace(
         &mut self,
         output: SynthesisJobOutput,
@@ -1272,6 +1525,14 @@ impl WaveEngine {
         }
     }
 
+    /// Runs synthesis for one stage with no runtime events or trace output.
+    ///
+    /// This is the smallest public execution entry point. It prepares jobs for
+    /// `stage`, applies up to `attempt_budget` candidate jobs, and stops early
+    /// if `output_budget` new unique outputs are reached. New terminal paths
+    /// discovered while applying transitions are still registered and queued
+    /// for rough scoring; scoring results may be applied later by wave/run
+    /// methods.
     pub fn run_stage_sync(
         &mut self,
         stage: usize,
@@ -1299,6 +1560,13 @@ impl WaveEngine {
         )
     }
 
+    /// Runs one complete wave with no runtime events or trace output.
+    ///
+    /// A wave selects the current target stage, runs that stage, then
+    /// propagates newly discovered states through later stages. It also polls
+    /// a bounded amount of completed rough-scoring work at wave boundaries.
+    /// Use [`Self::run_sync`] when you want the normal repeated-wave search
+    /// loop.
     pub fn run_wave_sync(
         &mut self,
         attempt_budget: usize,
@@ -1326,7 +1594,11 @@ impl WaveEngine {
             .select_target_stage()
             .expect("wave engine should have at least one stage");
         let last_stage = self.stages.len() - 1;
-        self.poll_scoring_jobs_with_trace(trace, "wave_started");
+        self.poll_some_scoring_jobs_with_trace(
+            trace,
+            "wave_started",
+            SCORING_RESULT_POLL_LIMIT_PER_WAVE_BOUNDARY,
+        );
         let last_outputs_before = self.transition_table.unique_output_count(last_stage);
         let target = self.run_stage_sync_with_session_and_trace(
             target_stage,
@@ -1403,7 +1675,12 @@ impl WaveEngine {
         }
 
         self.wave_count += 1;
-        let scored_paths = self.poll_scoring_jobs_with_trace(trace, "wave_finished");
+        self.flush_pending_registered_path_rescores_with_trace(trace, "wave_finished");
+        let scored_paths = self.poll_some_scoring_jobs_with_trace(
+            trace,
+            "wave_finished",
+            SCORING_RESULT_POLL_LIMIT_PER_WAVE_BOUNDARY,
+        );
         let discovered_paths = target.discovered_paths()
             + propagation
                 .iter()
@@ -1419,6 +1696,12 @@ impl WaveEngine {
         })
     }
 
+    /// Runs the normal wave search loop without runtime events or trace output.
+    ///
+    /// This is the quiet programmatic entry point. It repeatedly runs waves
+    /// until the search is exhausted, `max_waves` is reached, or the engine can
+    /// no longer select a target stage. At the end it drains pending rough
+    /// scoring jobs before returning the [`WaveSearchResult`].
     pub fn run_sync(
         &mut self,
         max_waves: Option<usize>,
@@ -1429,6 +1712,12 @@ impl WaveEngine {
         self.run_sync_with_session(max_waves, attempt_budget, output_budget, &mut session)
     }
 
+    /// Runs the normal wave search loop while emitting runtime events.
+    ///
+    /// This is the entry point used by line logging, the TUI, and tests that
+    /// need user-visible progress without low-level JSON trace events.
+    /// `session.should_stop()` is checked between waves and propagation stages
+    /// for cooperative cancellation.
     pub fn run_sync_with_session(
         &mut self,
         max_waves: Option<usize>,
@@ -1446,6 +1735,13 @@ impl WaveEngine {
         )
     }
 
+    /// Runs the normal wave search loop with runtime events and JSON tracing.
+    ///
+    /// This variant is useful when the caller wants both presentation-level
+    /// [`RuntimeEvent`] updates and detailed trace events for profiling or
+    /// postmortem analysis. It uses a no-op [`WaveProgressObserver`]; use
+    /// [`Self::run_sync_with_session_trace_and_observer`] when live full
+    /// scoring or a test hook must observe wave completions.
     pub fn run_sync_with_session_and_trace(
         &mut self,
         max_waves: Option<usize>,
@@ -1454,22 +1750,49 @@ impl WaveEngine {
         session: &mut impl RuntimeSession,
         trace: &mut RuntimeTrace,
     ) -> Result<WaveSearchResult, SynthesisError> {
+        let mut observer = NullWaveProgressObserver;
+        self.run_sync_with_session_trace_and_observer(
+            max_waves,
+            attempt_budget,
+            output_budget,
+            session,
+            trace,
+            &mut observer,
+        )
+    }
+
+    /// Runs the full wave search loop with all progress extension points.
+    ///
+    /// This is the most complete execution entry point. In addition to runtime
+    /// events and JSON tracing, it calls `observer` after each wave and after
+    /// the final rough-scoring drain with the recently applied scored paths.
+    /// The production solve path uses this to feed live full uiCA scoring
+    /// without blocking the synthesis coordinator.
+    ///
+    /// The method preserves deterministic ordering despite asynchronous
+    /// workers: synthesis results are applied in candidate order and rough
+    /// scoring results are applied in submission order before they are exposed
+    /// to the observer.
+    pub fn run_sync_with_session_trace_and_observer(
+        &mut self,
+        max_waves: Option<usize>,
+        attempt_budget: usize,
+        output_budget: usize,
+        session: &mut impl RuntimeSession,
+        trace: &mut RuntimeTrace,
+        observer: &mut impl WaveProgressObserver,
+    ) -> Result<WaveSearchResult, SynthesisError> {
         session.on_event(RuntimeEvent::RunStarted {
             stage_count: self.stages.len(),
         });
-        if trace.is_enabled() {
-            trace.event(
-                "engine_run_started",
-                json!({
+        crate::trace!(trace, "engine_run_started", {
                     "stage_count": self.stages.len(),
                     "max_waves": max_waves,
                     "attempt_budget": attempt_budget,
                     "output_budget": output_budget,
                     "worker_count": self.config.worker_count,
                     "worker_backend": self.resolved_worker_backend().cli_name(),
-                }),
-            );
-        }
+        });
         for snapshot in self.stage_progress_snapshots() {
             session.on_event(RuntimeEvent::StageUpdated(snapshot));
         }
@@ -1491,15 +1814,10 @@ impl WaveEngine {
                 wave: self.wave_count,
                 target_stage,
             });
-            if trace.is_enabled() {
-                trace.event(
-                    "wave_started",
-                    json!({
+            crate::trace!(trace, "wave_started", {
                         "wave": self.wave_count,
                         "target_stage": target_stage,
-                    }),
-                );
-            }
+            });
             let wave = self.run_wave_sync_with_session_and_trace(
                 attempt_budget,
                 output_budget,
@@ -1518,10 +1836,7 @@ impl WaveEngine {
                 discovered_paths: wave.discovered_paths(),
                 scored_paths: wave.scored_paths(),
             });
-            if trace.is_enabled() {
-                trace.event(
-                    "wave_finished",
-                    json!({
+            crate::trace!(trace, "wave_finished", {
                         "wave": wave.wave(),
                         "target_stage": wave.target_stage(),
                         "attempts": wave.target().attempts(),
@@ -1529,15 +1844,35 @@ impl WaveEngine {
                         "new_outputs": wave.target().new_outputs(),
                         "discovered_paths": wave.discovered_paths(),
                         "scored_paths": wave.scored_paths(),
-                    }),
-                );
-            }
+            });
+            self.trace_storage_snapshot(trace, "wave_finished");
             self.emit_scoring_update_with_trace(session, trace, "wave_finished");
+            observer
+                .on_wave_progress(
+                    self,
+                    &self.recent_scored_paths,
+                    session,
+                    trace,
+                    "wave_finished",
+                )
+                .map_err(SynthesisError::WorkerProcess)?;
+            self.recent_scored_paths.clear();
             waves.push(wave);
         }
 
         self.drain_scoring_jobs_with_trace(trace, "run_finished_drain");
+        self.trace_storage_snapshot(trace, "run_finished_drain");
         self.emit_scoring_update_with_trace(session, trace, "run_finished_drain");
+        observer
+            .on_wave_progress(
+                self,
+                &self.recent_scored_paths,
+                session,
+                trace,
+                "run_finished_drain",
+            )
+            .map_err(SynthesisError::WorkerProcess)?;
+        self.recent_scored_paths.clear();
         let result = WaveSearchResult {
             wave_count: self.wave_count,
             search_exhausted: self.search_exhausted(),
@@ -1549,19 +1884,57 @@ impl WaveEngine {
             scored_paths: self.scored_path_count(),
             best_score: self.best_score(),
         });
-        if trace.is_enabled() {
-            trace.event(
-                "engine_run_finished",
-                json!({
+        crate::trace!(trace, "engine_run_finished", {
                     "wave_count": result.wave_count(),
                     "search_exhausted": result.search_exhausted(),
                     "scored_paths": self.scored_path_count(),
                     "best_score": self.best_score(),
-                }),
-            );
-        }
+        });
 
         Ok(result)
+    }
+
+    fn trace_storage_snapshot(&self, trace: &mut RuntimeTrace, reason: &str) {
+        crate::trace!(trace, "engine_storage_snapshot", {
+            "reason": reason,
+            "wave": self.wave_count,
+            "states": self.transition_table.states().len(),
+            "path_registry_paths": self.path_registry.len(),
+            "path_registry_indexed_transitions": self.path_registry.indexed_transition_count(),
+            "path_registry_indexed_path_refs": self.path_registry.indexed_path_ref_count(),
+            "scored_path_keys": self.scored_path_keys.len(),
+            "retained_scored_paths": self.scored_paths.len(),
+            "recent_scored_paths": self.recent_scored_paths.len(),
+            "latest_scoring_signatures": self.latest_scoring_signatures.len(),
+            "pending_scoring_path_ids": self.pending_scoring_path_ids.len(),
+            "pending_scoring_path_set": self.pending_scoring_path_set.len(),
+            "pending_registered_rescore_transitions": self.pending_registered_rescore_transitions.len(),
+            "buffered_scoring_results": self.buffered_scoring_results.len(),
+            "pending_scoring_jobs": self.pending_scoring_job_count(),
+            "in_flight_scoring_jobs": self.in_flight_scoring_job_count(),
+            "stages": self
+            .transition_table
+            .stages()
+            .iter()
+            .enumerate()
+            .map(|(stage, data)| {
+                json!({
+                    "stage": stage,
+                    "transitions": data.transition_count(),
+                    "gadgets": data.total_gadget_count(),
+                    "unique_inputs": data.unique_input_ids().len(),
+                    "unique_outputs": data.unique_output_ids().len(),
+                    "attempted_pairs": data.attempted_pair_count(),
+                    "forwarded_outputs": data.forwarded_output_count(),
+                    "transitions_by_input_entries": data.transitions_by_input_entry_count(),
+                    "transitions_by_input_refs": data.transitions_by_input_ref_count(),
+                    "transitions_by_output_entries": data.transitions_by_output_entry_count(),
+                    "transitions_by_output_refs": data.transitions_by_output_ref_count(),
+                    "attempts": data.attempts(),
+                })
+            })
+            .collect::<Vec<_>>(),
+        });
     }
 
     pub fn stage_progress_snapshots(&self) -> Vec<StageProgressSnapshot> {
@@ -1595,7 +1968,7 @@ impl WaveEngine {
     fn scoring_progress_snapshot(&self) -> ScoringProgressSnapshot {
         ScoringProgressSnapshot::new(
             self.next_scoring_result_order,
-            self.next_scoring_job_order,
+            self.next_scoring_job_order + self.pending_scoring_path_ids.len(),
             self.pending_scoring_job_count(),
             self.scored_path_count(),
         )
@@ -1609,13 +1982,9 @@ impl WaveEngine {
         path_id: PathId,
         path: &CompletePath,
     ) {
-        if !trace.is_enabled() {
-            return;
-        }
-        let (queued, submitted, completed, pending, scored) = self.scoring_trace_counts();
-        trace.event(
-            "scoring_job_queued",
-            json!({
+        crate::trace!(trace, if should_trace_scoring_detail(order), "scoring_job_queued", [
+            let (queued, submitted, completed, pending, scored) = self.scoring_trace_counts();
+        ], {
                 "reason": reason,
                 "order": order,
                 "path_id": path_id.0,
@@ -1626,8 +1995,139 @@ impl WaveEngine {
                 "completed": completed,
                 "pending": pending,
                 "scored": scored,
-            }),
-        );
+        });
+    }
+
+    fn trace_registered_path_rescore_deferred(
+        &self,
+        trace: &mut RuntimeTrace,
+        reason: &str,
+        transition: TransitionRef,
+        registered_paths: usize,
+        was_new_pending_transition: bool,
+    ) {
+        crate::trace!(trace, "registered_path_rescore_deferred", {
+                "reason": reason,
+                "stage": transition.stage,
+                "transition": transition.transition.0,
+                "registered_paths": registered_paths,
+                "was_new_pending_transition": was_new_pending_transition,
+                "pending_registered_rescore_transitions": self.pending_registered_rescore_transitions.len(),
+        });
+    }
+
+    fn trace_registered_path_rescore_flushed(
+        &self,
+        trace: &mut RuntimeTrace,
+        reason: &str,
+        transition_count: usize,
+        candidate_paths: usize,
+        enqueued: usize,
+    ) {
+        crate::trace!(trace, "registered_path_rescore_flushed", {
+                "reason": reason,
+                "transitions": transition_count,
+                "candidate_paths": candidate_paths,
+                "enqueued": enqueued,
+                "queued": self.next_scoring_job_order,
+                "pending": self.pending_scoring_job_count(),
+        });
+    }
+
+    fn trace_process_worker_spawned(
+        &self,
+        trace: &mut RuntimeTrace,
+        reason: &str,
+        worker: &ProcessSynthesisWorker,
+    ) {
+        crate::trace!(trace, "process_worker_spawned", {
+                "reason": reason,
+                "pid": worker.pid(),
+                "rss_kb": worker.rss_kb(),
+                "recycle_job_limit": PROCESS_WORKER_RECYCLE_JOB_LIMIT,
+        });
+    }
+
+    fn trace_process_worker_recycled(
+        &self,
+        trace: &mut RuntimeTrace,
+        worker: &ProcessSynthesisWorker,
+    ) {
+        crate::trace!(trace, "process_worker_recycled", {
+                "pid": worker.pid(),
+                "jobs_since_spawn": worker.jobs_since_spawn(),
+                "rss_kb": worker.rss_kb(),
+                "recycle_job_limit": PROCESS_WORKER_RECYCLE_JOB_LIMIT,
+        });
+    }
+
+    fn trace_process_worker_pool_snapshot(
+        &self,
+        trace: &mut RuntimeTrace,
+        reason: &str,
+        workers: &[ProcessSynthesisWorker],
+    ) {
+        crate::trace!(trace, "process_worker_pool_snapshot", [
+            let rss_values = workers
+                .iter()
+                .filter_map(|worker| worker.rss_kb())
+                .collect::<Vec<_>>();
+            let jobs_total = workers
+                .iter()
+                .map(ProcessSynthesisWorker::jobs_since_spawn)
+                .sum::<usize>();
+            let jobs_max = workers
+                .iter()
+                .map(ProcessSynthesisWorker::jobs_since_spawn)
+                .max()
+                .unwrap_or(0);
+            let rss_total_kb = (!rss_values.is_empty()).then(|| rss_values.iter().sum::<u64>());
+            let rss_min_kb = rss_values.iter().min().copied();
+            let rss_max_kb = rss_values.iter().max().copied();
+        ], {
+                "reason": reason,
+                "workers": workers.len(),
+                "rss_total_kb": rss_total_kb,
+                "rss_min_kb": rss_min_kb,
+                "rss_max_kb": rss_max_kb,
+                "jobs_since_spawn_total": jobs_total,
+                "jobs_since_spawn_max": jobs_max,
+                "recycle_job_limit": PROCESS_WORKER_RECYCLE_JOB_LIMIT,
+        });
+    }
+
+    fn trace_process_worker_rss_snapshot(
+        &self,
+        trace: &mut RuntimeTrace,
+        reason: &str,
+        pids: &[u32],
+        counters: WorkerCounters,
+    ) {
+        crate::trace!(trace, if !pids.is_empty(), "process_worker_rss_snapshot", [
+            let rss_values = pids
+                .iter()
+                .filter_map(|pid| process_rss_kb(*pid))
+                .collect::<Vec<_>>();
+            let rss_total_kb = (!rss_values.is_empty()).then(|| rss_values.iter().sum::<u64>());
+            let rss_min_kb = rss_values.iter().min().copied();
+            let rss_max_kb = rss_values.iter().max().copied();
+        ], {
+                "reason": reason,
+                "stage": counters.stage,
+                "workers": pids.len(),
+                "rss_total_kb": rss_total_kb,
+                "rss_min_kb": rss_min_kb,
+                "rss_max_kb": rss_max_kb,
+                "job_count": counters.job_count,
+                "worker_capacity": counters.worker_capacity,
+                "active_workers": counters.active_workers,
+                "in_flight": counters.in_flight,
+                "next_to_send": counters.next_to_send,
+                "next_to_apply": counters.next_to_apply,
+                "buffered_results": counters.buffered_results,
+                "job_interval": PROCESS_WORKER_RSS_TRACE_INTERVAL,
+                "idle_interval_ms": PROCESS_WORKER_RSS_TRACE_IDLE_INTERVAL.as_millis(),
+        });
     }
 
     fn trace_scoring_job_completed(
@@ -1636,13 +2136,9 @@ impl WaveEngine {
         reason: &str,
         fields: ScoringJobTraceFields,
     ) {
-        if !trace.is_enabled() {
-            return;
-        }
-        let (queued, submitted, completed, pending, scored) = self.scoring_trace_counts();
-        trace.event(
-            "scoring_job_completed",
-            json!({
+        crate::trace!(trace, if should_trace_scoring_detail(fields.order), "scoring_job_completed", [
+            let (queued, submitted, completed, pending, scored) = self.scoring_trace_counts();
+        ], {
                 "reason": reason,
                 "order": fields.order,
                 "path_id": fields.path_id.0,
@@ -1654,8 +2150,7 @@ impl WaveEngine {
                 "completed": completed,
                 "pending": pending,
                 "scored": scored,
-            }),
-        );
+        });
     }
 
     fn trace_scoring_job_applied(
@@ -1665,13 +2160,9 @@ impl WaveEngine {
         fields: ScoringJobTraceFields,
         applied_candidates: usize,
     ) {
-        if !trace.is_enabled() {
-            return;
-        }
-        let (queued, submitted, completed, pending, scored) = self.scoring_trace_counts();
-        trace.event(
-            "scoring_job_applied",
-            json!({
+        crate::trace!(trace, if should_trace_scoring_detail(fields.order), "scoring_job_applied", [
+            let (queued, submitted, completed, pending, scored) = self.scoring_trace_counts();
+        ], {
                 "reason": reason,
                 "order": fields.order,
                 "path_id": fields.path_id.0,
@@ -1683,19 +2174,14 @@ impl WaveEngine {
                 "completed": completed,
                 "pending": pending,
                 "scored": scored,
-            }),
-        );
+        });
     }
 
     fn trace_scoring_queue_snapshot(&self, trace: &mut RuntimeTrace, reason: &str) {
-        if !trace.is_enabled() {
-            return;
-        }
-        let snapshot = self.scoring_progress_snapshot();
-        let (queued, submitted, completed, pending, scored) = self.scoring_trace_counts();
-        trace.event(
-            "scoring_queue_snapshot",
-            json!({
+        crate::trace!(trace, "scoring_queue_snapshot", [
+            let snapshot = self.scoring_progress_snapshot();
+            let (queued, submitted, completed, pending, scored) = self.scoring_trace_counts();
+        ], {
                 "reason": reason,
                 "queued": queued,
                 "submitted": submitted,
@@ -1706,13 +2192,15 @@ impl WaveEngine {
                 "completed_paths": snapshot.completed_paths(),
                 "pending_paths": snapshot.pending_paths(),
                 "scored_paths": snapshot.scored_paths(),
-            }),
-        );
+                "pending_limit": self.scoring_pool.max_pending_jobs,
+                "pending_backlog": self.pending_scoring_path_ids.len(),
+                "in_flight": self.in_flight_scoring_job_count(),
+        });
     }
 
     fn scoring_trace_counts(&self) -> (usize, usize, usize, usize, usize) {
         (
-            self.next_scoring_job_order,
+            self.next_scoring_job_order + self.pending_scoring_path_ids.len(),
             self.next_scoring_job_order,
             self.next_scoring_result_order,
             self.pending_scoring_job_count(),
@@ -1755,13 +2243,32 @@ impl WaveEngine {
             return;
         }
 
-        self.scored_paths.sort_by(|left, right| {
-            left.cost()
-                .score()
-                .total_cmp(&right.cost().score())
-                .then_with(|| left.discovery_order().cmp(&right.discovery_order()))
-        });
+        self.scored_paths.sort_by(Self::compare_scored_paths);
         self.scored_paths.truncate(top_k);
+        self.sync_scored_path_keys();
+    }
+
+    fn retain_recent_scored_paths(&mut self) {
+        let Some(top_k) = self.config.top_k else {
+            return;
+        };
+        let tie_limit = rough_tie_expanded_limit(top_k);
+        retain_rough_frontier(&mut self.recent_scored_paths, top_k, tie_limit);
+    }
+
+    fn sync_scored_path_keys(&mut self) {
+        self.scored_path_keys = self
+            .scored_paths
+            .iter()
+            .map(|path| path.assigned_path().selection_key())
+            .collect();
+    }
+
+    fn compare_scored_paths(left: &ScoredPath, right: &ScoredPath) -> std::cmp::Ordering {
+        left.cost()
+            .score()
+            .total_cmp(&right.cost().score())
+            .then_with(|| left.discovery_order().cmp(&right.discovery_order()))
     }
 
     fn enqueue_scoring_paths_with_trace(
@@ -1774,30 +2281,77 @@ impl WaveEngine {
             return 0;
         }
 
-        let table = Arc::new(self.transition_table.clone());
         let mut enqueued = 0;
         for path in paths {
             let registration = self.path_registry.register(path);
-            if self.submit_scoring_path_with_trace(
-                registration.id,
-                Arc::clone(&table),
-                trace,
-                reason,
-            ) {
+            if self.queue_scoring_path(registration.id) {
                 enqueued += 1;
             }
         }
+        self.top_off_scoring_jobs_with_trace(trace, reason);
+        self.trace_scoring_queue_snapshot(trace, reason);
         enqueued
     }
 
-    fn enqueue_registered_paths_for_transition_with_trace(
+    fn defer_registered_paths_for_transition_rescore_with_trace(
         &mut self,
         transition: TransitionRef,
         trace: &mut RuntimeTrace,
         reason: &str,
     ) -> usize {
-        let path_ids = self.path_registry.paths_for_transition(transition).to_vec();
-        self.enqueue_scoring_path_ids_with_trace(path_ids, trace, reason)
+        let registered_paths = self.path_registry.paths_for_transition(transition).len();
+        if registered_paths == 0 {
+            return 0;
+        }
+
+        let was_new_pending_transition = self
+            .pending_registered_rescore_transitions
+            .insert(transition);
+        self.trace_registered_path_rescore_deferred(
+            trace,
+            reason,
+            transition,
+            registered_paths,
+            was_new_pending_transition,
+        );
+        0
+    }
+
+    fn flush_pending_registered_path_rescores_with_trace(
+        &mut self,
+        trace: &mut RuntimeTrace,
+        reason: &str,
+    ) -> usize {
+        if self.pending_registered_rescore_transitions.is_empty() {
+            return 0;
+        }
+
+        let transitions = std::mem::take(&mut self.pending_registered_rescore_transitions);
+        let transition_count = transitions.len();
+        let mut path_ids = BTreeSet::new();
+        for transition in transitions {
+            path_ids.extend(
+                self.path_registry
+                    .paths_for_transition(transition)
+                    .iter()
+                    .copied(),
+            );
+        }
+
+        let candidate_paths = path_ids.len();
+        let enqueued = self.enqueue_scoring_path_ids_with_trace(
+            path_ids.into_iter().collect(),
+            trace,
+            "registered_gadget_rescore",
+        );
+        self.trace_registered_path_rescore_flushed(
+            trace,
+            reason,
+            transition_count,
+            candidate_paths,
+            enqueued,
+        );
+        enqueued
     }
 
     fn enqueue_scoring_path_ids_with_trace(
@@ -1810,40 +2364,70 @@ impl WaveEngine {
             return 0;
         }
 
-        let table = Arc::new(self.transition_table.clone());
         let mut enqueued = 0;
         for path_id in path_ids {
-            if self.submit_scoring_path_with_trace(path_id, Arc::clone(&table), trace, reason) {
+            if self.queue_scoring_path(path_id) {
                 enqueued += 1;
             }
         }
+        self.top_off_scoring_jobs_with_trace(trace, reason);
+        self.trace_scoring_queue_snapshot(trace, reason);
         enqueued
+    }
+
+    fn queue_scoring_path(&mut self, path_id: PathId) -> bool {
+        let path = self.path_registry.path(path_id).clone();
+        let signature = self.path_scoring_signature(&path);
+        if self
+            .latest_scoring_signatures
+            .get(&path_id)
+            .is_some_and(|existing| existing == &signature)
+        {
+            return false;
+        }
+        self.latest_scoring_signatures.insert(path_id, signature);
+        let newly_pending = self.pending_scoring_path_set.insert(path_id);
+        if newly_pending {
+            self.pending_scoring_path_ids.push_back(path_id);
+        }
+        newly_pending
+    }
+
+    fn top_off_scoring_jobs_with_trace(&mut self, trace: &mut RuntimeTrace, reason: &str) -> usize {
+        let mut submitted = 0;
+        while self.scoring_pool.has_capacity() {
+            let Some(path_id) = self.pending_scoring_path_ids.pop_front() else {
+                break;
+            };
+            self.pending_scoring_path_set.remove(&path_id);
+            self.submit_scoring_path_with_trace(path_id, trace, reason);
+            submitted += 1;
+        }
+        submitted
     }
 
     fn submit_scoring_path_with_trace(
         &mut self,
         path_id: PathId,
-        table: Arc<TransitionTable>,
         trace: &mut RuntimeTrace,
         reason: &str,
-    ) -> bool {
+    ) {
         let path = self.path_registry.path(path_id).clone();
-        let signature = self.path_scoring_signature(&path);
-        if !self.submitted_scoring_signatures.insert(signature) {
-            return false;
-        }
-
+        let snapshot = self.path_scoring_snapshot(&path);
         let order = self.next_scoring_job_order;
         self.next_scoring_job_order += 1;
         self.scoring_pool.submit(ScoringJob {
             order,
             path_id,
             path: path.clone(),
-            table,
+            snapshot,
             assignment_limit: self.config.top_k.unwrap_or(1),
         });
         self.trace_scoring_job_queued(trace, reason, order, path_id, &path);
-        true
+    }
+
+    fn path_scoring_snapshot(&self, path: &CompletePath) -> PathScoringSnapshot {
+        PathScoringSnapshot::from_table(path, &self.transition_table)
     }
 
     fn path_scoring_signature(&self, path: &CompletePath) -> PathScoringSignature {
@@ -1869,12 +2453,17 @@ impl WaveEngine {
         &mut self,
         trace: &mut RuntimeTrace,
         reason: &str,
+        result_limit: Option<usize>,
     ) -> usize {
         let mut scored = 0;
-        while let Some(result) = self
-            .buffered_scoring_results
-            .remove(&self.next_scoring_result_order)
-        {
+        let mut applied_results = 0;
+        while result_limit.is_none_or(|limit| applied_results < limit) {
+            let Some(result) = self
+                .buffered_scoring_results
+                .remove(&self.next_scoring_result_order)
+            else {
+                break;
+            };
             let fields = ScoringJobTraceFields {
                 order: result.order,
                 path_id: result.path_id,
@@ -1884,16 +2473,21 @@ impl WaveEngine {
             let mut applied_candidates = 0;
             self.next_scoring_result_order += 1;
             self.scoring_pool.pending_jobs = self.scoring_pool.pending_jobs.saturating_sub(1);
+            applied_results += 1;
+            self.recent_scored_paths
+                .extend(result.scored_paths.iter().cloned());
+            self.retain_recent_scored_paths();
             for scored_path in result.scored_paths {
                 let key = scored_path.assigned_path().selection_key();
-                if !self.scored_path_keys.insert(key) {
+                if self.scored_path_keys.contains(&key) {
                     continue;
                 }
+                self.scored_path_keys.insert(key);
                 self.scored_paths.push(scored_path);
-                self.retain_top_k_paths();
                 scored += 1;
                 applied_candidates += 1;
             }
+            self.retain_top_k_paths();
             self.trace_scoring_job_applied(trace, reason, fields, applied_candidates);
         }
         scored
@@ -1945,10 +2539,7 @@ impl WaveEngine {
         } else {
             self.config.worker_count.min(jobs.len()).max(1)
         };
-        if trace.is_enabled() {
-            trace.event(
-                "stage_jobs_prepared",
-                json!({
+        crate::trace!(trace, "stage_jobs_prepared", {
                     "stage": stage,
                     "jobs": jobs.len(),
                     "attempt_budget": attempt_budget,
@@ -1956,9 +2547,7 @@ impl WaveEngine {
                     "attempts_at_start": attempts_at_start,
                     "outputs_at_start": outputs_at_start,
                     "worker_capacity": worker_capacity,
-                }),
-            );
-        }
+        });
         self.set_stage_worker_state(stage, 0, worker_capacity, jobs.len());
         self.emit_stage_update(stage, session);
         if self.config.worker_count > 1 && jobs.len() > 1 {
@@ -2037,37 +2626,38 @@ impl WaveEngine {
         let config = self.config;
         let backend = self.resolved_worker_backend();
         let mut process_workers = if backend == WorkerBackendArg::Process {
-            Some(
-                (0..worker_count)
-                    .map(|_| ProcessSynthesisWorker::spawn(config))
-                    .collect::<Result<Vec<_>, _>>()?,
-            )
+            Some(self.take_process_workers(worker_count, trace)?)
         } else {
             None
         };
+        let process_worker_pids = process_workers
+            .as_ref()
+            .map(|workers| {
+                workers
+                    .iter()
+                    .map(ProcessSynthesisWorker::pid)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         let (job_sender, job_receiver) = mpsc::channel::<Option<WorkerSynthesisJob>>();
         let job_receiver = Arc::new(Mutex::new(job_receiver));
         let (event_sender, event_receiver) = mpsc::channel::<WorkerPoolEvent>();
-        if trace.is_enabled() {
-            trace.event(
-                "worker_pool_started",
-                json!({
+        crate::trace!(trace, "worker_pool_started", {
                     "stage": stage,
                     "jobs": jobs.len(),
                     "worker_capacity": worker_count,
                     "worker_backend": backend.cli_name(),
                     "outputs_at_start": outputs_at_start,
                     "output_budget": output_budget,
-                }),
-            );
-        }
+        });
 
         thread::scope(|scope| {
+            let mut process_handles = Vec::new();
             if let Some(workers) = process_workers.take() {
                 for mut process_worker in workers {
                     let job_receiver = Arc::clone(&job_receiver);
                     let event_sender = event_sender.clone();
-                    scope.spawn(move || {
+                    process_handles.push(scope.spawn(move || {
                         loop {
                             let message = {
                                 let receiver = job_receiver
@@ -2090,8 +2680,8 @@ impl WaveEngine {
                                 break;
                             }
                         }
-                        process_worker.shutdown();
-                    });
+                        process_worker
+                    }));
                 }
             } else {
                 for _ in 0..worker_count {
@@ -2135,6 +2725,8 @@ impl WaveEngine {
             let mut valid_outputs = 0;
             let mut new_transitions = 0;
             let mut discovered_paths = 0;
+            let mut buffered_results = BTreeMap::new();
+            let mut next_rss_trace_job = PROCESS_WORKER_RSS_TRACE_INTERVAL;
 
             while !session.should_stop() && in_flight < worker_count && next_to_send < jobs.len() {
                 let job_index = next_to_send;
@@ -2153,7 +2745,7 @@ impl WaveEngine {
                         in_flight,
                         next_to_send,
                         next_to_apply: applied_jobs,
-                        buffered_results: 0,
+                        buffered_results: buffered_results.len(),
                     },
                 );
             }
@@ -2175,29 +2767,64 @@ impl WaveEngine {
                     in_flight,
                     next_to_send,
                     next_to_apply: applied_jobs,
-                    buffered_results: 0,
+                    buffered_results: buffered_results.len(),
+                },
+            );
+            self.trace_process_worker_rss_snapshot(
+                trace,
+                "initial_submission",
+                &process_worker_pids,
+                WorkerCounters {
+                    stage,
+                    job_count: jobs.len(),
+                    worker_capacity: worker_count,
+                    active_workers,
+                    in_flight,
+                    next_to_send,
+                    next_to_apply: applied_jobs,
+                    buffered_results: buffered_results.len(),
                 },
             );
             if session.should_stop() {
                 stop_sending = true;
                 stop_applying = true;
-                trace.event(
-                    "worker_pool_stop_requested",
-                    json!({
+                crate::trace!(trace, "worker_pool_stop_requested", {
                         "stage": stage,
                         "reason": "session_stop",
                         "next_to_send": next_to_send,
                         "in_flight": in_flight,
                         "active_workers": active_workers,
-                    }),
-                );
+                });
             }
 
             let mut first_error = None;
             while in_flight > 0 {
-                let event = event_receiver
-                    .recv()
-                    .expect("worker event channel should stay open while jobs are in flight");
+                let event = match event_receiver
+                    .recv_timeout(PROCESS_WORKER_RSS_TRACE_IDLE_INTERVAL)
+                {
+                    Ok(event) => event,
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        self.trace_process_worker_rss_snapshot(
+                            trace,
+                            "idle_timeout",
+                            &process_worker_pids,
+                            WorkerCounters {
+                                stage,
+                                job_count: jobs.len(),
+                                worker_capacity: worker_count,
+                                active_workers,
+                                in_flight,
+                                next_to_send,
+                                next_to_apply: applied_jobs,
+                                buffered_results: buffered_results.len(),
+                            },
+                        );
+                        continue;
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        panic!("worker event channel should stay open while jobs are in flight");
+                    }
+                };
 
                 match event {
                     WorkerPoolEvent::Started(index) => {
@@ -2214,18 +2841,13 @@ impl WaveEngine {
                             ),
                         );
                         self.emit_stage_update(stage, session);
-                        if trace.is_enabled() {
-                            trace.event(
-                                "job_started",
-                                json!({
+                        crate::trace!(trace, "job_started", {
                                     "stage": stage,
                                     "job_index": index,
                                     "candidate_index": jobs[index].candidate_index(),
                                     "active_workers": active_workers,
                                     "in_flight": in_flight,
-                                }),
-                            );
-                        }
+                        });
                         trace_worker_counters(
                             trace,
                             "job_started",
@@ -2237,7 +2859,7 @@ impl WaveEngine {
                                 in_flight,
                                 next_to_send,
                                 next_to_apply: applied_jobs,
-                                buffered_results: 0,
+                                buffered_results: buffered_results.len(),
                             },
                         );
                         continue;
@@ -2256,11 +2878,8 @@ impl WaveEngine {
                                 active_workers,
                             ),
                         );
-                        if trace.is_enabled() {
-                            match &result {
-                                Ok(output) => trace.event(
-                                    "job_finished",
-                                    json!({
+                        match &result {
+                            Ok(output) => crate::trace!(trace, "job_finished", {
                                         "stage": stage,
                                         "job_index": index,
                                         "candidate_index": output.job.candidate_index(),
@@ -2268,11 +2887,8 @@ impl WaveEngine {
                                         "valid_outputs": output.results.len(),
                                         "active_workers": active_workers,
                                         "in_flight": in_flight,
-                                    }),
-                                ),
-                                Err(error) => trace.event(
-                                    "job_finished",
-                                    json!({
+                            }),
+                            Err(error) => crate::trace!(trace, "job_finished", {
                                         "stage": stage,
                                         "job_index": index,
                                         "candidate_index": jobs[index].candidate_index(),
@@ -2280,9 +2896,7 @@ impl WaveEngine {
                                         "error": error.to_string(),
                                         "active_workers": active_workers,
                                         "in_flight": in_flight,
-                                    }),
-                                ),
-                            }
+                            }),
                         }
                         trace_worker_counters(
                             trace,
@@ -2295,123 +2909,143 @@ impl WaveEngine {
                                 in_flight,
                                 next_to_send,
                                 next_to_apply: applied_jobs,
-                                buffered_results: 0,
+                                buffered_results: buffered_results.len(),
                             },
                         );
                         if stop_applying {
                             continue;
                         }
-                        match result {
-                            Ok(output) => {
-                                let job_index = index;
-                                let job_stage = output.job.stage();
-                                let candidate_index = output.job.candidate_index();
-                                let worker_valid_outputs = output.results.len();
-                                if trace.is_enabled() {
-                                    trace.event(
-                                        "job_apply_started",
-                                        json!({
-                                            "stage": job_stage,
-                                            "job_index": job_index,
-                                            "candidate_index": candidate_index,
-                                            "valid_outputs": worker_valid_outputs,
-                                        }),
-                                    );
-                                }
-                                let apply_result =
-                                    self.apply_synthesis_output_with_trace(output, trace);
-                                attempts += apply_result.attempts();
-                                valid_outputs += apply_result.valid_output_count();
-                                new_transitions += apply_result.new_transition_count();
-                                discovered_paths += apply_result.discovered_paths();
-                                self.poll_scoring_jobs_with_trace(trace, "job_apply_finished");
-                                self.emit_scoring_update_with_trace(
-                                    session,
-                                    trace,
-                                    "job_apply_finished",
-                                );
-                                applied_jobs += 1;
-                                self.emit_stage_update(stage, session);
-                                if trace.is_enabled() {
-                                    trace.event(
+                        buffered_results.insert(index, result);
+                        while !stop_applying {
+                            let Some(result) = buffered_results.remove(&applied_jobs) else {
+                                break;
+                            };
+                            match result {
+                                Ok(output) => {
+                                    let job_index = applied_jobs;
+                                    let job_stage = output.job.stage();
+                                    let candidate_index = output.job.candidate_index();
+                                    let worker_valid_outputs = output.results.len();
+                                    crate::trace!(trace, "job_apply_started", {
+                                                "stage": job_stage,
+                                                "job_index": job_index,
+                                                "candidate_index": candidate_index,
+                                                "valid_outputs": worker_valid_outputs,
+                                    });
+                                    let apply_result =
+                                        self.apply_synthesis_output_with_trace(output, trace);
+                                    attempts += apply_result.attempts();
+                                    valid_outputs += apply_result.valid_output_count();
+                                    new_transitions += apply_result.new_transition_count();
+                                    discovered_paths += apply_result.discovered_paths();
+                                    applied_jobs += 1;
+                                    if applied_jobs.is_multiple_of(
+                                        SCORING_RESULT_POLL_INTERVAL_PER_SYNTHESIS_JOBS,
+                                    ) {
+                                        self.poll_some_scoring_jobs_with_trace(
+                                            trace,
+                                            "job_apply_finished",
+                                            SCORING_RESULT_POLL_LIMIT_PER_SYNTHESIS_INTERVAL,
+                                        );
+                                        self.emit_scoring_update_with_trace(
+                                            session,
+                                            trace,
+                                            "job_apply_finished",
+                                        );
+                                    }
+                                    if applied_jobs >= next_rss_trace_job {
+                                        self.trace_process_worker_rss_snapshot(
+                                            trace,
+                                            "job_apply_interval",
+                                            &process_worker_pids,
+                                            WorkerCounters {
+                                                stage,
+                                                job_count: jobs.len(),
+                                                worker_capacity: worker_count,
+                                                active_workers,
+                                                in_flight,
+                                                next_to_send,
+                                                next_to_apply: applied_jobs,
+                                                buffered_results: buffered_results.len(),
+                                            },
+                                        );
+                                        while next_rss_trace_job <= applied_jobs {
+                                            next_rss_trace_job += PROCESS_WORKER_RSS_TRACE_INTERVAL;
+                                        }
+                                    }
+                                    self.emit_stage_update(stage, session);
+                                    crate::trace!(trace, "job_apply_finished", [
+                                        let stage_new_outputs =
+                                            self.transition_table.unique_output_count(stage)
+                                                - outputs_at_start;
+                                    ], {
+                                                "stage": job_stage,
+                                                "job_index": job_index,
+                                                "candidate_index": candidate_index,
+                                                "attempts": apply_result.attempts(),
+                                                "valid_outputs": apply_result.valid_output_count(),
+                                                "new_transitions": apply_result.new_transition_count(),
+                                                "discovered_paths": apply_result.discovered_paths(),
+                                                "total_attempts": attempts,
+                                                "total_valid_outputs": valid_outputs,
+                                                "total_new_transitions": new_transitions,
+                                                "stage_new_outputs": stage_new_outputs,
+                                    });
+                                    trace_worker_counters(
+                                        trace,
                                         "job_apply_finished",
-                                        json!({
-                                            "stage": job_stage,
-                                            "job_index": job_index,
-                                            "candidate_index": candidate_index,
-                                            "attempts": apply_result.attempts(),
-                                            "valid_outputs": apply_result.valid_output_count(),
-                                            "new_transitions": apply_result.new_transition_count(),
-                                            "discovered_paths": apply_result.discovered_paths(),
-                                            "total_attempts": attempts,
-                                            "total_valid_outputs": valid_outputs,
-                                            "total_new_transitions": new_transitions,
-                                            "stage_new_outputs": self.transition_table.unique_output_count(stage) - outputs_at_start,
-                                        }),
+                                        WorkerCounters {
+                                            stage,
+                                            job_count: jobs.len(),
+                                            worker_capacity: worker_count,
+                                            active_workers,
+                                            in_flight,
+                                            next_to_send,
+                                            next_to_apply: applied_jobs,
+                                            buffered_results: buffered_results.len(),
+                                        },
                                     );
+                                    if session.should_stop() {
+                                        crate::trace!(trace, "worker_pool_stop_requested", {
+                                                "stage": stage,
+                                                "reason": "session_stop",
+                                                "next_to_send": next_to_send,
+                                                "in_flight": in_flight,
+                                                "active_workers": active_workers,
+                                        });
+                                        break;
+                                    }
+
+                                    let new_outputs =
+                                        self.transition_table.unique_output_count(stage)
+                                            - outputs_at_start;
+                                    if new_outputs >= output_budget {
+                                        stop_sending = true;
+                                        stop_applying = true;
+                                        crate::trace!(trace, "worker_pool_stop_requested", {
+                                                "stage": stage,
+                                                "reason": "output_budget",
+                                                "new_outputs": new_outputs,
+                                                "output_budget": output_budget,
+                                                "next_to_send": next_to_send,
+                                                "in_flight": in_flight,
+                                                "active_workers": active_workers,
+                                        });
+                                    }
                                 }
-                                trace_worker_counters(
-                                    trace,
-                                    "job_apply_finished",
-                                    WorkerCounters {
-                                        stage,
-                                        job_count: jobs.len(),
-                                        worker_capacity: worker_count,
-                                        active_workers,
-                                        in_flight,
-                                        next_to_send,
-                                        next_to_apply: applied_jobs,
-                                        buffered_results: 0,
-                                    },
-                                );
-                                if session.should_stop() {
-                                    trace.event(
-                                        "worker_pool_stop_requested",
-                                        json!({
+                                Err(error) => {
+                                    crate::trace!(trace, "worker_pool_stop_requested", {
                                             "stage": stage,
-                                            "reason": "session_stop",
+                                            "reason": "worker_error",
+                                            "error": error.to_string(),
                                             "next_to_send": next_to_send,
                                             "in_flight": in_flight,
                                             "active_workers": active_workers,
-                                        }),
-                                    );
-                                    break;
-                                }
-
-                                let new_outputs = self.transition_table.unique_output_count(stage)
-                                    - outputs_at_start;
-                                if new_outputs >= output_budget {
+                                    });
+                                    first_error = Some(error);
                                     stop_sending = true;
                                     stop_applying = true;
-                                    trace.event(
-                                        "worker_pool_stop_requested",
-                                        json!({
-                                            "stage": stage,
-                                            "reason": "output_budget",
-                                            "new_outputs": new_outputs,
-                                            "output_budget": output_budget,
-                                            "next_to_send": next_to_send,
-                                            "in_flight": in_flight,
-                                            "active_workers": active_workers,
-                                        }),
-                                    );
                                 }
-                            }
-                            Err(error) => {
-                                trace.event(
-                                    "worker_pool_stop_requested",
-                                    json!({
-                                        "stage": stage,
-                                        "reason": "worker_error",
-                                        "error": error.to_string(),
-                                        "next_to_send": next_to_send,
-                                        "in_flight": in_flight,
-                                        "active_workers": active_workers,
-                                    }),
-                                );
-                                first_error = Some(error);
-                                stop_sending = true;
-                                stop_applying = true;
                             }
                         }
                     }
@@ -2420,31 +3054,25 @@ impl WaveEngine {
                 if session.should_stop() {
                     stop_sending = true;
                     stop_applying = true;
-                    trace.event(
-                        "worker_pool_stop_requested",
-                        json!({
+                    crate::trace!(trace, "worker_pool_stop_requested", {
                             "stage": stage,
                             "reason": "session_stop",
                             "next_to_send": next_to_send,
                             "in_flight": in_flight,
                             "active_workers": active_workers,
-                        }),
-                    );
+                    });
                 }
 
                 while !stop_sending && in_flight < worker_count && next_to_send < jobs.len() {
                     if session.should_stop() {
                         stop_sending = true;
-                        trace.event(
-                            "worker_pool_stop_requested",
-                            json!({
+                        crate::trace!(trace, "worker_pool_stop_requested", {
                                 "stage": stage,
                                 "reason": "session_stop",
                                 "next_to_send": next_to_send,
                                 "in_flight": in_flight,
                                 "active_workers": active_workers,
-                            }),
-                        );
+                        });
                         break;
                     }
                     let job_index = next_to_send;
@@ -2463,7 +3091,7 @@ impl WaveEngine {
                             in_flight,
                             next_to_send,
                             next_to_apply: applied_jobs,
-                            buffered_results: 0,
+                            buffered_results: buffered_results.len(),
                         },
                     );
                 }
@@ -2485,13 +3113,24 @@ impl WaveEngine {
                         in_flight,
                         next_to_send,
                         next_to_apply: applied_jobs,
-                        buffered_results: 0,
+                        buffered_results: buffered_results.len(),
                     },
                 );
             }
 
             for _ in 0..worker_count {
                 let _ = job_sender.send(None);
+            }
+            let returned_process_workers = process_handles
+                .into_iter()
+                .map(|handle| {
+                    handle
+                        .join()
+                        .expect("process worker thread should not panic")
+                })
+                .collect::<Vec<_>>();
+            if !returned_process_workers.is_empty() {
+                self.return_process_workers(returned_process_workers, trace);
             }
 
             self.set_stage_worker_state(stage, 0, 0, 0);
@@ -2507,7 +3146,7 @@ impl WaveEngine {
                     in_flight: 0,
                     next_to_send,
                     next_to_apply: applied_jobs,
-                    buffered_results: 0,
+                    buffered_results: buffered_results.len(),
                 },
             );
 
@@ -2516,9 +3155,7 @@ impl WaveEngine {
             }
 
             let new_outputs = self.transition_table.unique_output_count(stage) - outputs_at_start;
-            trace.event(
-                "worker_pool_finished",
-                json!({
+            crate::trace!(trace, "worker_pool_finished", {
                     "stage": stage,
                     "attempts": attempts,
                     "valid_outputs": valid_outputs,
@@ -2529,8 +3166,7 @@ impl WaveEngine {
                     "submitted_jobs": next_to_send,
                     "applied_jobs": applied_jobs,
                     "buffered_results": 0,
-                }),
-            );
+            });
             Ok(StageRunResult {
                 stage,
                 attempts,
@@ -2610,6 +3246,14 @@ impl WaveEngine {
     }
 }
 
+impl Drop for WaveEngine {
+    fn drop(&mut self) {
+        for worker in self.process_workers.drain(..) {
+            worker.shutdown();
+        }
+    }
+}
+
 fn pending_worker_queue_len(
     job_count: usize,
     next_to_send: usize,
@@ -2620,6 +3264,12 @@ fn pending_worker_queue_len(
     job_count.saturating_sub(next_to_send) + sent_not_started
 }
 
+/// Snapshot of synthesis-worker scheduler counters for tracing.
+///
+/// This is emitted into runtime trace events and converted into stage progress
+/// snapshots. `next_to_send` and `next_to_apply` are ordered job cursors; the
+/// distinction matters because worker results may finish out of order but must
+/// still be applied in candidate order.
 #[derive(Clone, Copy)]
 struct WorkerCounters {
     stage: usize,
@@ -2644,12 +3294,7 @@ impl WorkerCounters {
 }
 
 fn trace_worker_counters(trace: &mut RuntimeTrace, reason: &str, counters: WorkerCounters) {
-    if !trace.is_enabled() {
-        return;
-    }
-    trace.event(
-        "worker_counters",
-        json!({
+    crate::trace!(trace, "worker_counters", {
             "reason": reason,
             "stage": counters.stage,
             "job_count": counters.job_count,
@@ -2660,8 +3305,7 @@ fn trace_worker_counters(trace: &mut RuntimeTrace, reason: &str, counters: Worke
             "next_to_send": counters.next_to_send,
             "next_to_apply": counters.next_to_apply,
             "buffered_results": counters.buffered_results,
-        }),
-    );
+    });
 }
 
 fn trace_job_submitted(
@@ -2670,12 +3314,7 @@ fn trace_job_submitted(
     job_index: usize,
     counters: WorkerCounters,
 ) {
-    if !trace.is_enabled() {
-        return;
-    }
-    trace.event(
-        "job_submitted",
-        json!({
+    crate::trace!(trace, "job_submitted", {
             "stage": job.stage(),
             "job_index": job_index,
             "candidate_index": job.candidate_index(),
@@ -2689,8 +3328,7 @@ fn trace_job_submitted(
             "next_to_send": counters.next_to_send,
             "next_to_apply": counters.next_to_apply,
             "buffered_results": counters.buffered_results,
-        }),
-    );
+    });
 }
 
 fn path_transitions_json(path: &CompletePath) -> Vec<Value> {
@@ -2702,6 +3340,58 @@ fn path_transitions_json(path: &CompletePath) -> Vec<Value> {
             })
         })
         .collect()
+}
+
+fn rough_tie_expanded_limit(top_k: usize) -> usize {
+    top_k
+        .saturating_mul(ROUGH_TIE_EXPANSION_FACTOR)
+        .max(top_k)
+        .max(1)
+}
+
+fn retain_rough_frontier(paths: &mut Vec<ScoredPath>, top_k: usize, tie_limit: usize) {
+    if top_k == 0 {
+        paths.clear();
+        return;
+    }
+    if paths.len() <= top_k {
+        return;
+    }
+
+    paths.sort_by(compare_rough_frontier_paths);
+    let cutoff_score = paths[top_k - 1].cost().score();
+    let tied_len = paths
+        .iter()
+        .position(|path| path.cost().score().total_cmp(&cutoff_score).is_gt())
+        .unwrap_or(paths.len());
+    paths.truncate(tied_len.min(tie_limit.max(top_k)));
+}
+
+fn compare_rough_frontier_paths(left: &ScoredPath, right: &ScoredPath) -> std::cmp::Ordering {
+    left.cost()
+        .score()
+        .total_cmp(&right.cost().score())
+        .then_with(|| {
+            left.assigned_path()
+                .selection_key()
+                .cmp(&right.assigned_path().selection_key())
+        })
+        .then_with(|| left.discovery_order().cmp(&right.discovery_order()))
+}
+
+fn should_trace_scoring_detail(order: usize) -> bool {
+    order < SCORING_TRACE_DETAIL_LIMIT || order.is_multiple_of(SCORING_TRACE_DETAIL_INTERVAL)
+}
+
+fn process_rss_kb(pid: u32) -> Option<u64> {
+    let status = fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    status.lines().find_map(|line| {
+        let value = line.strip_prefix("VmRSS:")?;
+        value
+            .split_whitespace()
+            .next()
+            .and_then(|kb| kb.parse::<u64>().ok())
+    })
 }
 
 fn synthesize_worker_job(

@@ -265,14 +265,15 @@ fn extract_verify_steps(
                 transition,
             };
             let record = table.transition(reference);
-            let [gadget] = record.gadgets() else {
+            let gadgets = record.gadgets();
+            if gadgets.len() != 1 {
                 return Err(format!(
                     "stage {stage} transition has {} gadgets; verify requires concrete one-gadget JSON",
-                    record.gadgets().len()
+                    gadgets.len()
                 ));
-            };
+            }
             Ok(VerifyStep {
-                gadget: gadget.clone(),
+                gadget: gadgets.get(0).clone(),
                 input_state: table.state_as_one_based_tuple(record.input()),
                 output_state: table.state_as_one_based_tuple(record.output()),
             })

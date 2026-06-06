@@ -27,8 +27,10 @@ use gadget_synth::{InstructionArg, InstructionSpec, PermutationGadget};
 
 use crate::ArchArg;
 use crate::json_exporter::SolutionJsonMetadata;
-use crate::scoring::AssignedPath;
-use crate::transition_table::{CompletePath, StateTuple, TransitionRef, TransitionTable};
+use crate::scoring::{AssignedPath, PathScoringSnapshot};
+use crate::transition_table::{
+    CompletePath, GadgetIndex, StateTuple, TransitionRef, TransitionTable,
+};
 
 // ---------------------------------------------------------------------------
 // Register
@@ -252,6 +254,16 @@ pub fn lower_assigned_paths(
     }
 }
 
+pub fn lower_assigned_path_snapshot(
+    metadata: &SolutionJsonMetadata,
+    snapshot: &PathScoringSnapshot,
+    path: &AssignedPath,
+    options: LoweringOptions,
+) -> InstructionBlock {
+    let mut constants = ConstantPool::default();
+    lower_assigned_path_snapshot_inner(0, metadata, snapshot, path, &mut constants, options)
+}
+
 // ---------------------------------------------------------------------------
 // Private lowering helpers
 // ---------------------------------------------------------------------------
@@ -278,7 +290,7 @@ fn lower_path(
                 stage,
                 input: table.state_as_zero_based_tuple(record.input()),
                 output: table.state_as_zero_based_tuple(record.output()),
-                gadget: record.gadgets().first(),
+                gadget: (!record.gadgets().is_empty()).then(|| record.gadget(GadgetIndex(0))),
             }
         })
         .collect::<Vec<_>>();
@@ -311,6 +323,28 @@ fn lower_assigned_path(
                 output: table.state_as_zero_based_tuple(record.output()),
                 gadget: Some(record.gadget(gadget_index)),
             }
+        })
+        .collect::<Vec<_>>();
+    lower_concrete_steps(solution_index, metadata, &steps, constants, options)
+}
+
+fn lower_assigned_path_snapshot_inner(
+    solution_index: usize,
+    metadata: &SolutionJsonMetadata,
+    snapshot: &PathScoringSnapshot,
+    path: &AssignedPath,
+    constants: &mut ConstantPool,
+    options: LoweringOptions,
+) -> InstructionBlock {
+    let steps = snapshot
+        .steps()
+        .iter()
+        .zip(path.gadgets().iter().copied())
+        .map(|(step, gadget_index)| LoweringStep {
+            stage: step.stage(),
+            input: step.input().clone(),
+            output: step.output().clone(),
+            gadget: Some(step.gadget(gadget_index)),
         })
         .collect::<Vec<_>>();
     lower_concrete_steps(solution_index, metadata, &steps, constants, options)

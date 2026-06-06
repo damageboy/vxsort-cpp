@@ -17,6 +17,13 @@ fn gadget_with_instruction_count(count: usize) -> PermutationGadget {
     )
 }
 
+fn single_instruction_gadget(name: &'static str) -> PermutationGadget {
+    PermutationGadget::new(
+        vec![InstructionSpec::new(name, BTreeMap::new())],
+        Vec::new(),
+    )
+}
+
 #[test]
 fn dummy_scorer_counts_gadget_instructions() {
     let scorer = DummyScorer;
@@ -68,8 +75,35 @@ fn dummy_scorer_assigns_lowest_cost_gadget_per_path_step() {
     assert_eq!(assigned.gadget_at_stage(0), GadgetIndex(1));
     assert_eq!(
         scorer
-            .score_gadget(&table.transition_gadgets(assigned.selection_key()[0].0)[1])
+            .score_gadget(
+                table
+                    .transition_gadgets(assigned.selection_key()[0].0)
+                    .get(1)
+            )
             .instruction_count(),
         1
     );
+}
+
+#[test]
+fn k_best_assignment_keeps_equal_cost_gadget_ties_at_cutoff() {
+    let scorer = DummyScorer;
+    let mut table = TransitionTable::new(1);
+    let input = state(&[1], &[2]);
+    let output = state(&[3], &[4]);
+
+    table.add_transition(0, &input, &output, single_instruction_gadget("top_a"));
+    table.add_transition(0, &input, &output, single_instruction_gadget("top_b"));
+    table.add_transition(0, &input, &output, gadget_with_instruction_count(2));
+    let path = table
+        .complete_path_from_zero_based_steps(&[(0, input.as_tuple(), output.as_tuple())])
+        .expect("path should resolve");
+
+    let assigned = scorer.assign_path_gadgets_k_best(&path, &table, 1);
+    let gadget_indices = assigned
+        .iter()
+        .map(|assigned_path| assigned_path.gadget_at_stage(0))
+        .collect::<Vec<_>>();
+
+    assert_eq!(gadget_indices, vec![GadgetIndex(0), GadgetIndex(1)]);
 }

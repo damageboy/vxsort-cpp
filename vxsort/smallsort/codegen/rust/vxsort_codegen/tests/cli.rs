@@ -3,8 +3,9 @@ use serde_json::Value;
 use std::fs;
 use std::process::Command;
 use vxsort_codegen::{
-    ArchArg, CliArgs, CliCommand, DTypeArg, FetchUicaDataConfig, RunConfig, RuntimeUiArg,
-    WorkerBackendArg, build_dry_run_summary, build_run_summary, fetch_uica_data, parse_run_config,
+    ArchArg, CliArgs, CliCommand, DTypeArg, FetchUicaDataConfig, PruneScoreArg, RunConfig,
+    RuntimeUiArg, WorkerBackendArg, build_dry_run_summary, fetch_uica_data, parse_run_config,
+    run_solver_with_session, runtime::NullRuntimeSession,
 };
 
 #[test]
@@ -54,6 +55,7 @@ fn parses_python_compatible_solve_flags() {
             dtype: DTypeArg::I64,
             depth_limit: Some(3),
             top_k: Some(5),
+            prune_score: PruneScoreArg::Rough,
             gadget_depth: 2,
             natural_order: true,
             retroactive_input: true,
@@ -95,6 +97,29 @@ fn verify_parses_json_input_top_k_and_workers() {
     assert_eq!(verify_args.input, std::path::PathBuf::from("fixture.json"));
     assert_eq!(verify_args.top_k, Some(1));
     assert_eq!(verify_args.workers, 1);
+}
+
+#[test]
+fn solve_parses_uica_prune_score_mode() {
+    let args = CliArgs::try_parse_from([
+        "vxsort-codegen",
+        "solve",
+        "--vector-machine",
+        "AVX2",
+        "--datatype",
+        "i64",
+        "--target-cpu",
+        "SKL",
+        "--top-k",
+        "1",
+        "--prune-score",
+        "uica",
+    ])
+    .expect("uica prune score mode should parse");
+
+    let config = parse_run_config(args).expect("run config should be built");
+
+    assert_eq!(config.prune_score, PruneScoreArg::Uica);
 }
 
 #[test]
@@ -249,7 +274,7 @@ fn dry_run_summary_reports_stages_initial_state_and_candidate_counts() {
     .expect("dry-run flags should parse");
     let config = parse_run_config(args).expect("run config should be built");
 
-    let summary = build_dry_run_summary(&config).expect("dry-run summary should be built");
+    let summary = build_dry_run_summary(&config).expect("dry-solver should run");
 
     assert_eq!(summary.elements_per_vector, 4);
     assert_eq!(summary.total_elements, 8);
@@ -337,7 +362,8 @@ fn run_summary_drives_sync_wave_loop() {
     let mut config = parse_run_config(args).expect("run config should be built");
     config.worker_backend = WorkerBackendArg::InProcess;
 
-    let summary = build_run_summary(&config).expect("run summary should be built");
+    let mut session = NullRuntimeSession;
+    let summary = run_solver_with_session(&config, &mut session).expect("solver should run");
 
     assert_eq!(summary.wave_count, 1);
     assert_eq!(summary.scored_paths, 0);
@@ -386,7 +412,8 @@ fn run_summary_writes_runtime_trace_file() {
     let mut config = parse_run_config(args).expect("run config should be built");
     config.worker_backend = WorkerBackendArg::InProcess;
 
-    build_run_summary(&config).expect("run summary should be built");
+    let mut session = NullRuntimeSession;
+    run_solver_with_session(&config, &mut session).expect("solver should run");
 
     let trace_contents = fs::read_to_string(&trace_path).expect("trace file should be readable");
     let events = trace_contents
@@ -401,6 +428,11 @@ fn run_summary_writes_runtime_trace_file() {
         events
             .iter()
             .any(|event| event["event"] == "worker_counters")
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| event["event"] == "live_full_scoring_snapshot")
     );
 }
 
