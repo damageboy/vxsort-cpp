@@ -9,7 +9,9 @@ use std::{
 
 use vxsort_codegen::scoring::{AssignedPath, GadgetCost, PathCost, Scorer};
 use vxsort_codegen::transition_table::{TransitionKey, TransitionTable};
-use vxsort_codegen::wave_engine::{WaveConfig, WaveEngine};
+use vxsort_codegen::wave_engine::{
+    StageRunResult, WaveConfig, WaveEngine, WaveProgressObserver, WaveSearchResult,
+};
 use vxsort_codegen::{ArchArg, DTypeArg, WorkerBackendArg};
 use vxsort_codegen::{runtime::NullRuntimeSession, runtime_trace::RuntimeTrace};
 
@@ -27,6 +29,47 @@ fn chain_state(index: u64) -> gadget_synth::VectorState {
 
 fn empty_gadget() -> gadget_synth::PermutationGadget {
     gadget_synth::PermutationGadget::new(Vec::new(), Vec::new())
+}
+
+fn run_stage_sync(
+    engine: &mut WaveEngine,
+    stage: usize,
+    attempt_budget: usize,
+    output_budget: usize,
+) -> Result<StageRunResult, gadget_synth::SynthesisError> {
+    let mut session = NullRuntimeSession;
+    let mut trace = RuntimeTrace::disabled();
+    engine.run_stage(
+        stage,
+        None,
+        attempt_budget,
+        output_budget,
+        &mut session,
+        &mut trace,
+    )
+}
+
+struct NoopWaveProgressObserver;
+
+impl WaveProgressObserver for NoopWaveProgressObserver {}
+
+fn run_engine_sync(
+    engine: &mut WaveEngine,
+    max_waves: Option<usize>,
+    attempt_budget: usize,
+    output_budget: usize,
+) -> Result<WaveSearchResult, gadget_synth::SynthesisError> {
+    let mut session = NullRuntimeSession;
+    let mut trace = RuntimeTrace::disabled();
+    let mut observer = NoopWaveProgressObserver;
+    engine.run(
+        max_waves,
+        attempt_budget,
+        output_budget,
+        &mut session,
+        &mut trace,
+        &mut observer,
+    )
 }
 
 fn gadget_with_instruction_count(count: usize) -> gadget_synth::PermutationGadget {
@@ -381,9 +424,7 @@ fn execute_job_records_attempt_and_successful_transitions() {
 fn run_stage_sync_respects_attempt_budget_and_records_progress() {
     let mut engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
 
-    let result = engine
-        .run_stage_sync(0, 5, 100)
-        .expect("stage run should not error");
+    let result = run_stage_sync(&mut engine, 0, 5, 100).expect("stage run should not error");
 
     assert_eq!(result.stage(), 0);
     assert_eq!(result.attempts(), 5);
@@ -399,12 +440,10 @@ fn run_stage_sync_with_workers_matches_single_worker_results() {
     })
     .expect("wave engine should initialize");
 
-    let sequential_result = sequential
-        .run_stage_sync(0, 20, 100)
+    let sequential_result = run_stage_sync(&mut sequential, 0, 20, 100)
         .expect("single-worker stage run should not error");
-    let parallel_result = parallel
-        .run_stage_sync(0, 20, 100)
-        .expect("multi-worker stage run should not error");
+    let parallel_result =
+        run_stage_sync(&mut parallel, 0, 20, 100).expect("multi-worker stage run should not error");
 
     assert_eq!(parallel_result, sequential_result);
     assert_eq!(
@@ -426,12 +465,10 @@ fn worker_pool_stops_applying_results_after_output_budget() {
     })
     .expect("wave engine should initialize");
 
-    let sequential_result = sequential
-        .run_stage_sync(0, 20, 1)
+    let sequential_result = run_stage_sync(&mut sequential, 0, 20, 1)
         .expect("single-worker stage run should not error");
-    let parallel_result = parallel
-        .run_stage_sync(0, 20, 1)
-        .expect("multi-worker stage run should not error");
+    let parallel_result =
+        run_stage_sync(&mut parallel, 0, 20, 1).expect("multi-worker stage run should not error");
 
     assert_eq!(parallel_result, sequential_result);
     assert_eq!(
@@ -454,11 +491,9 @@ fn run_stage_sync_respects_max_unique_outputs_per_candidate() {
     let candidate_count =
         one_output.shallow_candidates().len() + one_output.deep_candidates().len();
 
-    one_output
-        .run_stage_sync(0, candidate_count, usize::MAX)
+    run_stage_sync(&mut one_output, 0, candidate_count, usize::MAX)
         .expect("stage run should complete with one output per candidate");
-    default_outputs
-        .run_stage_sync(0, candidate_count, usize::MAX)
+    run_stage_sync(&mut default_outputs, 0, candidate_count, usize::MAX)
         .expect("stage run should complete with default output count");
 
     assert!(
@@ -472,13 +507,12 @@ fn run_wave_sync_exhausts_stage_with_inputs_but_no_remaining_jobs() {
     let mut engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
     let candidate_count = engine.shallow_candidates().len() + engine.deep_candidates().len();
 
-    engine
-        .run_stage_sync(0, candidate_count, usize::MAX)
+    run_stage_sync(&mut engine, 0, candidate_count, usize::MAX)
         .expect("stage run should consume all stage 0 candidates");
     let mut session = NullRuntimeSession;
     let mut trace = RuntimeTrace::disabled();
     let result = engine
-        .run_wave_sync(5, 1, &mut session, &mut trace)
+        .run_wave(5, 1, &mut session, &mut trace)
         .expect("wave run should not error");
 
     assert_eq!(result.target_stage(), 0);
@@ -502,7 +536,7 @@ fn run_wave_sync_runs_selected_stage_and_increments_wave_count() {
     let mut trace = RuntimeTrace::disabled();
 
     let result = engine
-        .run_wave_sync(5, 100, &mut session, &mut trace)
+        .run_wave(5, 100, &mut session, &mut trace)
         .expect("wave run should not error");
 
     assert_eq!(result.wave(), 0);
@@ -521,7 +555,7 @@ fn run_wave_sync_records_zero_output_budget_for_target_stage() {
     let mut trace = RuntimeTrace::disabled();
 
     let result = engine
-        .run_wave_sync(0, 1, &mut session, &mut trace)
+        .run_wave(0, 1, &mut session, &mut trace)
         .expect("wave run should not error");
 
     assert_eq!(result.target_stage(), 0);
@@ -542,7 +576,7 @@ fn run_wave_sync_propagates_new_outputs_to_downstream_stage() {
     let mut trace = RuntimeTrace::disabled();
 
     let result = engine
-        .run_wave_sync(
+        .run_wave(
             engine.shallow_candidates().len(),
             1,
             &mut session,
@@ -568,9 +602,7 @@ fn run_wave_sync_propagates_new_outputs_to_downstream_stage() {
 fn run_sync_honors_max_waves_and_records_wave_results() {
     let mut engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
 
-    let result = engine
-        .run_sync(Some(2), 5, 100)
-        .expect("sync run should not error");
+    let result = run_engine_sync(&mut engine, Some(2), 5, 100).expect("sync run should not error");
 
     assert_eq!(result.wave_count(), 2);
     assert_eq!(engine.wave_count(), 2);
@@ -618,7 +650,7 @@ fn run_wave_sync_marks_downstream_stage_without_inputs_as_stalled() {
     let mut trace = RuntimeTrace::disabled();
 
     let result = engine
-        .run_wave_sync(5, 1, &mut session, &mut trace)
+        .run_wave(5, 1, &mut session, &mut trace)
         .expect("wave run should not error");
 
     assert_eq!(result.target_stage(), 2);

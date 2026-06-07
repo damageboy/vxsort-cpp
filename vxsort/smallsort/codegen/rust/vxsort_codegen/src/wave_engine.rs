@@ -15,8 +15,7 @@ use gadget_synth::{
 
 use crate::bitonic_sorter::{BitonicSorter, BitonicStage};
 use crate::runtime::{
-    NullRuntimeSession, RuntimeEvent, RuntimeSession, ScoringProgressSnapshot,
-    StageProgressSnapshot,
+    RuntimeEvent, RuntimeSession, ScoringProgressSnapshot, StageProgressSnapshot,
 };
 use crate::runtime_trace::RuntimeTrace;
 use crate::scoring::{
@@ -87,34 +86,63 @@ pub struct WaveConfig {
 /// live scheduler state, so callers should use the public snapshot/result APIs
 /// instead of trying to infer progress from individual fields.
 pub struct WaveEngine {
+    /// Normalized solve configuration. `worker_count` is clamped to at least 1.
     config: WaveConfig,
+    /// SIMD lanes in one vector for the selected architecture and dtype.
     elements_per_vector: usize,
+    /// Total scalar elements being sorted across all configured vectors.
     total_elements: usize,
+    /// Ordered bitonic stages, plus the optional natural-order restore stage.
     stages: Vec<BitonicStage>,
+    /// Candidate gadget graphs in the low-depth tier.
     shallow_candidates: Vec<GadgetGraph>,
+    /// Candidate gadget graphs in the higher-depth tier.
     deep_candidates: Vec<GadgetGraph>,
+    /// Interned states, transitions, gadgets, and per-stage attempt statistics.
     transition_table: TransitionTable,
+    /// UI progress denominators, indexed by stage.
     stage_progress_totals: Vec<usize>,
+    /// Currently active synthesis workers, indexed by stage.
     active_worker_counts: Vec<usize>,
+    /// Current worker capacity advertised to the UI, indexed by stage.
     worker_capacities: Vec<usize>,
+    /// Queued synthesis jobs not yet running, indexed by stage.
     queued_job_counts: Vec<usize>,
+    /// Initial comparison-pair state built from the first bitonic stage.
     initial_state: VectorState,
+    /// Interned id for `initial_state` in `transition_table`.
     initial_state_id: StateId,
+    /// Number of completed wave iterations.
     wave_count: usize,
+    /// Stages known to have no remaining search work.
     exhausted_stages: HashSet<usize>,
+    /// Stages that cannot run now but may receive upstream inputs later.
     stalled_stages: HashSet<usize>,
+    /// Assigned-path selection keys already accepted into `scored_paths`.
     scored_path_keys: HashSet<AssignedPathKey>,
+    /// Retained top scored paths across the run.
     scored_paths: Vec<ScoredPath>,
+    /// Recently scored paths retained for incremental progress reporting.
     recent_scored_paths: Vec<ScoredPath>,
+    /// Bounded async pool used for rough path scoring.
     scoring_pool: ScoringPool,
+    /// Monotonic submission order assigned to the next scoring job.
     next_scoring_job_order: usize,
+    /// Lowest scoring-result order not yet applied.
     next_scoring_result_order: usize,
+    /// Completed scoring results waiting for earlier orders to arrive.
     buffered_scoring_results: BTreeMap<usize, ScoringJobResult>,
+    /// Last gadget-count signature scored for each registered path.
     latest_scoring_signatures: HashMap<PathId, PathScoringSignature>,
+    /// FIFO backlog of registered paths waiting for scoring-pool capacity.
     pending_scoring_path_ids: VecDeque<PathId>,
+    /// Membership set for `pending_scoring_path_ids`.
     pending_scoring_path_set: HashSet<PathId>,
+    /// Transitions whose registered paths need rescoring after gadget growth.
     pending_registered_rescore_transitions: BTreeSet<TransitionRef>,
+    /// Stable complete-path store and reverse transition-to-path index.
     path_registry: PathRegistry,
+    /// Idle subprocess synthesis workers kept warm between stage runs.
     process_workers: Vec<ProcessSynthesisWorker>,
 }
 
@@ -397,11 +425,6 @@ pub trait WaveProgressObserver {
         Ok(())
     }
 }
-
-/// Default observer used when no extra wave-progress behavior is needed.
-struct NullWaveProgressObserver;
-
-impl WaveProgressObserver for NullWaveProgressObserver {}
 
 /// Work item for asynchronous rough scoring.
 ///
@@ -1321,6 +1344,8 @@ impl WaveEngine {
             return None;
         }
 
+        // This kicks in when on the first wave but stage 0 is already exhausted.
+        // The reason this is even possible is because of --retroactive-input.
         if self.wave_count == 0 && !self.exhausted_stages.contains(&0) {
             return Some(0);
         }
@@ -1525,49 +1550,14 @@ impl WaveEngine {
         }
     }
 
-    /// Runs synthesis for one stage with no runtime events or trace output.
-    ///
-    /// This is the smallest public execution entry point. It prepares jobs for
-    /// `stage`, applies up to `attempt_budget` candidate jobs, and stops early
-    /// if `output_budget` new unique outputs are reached. New terminal paths
-    /// discovered while applying transitions are still registered and queued
-    /// for rough scoring; scoring results may be applied later by wave/run
-    /// methods.
-    pub fn run_stage_sync(
-        &mut self,
-        stage: usize,
-        attempt_budget: usize,
-        output_budget: usize,
-    ) -> Result<StageRunResult, SynthesisError> {
-        self.run_stage_sync_with_inputs(stage, None, attempt_budget, output_budget)
-    }
-
-    fn run_stage_sync_with_session_and_trace(
-        &mut self,
-        stage: usize,
-        attempt_budget: usize,
-        output_budget: usize,
-        session: &mut impl RuntimeSession,
-        trace: &mut RuntimeTrace,
-    ) -> Result<StageRunResult, SynthesisError> {
-        self.run_stage_sync_with_inputs_and_session(
-            stage,
-            None,
-            attempt_budget,
-            output_budget,
-            session,
-            trace,
-        )
-    }
-
     /// Runs one complete wave with the provided runtime session and trace.
     ///
     /// A wave selects the current target stage, runs that stage, then
     /// propagates newly discovered states through later stages. It also polls
     /// a bounded amount of completed rough-scoring work at wave boundaries.
-    /// Use [`Self::run_sync`] when you want the normal repeated-wave search
+    /// Use [`Self::run`] when you want the normal repeated-wave search
     /// loop.
-    pub fn run_wave_sync(
+    pub fn run_wave(
         &mut self,
         attempt_budget: usize,
         output_budget: usize,
@@ -1585,8 +1575,9 @@ impl WaveEngine {
             SCORING_RESULT_POLL_LIMIT_PER_WAVE_BOUNDARY,
         );
         let last_outputs_before = self.transition_table.unique_output_count(last_stage);
-        let target = self.run_stage_sync_with_session_and_trace(
+        let target = self.run_stage(
             target_stage,
+            None,
             attempt_budget,
             output_budget,
             session,
@@ -1639,7 +1630,7 @@ impl WaveEngine {
 
             self.transition_table
                 .mark_forwarded_ids(stage - 1, &forwarded);
-            let result = self.run_stage_sync_with_inputs_and_session(
+            let result = self.run_stage(
                 stage,
                 Some(&input_states),
                 attempt_budget,
@@ -1681,71 +1672,6 @@ impl WaveEngine {
         })
     }
 
-    /// Runs the normal wave search loop without runtime events or trace output.
-    ///
-    /// This is the quiet programmatic entry point. It repeatedly runs waves
-    /// until the search is exhausted, `max_waves` is reached, or the engine can
-    /// no longer select a target stage. At the end it drains pending rough
-    /// scoring jobs before returning the [`WaveSearchResult`].
-    pub fn run_sync(
-        &mut self,
-        max_waves: Option<usize>,
-        attempt_budget: usize,
-        output_budget: usize,
-    ) -> Result<WaveSearchResult, SynthesisError> {
-        let mut session = NullRuntimeSession;
-        self.run_sync_with_session(max_waves, attempt_budget, output_budget, &mut session)
-    }
-
-    /// Runs the normal wave search loop while emitting runtime events.
-    ///
-    /// This is the entry point used by line logging, the TUI, and tests that
-    /// need user-visible progress without low-level JSON trace events.
-    /// `session.should_stop()` is checked between waves and propagation stages
-    /// for cooperative cancellation.
-    pub fn run_sync_with_session(
-        &mut self,
-        max_waves: Option<usize>,
-        attempt_budget: usize,
-        output_budget: usize,
-        session: &mut impl RuntimeSession,
-    ) -> Result<WaveSearchResult, SynthesisError> {
-        let mut trace = RuntimeTrace::disabled();
-        self.run_sync_with_session_and_trace(
-            max_waves,
-            attempt_budget,
-            output_budget,
-            session,
-            &mut trace,
-        )
-    }
-
-    /// Runs the normal wave search loop with runtime events and JSON tracing.
-    ///
-    /// This variant is useful when the caller wants both presentation-level
-    /// [`RuntimeEvent`] updates and detailed trace events for profiling or
-    /// postmortem analysis. It uses a no-op [`WaveProgressObserver`]; use
-    /// [`Self::run_sync_with_session_trace_and_observer`] when live full
-    /// scoring or a test hook must observe wave completions.
-    pub fn run_sync_with_session_and_trace(
-        &mut self,
-        max_waves: Option<usize>,
-        attempt_budget: usize,
-        output_budget: usize,
-        session: &mut impl RuntimeSession,
-        trace: &mut RuntimeTrace,
-    ) -> Result<WaveSearchResult, SynthesisError> {
-        let mut observer = NullWaveProgressObserver;
-        self.run_sync_with_session_trace_and_observer(
-            max_waves,
-            attempt_budget,
-            output_budget,
-            session,
-            trace,
-            &mut observer,
-        )
-    }
-
     /// Runs the full wave search loop with all progress extension points.
     ///
     /// This is the most complete execution entry point. In addition to runtime
@@ -1758,7 +1684,7 @@ impl WaveEngine {
     /// workers: synthesis results are applied in candidate order and rough
     /// scoring results are applied in submission order before they are exposed
     /// to the observer.
-    pub fn run_sync_with_session_trace_and_observer(
+    pub fn run(
         &mut self,
         max_waves: Option<usize>,
         attempt_budget: usize,
@@ -1803,7 +1729,7 @@ impl WaveEngine {
                         "wave": self.wave_count,
                         "target_stage": target_stage,
             });
-            let wave = self.run_wave_sync(attempt_budget, output_budget, session, trace)?;
+            let wave = self.run_wave(attempt_budget, output_budget, session, trace)?;
             for snapshot in self.stage_progress_snapshots() {
                 session.on_event(RuntimeEvent::StageUpdated(snapshot));
             }
@@ -2481,26 +2407,16 @@ impl WaveEngine {
         !self.make_jobs(stage, None, Some(1)).is_empty()
     }
 
-    fn run_stage_sync_with_inputs(
-        &mut self,
-        stage: usize,
-        input_states: Option<&[VectorState]>,
-        attempt_budget: usize,
-        output_budget: usize,
-    ) -> Result<StageRunResult, SynthesisError> {
-        let mut session = NullRuntimeSession;
-        let mut trace = RuntimeTrace::disabled();
-        self.run_stage_sync_with_inputs_and_session(
-            stage,
-            input_states,
-            attempt_budget,
-            output_budget,
-            &mut session,
-            &mut trace,
-        )
-    }
-
-    fn run_stage_sync_with_inputs_and_session(
+    /// Runs synthesis for one stage.
+    ///
+    /// It prepares jobs for `stage`, applies up to `attempt_budget` candidate
+    /// jobs, and stops early if `output_budget` new unique outputs are reached.
+    /// `input_states` constrains the run to newly forwarded upstream states;
+    /// `None` uses the normal transition-table inputs for the stage. New
+    /// terminal paths discovered while applying transitions are registered and
+    /// queued for rough scoring; scoring results may be applied later by
+    /// wave/run methods.
+    pub fn run_stage(
         &mut self,
         stage: usize,
         input_states: Option<&[VectorState]>,

@@ -10,7 +10,7 @@ use std::{
 use serde_json::{Value, json};
 use vxsort_codegen::runtime::{ChannelRuntimeSession, RuntimeEvent, RuntimeSession};
 use vxsort_codegen::runtime_trace::RuntimeTrace;
-use vxsort_codegen::wave_engine::{WaveConfig, WaveEngine};
+use vxsort_codegen::wave_engine::{WaveConfig, WaveEngine, WaveProgressObserver, WaveSearchResult};
 use vxsort_codegen::{ArchArg, DTypeArg, WorkerBackendArg};
 
 #[derive(Default)]
@@ -118,14 +118,54 @@ fn empty_gadget() -> gadget_synth::PermutationGadget {
     gadget_synth::PermutationGadget::new(Vec::new(), Vec::new())
 }
 
+struct NoopWaveProgressObserver;
+
+impl WaveProgressObserver for NoopWaveProgressObserver {}
+
+fn run_engine_sync(
+    engine: &mut WaveEngine,
+    max_waves: Option<usize>,
+    attempt_budget: usize,
+    output_budget: usize,
+    session: &mut impl RuntimeSession,
+) -> Result<WaveSearchResult, gadget_synth::SynthesisError> {
+    let mut trace = RuntimeTrace::disabled();
+    run_engine_sync_traced(
+        engine,
+        max_waves,
+        attempt_budget,
+        output_budget,
+        session,
+        &mut trace,
+    )
+}
+
+fn run_engine_sync_traced(
+    engine: &mut WaveEngine,
+    max_waves: Option<usize>,
+    attempt_budget: usize,
+    output_budget: usize,
+    session: &mut impl RuntimeSession,
+    trace: &mut RuntimeTrace,
+) -> Result<WaveSearchResult, gadget_synth::SynthesisError> {
+    let mut observer = NoopWaveProgressObserver;
+    engine.run(
+        max_waves,
+        attempt_budget,
+        output_budget,
+        session,
+        trace,
+        &mut observer,
+    )
+}
+
 #[test]
-fn run_sync_with_session_emits_lifecycle_and_stage_updates() {
+fn run_sync_emits_lifecycle_and_stage_updates() {
     let mut engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
     let mut session = RecordingRuntimeSession::default();
 
-    let result = engine
-        .run_sync_with_session(Some(1), 0, 1, &mut session)
-        .expect("run should complete");
+    let result =
+        run_engine_sync(&mut engine, Some(1), 0, 1, &mut session).expect("run should complete");
 
     assert_eq!(result.wave_count(), 1);
     assert!(matches!(
@@ -165,7 +205,7 @@ fn run_sync_with_session_emits_lifecycle_and_stage_updates() {
 }
 
 #[test]
-fn run_sync_with_session_emits_async_scoring_progress() {
+fn run_sync_emits_async_scoring_progress() {
     let mut engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
     let states = [
         chain_state(0),
@@ -196,9 +236,7 @@ fn run_sync_with_session_emits_async_scoring_progress() {
     assert_eq!(engine.discover_paths_for_transition(terminal, None), 1);
 
     let mut session = RecordingRuntimeSession::default();
-    engine
-        .run_sync_with_session(Some(0), 0, 1, &mut session)
-        .expect("run should complete");
+    run_engine_sync(&mut engine, Some(0), 0, 1, &mut session).expect("run should complete");
 
     assert!(session.events.iter().any(|event| matches!(
         event,
@@ -226,9 +264,7 @@ fn run_sync_with_retroactive_input_emits_initial_stage_zero_outputs_before_first
     .expect("wave engine should initialize");
     let mut session = RecordingRuntimeSession::default();
 
-    engine
-        .run_sync_with_session(Some(1), 0, 1, &mut session)
-        .expect("run should complete");
+    run_engine_sync(&mut engine, Some(1), 0, 1, &mut session).expect("run should complete");
 
     let stage_zero_update = session
         .events
@@ -262,9 +298,7 @@ fn run_sync_reports_stage_progress_total_from_queued_jobs() {
     .expect("wave engine should initialize");
     let mut session = RecordingRuntimeSession::default();
 
-    engine
-        .run_sync_with_session(Some(1), 5, 1, &mut session)
-        .expect("run should complete");
+    run_engine_sync(&mut engine, Some(1), 5, 1, &mut session).expect("run should complete");
 
     assert!(session.events.iter().any(|event| matches!(
         event,
@@ -294,9 +328,8 @@ fn runtime_session_can_stop_run_between_waves() {
     let mut engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
     let mut session = StopAfterFirstWave { events: Vec::new() };
 
-    let result = engine
-        .run_sync_with_session(Some(5), 0, 1, &mut session)
-        .expect("run should complete");
+    let result =
+        run_engine_sync(&mut engine, Some(5), 0, 1, &mut session).expect("run should complete");
 
     assert_eq!(result.wave_count(), 1);
     assert_eq!(
@@ -314,9 +347,8 @@ fn runtime_session_can_stop_run_during_active_wave() {
     let mut engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
     let mut session = StopAfterWaveStarted::default();
 
-    let result = engine
-        .run_sync_with_session(Some(1), 10, 1, &mut session)
-        .expect("run should complete");
+    let result =
+        run_engine_sync(&mut engine, Some(1), 10, 1, &mut session).expect("run should complete");
 
     assert_eq!(result.wave_count(), 1);
     assert_eq!(result.waves().len(), 1);
@@ -329,13 +361,12 @@ fn runtime_session_can_stop_run_during_active_wave() {
 }
 
 #[test]
-fn run_sync_with_session_emits_stage_progress_during_active_wave() {
+fn run_sync_emits_stage_progress_during_active_wave() {
     let mut engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
     let mut session = StopAfterStageUpdated::default();
 
-    let result = engine
-        .run_sync_with_session(Some(1), 5, 100, &mut session)
-        .expect("run should complete");
+    let result =
+        run_engine_sync(&mut engine, Some(1), 5, 100, &mut session).expect("run should complete");
 
     assert_eq!(result.wave_count(), 1);
     assert_eq!(result.waves().len(), 1);
@@ -359,9 +390,8 @@ fn worker_run_emits_stage_progress_during_active_wave() {
     .expect("wave engine should initialize");
     let mut session = StopAfterStageUpdated::default();
 
-    let result = engine
-        .run_sync_with_session(Some(1), 5, 100, &mut session)
-        .expect("run should complete");
+    let result =
+        run_engine_sync(&mut engine, Some(1), 5, 100, &mut session).expect("run should complete");
 
     assert_eq!(result.wave_count(), 1);
     assert_eq!(result.waves().len(), 1);
@@ -382,9 +412,8 @@ fn worker_run_reports_active_worker_occupancy_before_results_apply() {
     .expect("wave engine should initialize");
     let mut session = StopAfterActiveWorkerUpdate::default();
 
-    let result = engine
-        .run_sync_with_session(Some(1), 5, 100, &mut session)
-        .expect("run should complete");
+    let result =
+        run_engine_sync(&mut engine, Some(1), 5, 100, &mut session).expect("run should complete");
 
     assert_eq!(result.wave_count(), 1);
     assert!(session.events.iter().any(|event| matches!(
@@ -406,9 +435,7 @@ fn worker_run_does_not_report_submitted_jobs_as_active_workers() {
     .expect("wave engine should initialize");
     let mut session = RecordingRuntimeSession::default();
 
-    engine
-        .run_sync_with_session(Some(1), 5, 100, &mut session)
-        .expect("run should complete");
+    run_engine_sync(&mut engine, Some(1), 5, 100, &mut session).expect("run should complete");
 
     let first_pool_snapshot = session
         .events
@@ -443,8 +470,7 @@ fn runtime_trace_records_worker_jobs_and_counters() {
 
     {
         let mut trace = RuntimeTrace::open(&trace_path).expect("trace file should open");
-        engine
-            .run_sync_with_session_and_trace(Some(1), 5, 100, &mut session, &mut trace)
+        run_engine_sync_traced(&mut engine, Some(1), 5, 100, &mut session, &mut trace)
             .expect("run should complete");
         trace.flush().expect("trace should flush");
     }
@@ -530,8 +556,7 @@ fn runtime_trace_records_scoring_queue_events() {
             engine.discover_paths_for_transition_with_trace(terminal, None, &mut trace),
             1
         );
-        engine
-            .run_sync_with_session_and_trace(Some(0), 0, 1, &mut session, &mut trace)
+        run_engine_sync_traced(&mut engine, Some(0), 0, 1, &mut session, &mut trace)
             .expect("run should complete");
         trace.flush().expect("trace should flush");
     }

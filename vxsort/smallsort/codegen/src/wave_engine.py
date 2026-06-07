@@ -214,6 +214,46 @@ class WaveEngine:
     stages fill idle capacity during straggler Z3 jobs.  Checkpoints fire
     when a stage completes.  Scoring fires immediately when a new
     last-stage transition forms a complete path.
+
+    Attributes:
+        config: Wave-search configuration.
+        logger: Runtime logger used for structured progress events.
+        _last_heartbeat_at: Last runtime heartbeat timestamp.
+        elements_per_vector: SIMD lanes per vector for the selected type.
+        total_elements: Scalar elements sorted across all configured vectors.
+        all_stages: Ordered bitonic stages, plus optional natural reorder.
+        shallow_candidates: Low-depth gadget candidates.
+        deep_candidates: Higher-depth gadget candidates.
+        _candidates_with_index: Stable candidate-index/gadget pairs.
+        _candidate_by_index: Candidate lookup by stable index.
+        _candidate_instruction_keys: Telemetry keys per candidate.
+        _candidate_instruction_counts: Instruction counts per candidate.
+        _candidate_priority_order: Preferred synthesis order for candidates.
+        tt: Transition table of states, transitions, and gadgets.
+        initial_state: First-stage comparison-pair vector state.
+        wave_count: Number of completed waves.
+        exhausted_stages: Stages with no remaining search work.
+        best_scores: Best LLVM-MCA score seen per target CPU.
+        _stalled_stages: Stages waiting for new upstream inputs.
+        _scored_path_keys: Complete-path keys already scored.
+        _stage_attempts: Cumulative synthesis attempts by stage.
+        _stage_successes: Cumulative valid outputs by stage.
+        _interrupted: Ctrl-C flag checked by the wave loop.
+        _checkpoint: Optional checkpoint reader/writer.
+        _pending_jobs: Per-stage synthesis jobs waiting for the pool.
+        _in_flight: Per-stage synthesis jobs currently running.
+        _all_scored_paths: Accumulated scored path dictionaries.
+        _mca_executor: Dedicated async LLVM-MCA scoring executor.
+        _mca_future_sizes: Scored-path batch size per MCA future.
+        _mca_result_queue: Completed MCA futures awaiting collection.
+        _mca_pending_paths: Paths submitted to MCA and not yet collected.
+        _pending_score_anchors: Terminal transitions awaiting path discovery.
+        _queued_score_anchors: Dedup set for pending score anchors.
+        instruction_stats: Runtime instruction-attempt telemetry.
+        _menu_instruction_count: Total instruction menu entries.
+        _instruction_latency_arches: Target CPUs with latency telemetry.
+        _instruction_latency_by_key: Latency table keyed by instruction.
+        _wave_start_attempts: Per-stage attempt snapshot during a wave.
     """
 
     def __init__(self, config: WaveConfig) -> None:

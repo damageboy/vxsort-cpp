@@ -595,7 +595,7 @@ pub fn run_solver_with_session(
             let mut target_session =
                 TargetRuntimeSession::new(session, target_cpu, rough_top_k, final_top_k);
             engine
-                .run_sync_with_session_trace_and_observer(
+                .run(
                     config.max_waves,
                     config.wave_attempts,
                     config.wave_outputs,
