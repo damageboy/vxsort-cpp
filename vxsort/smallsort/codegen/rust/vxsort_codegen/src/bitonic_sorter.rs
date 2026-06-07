@@ -20,33 +20,40 @@ impl BitonicStage {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BitonicSorter {
-    stages: Vec<BitonicStage>,
+    stages: Box<[BitonicStage]>,
 }
 
 impl BitonicSorter {
     pub fn new(n: usize) -> Self {
-        let mut sorter = Self { stages: Vec::new() };
-        sorter.generate_bitonic_sorter(n, 0, 0);
-        sorter
+        let mut stages = Vec::new();
+        Self::generate_bitonic_sorter(&mut stages, n, 0, 0);
+        Self {
+            stages: stages.into_boxed_slice(),
+        }
     }
 
     pub fn stages(&self) -> &[BitonicStage] {
         &self.stages
     }
 
-    fn generate_bitonic_sorter(&mut self, n: usize, stage: usize, start: usize) -> usize {
+    fn generate_bitonic_sorter(
+        stages: &mut Vec<BitonicStage>,
+        n: usize,
+        stage: usize,
+        start: usize,
+    ) -> usize {
         if n == 1 {
             return stage;
         }
 
         let half = n / 2;
-        self.generate_bitonic_sorter(half, stage, start);
-        let stage = self.generate_bitonic_sorter(half, stage, start + half);
-        self.generate_bitonic_merge(n, stage, start, true)
+        Self::generate_bitonic_sorter(stages, half, stage, start);
+        let stage = Self::generate_bitonic_sorter(stages, half, stage, start + half);
+        Self::generate_bitonic_merge(stages, n, stage, start, true)
     }
 
     fn generate_bitonic_merge(
-        &mut self,
+        stages: &mut Vec<BitonicStage>,
         n: usize,
         stage: usize,
         start: usize,
@@ -67,16 +74,16 @@ impl BitonicSorter {
                 .collect()
         };
 
-        self.add_ops(stage, pairs);
-        self.generate_bitonic_merge(half, stage + 1, start, false);
-        self.generate_bitonic_merge(half, stage + 1, start + half, false)
+        Self::add_ops(stages, stage, pairs);
+        Self::generate_bitonic_merge(stages, half, stage + 1, start, false);
+        Self::generate_bitonic_merge(stages, half, stage + 1, start + half, false)
     }
 
-    fn add_ops(&mut self, stage: usize, pairs: Vec<(usize, usize)>) {
-        while self.stages.len() <= stage {
-            let index = self.stages.len();
-            self.stages.push(BitonicStage::new(index, Vec::new()));
+    fn add_ops(stages: &mut Vec<BitonicStage>, stage: usize, pairs: Vec<(usize, usize)>) {
+        while stages.len() <= stage {
+            let index = stages.len();
+            stages.push(BitonicStage::new(index, Vec::new()));
         }
-        self.stages[stage].pairs.extend(pairs);
+        stages[stage].pairs.extend(pairs);
     }
 }

@@ -36,8 +36,8 @@ pub enum FocusedPane {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TuiState {
-    stage_snapshots: Vec<StageProgressSnapshot>,
-    stage_rates: Vec<StageRate>,
+    stage_snapshots: Box<[StageProgressSnapshot]>,
+    stage_rates: Box<[StageRate]>,
     run_started_at: Option<Instant>,
     total_gadget_completion_rate: Option<f64>,
     selected_stage: usize,
@@ -104,8 +104,12 @@ impl TuiState {
         Self {
             stage_snapshots: (0..stage_count)
                 .map(|stage| StageProgressSnapshot::new(stage, empty_stage_stats()))
-                .collect(),
-            stage_rates: (0..stage_count).map(|_| StageRate::new()).collect(),
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+            stage_rates: (0..stage_count)
+                .map(|_| StageRate::new())
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
             run_started_at: None,
             total_gadget_completion_rate: None,
             selected_stage: 0,

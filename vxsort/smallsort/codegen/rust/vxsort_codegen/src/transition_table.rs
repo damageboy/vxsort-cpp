@@ -217,12 +217,14 @@ impl StateInterner {
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct CompletePath {
-    transitions: Vec<TransitionIndex>,
+    transitions: Box<[TransitionIndex]>,
 }
 
 impl CompletePath {
     pub fn new(transitions: Vec<TransitionIndex>) -> Self {
-        Self { transitions }
+        Self {
+            transitions: transitions.into_boxed_slice(),
+        }
     }
 
     pub fn transitions(&self) -> &[TransitionIndex] {
@@ -470,7 +472,7 @@ impl StageData {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TransitionTable {
     states: StateInterner,
-    stages: Vec<StageData>,
+    stages: Box<[StageData]>,
 }
 
 #[derive(Debug)]
@@ -488,14 +490,14 @@ impl TransitionTable {
     pub fn new(num_stages: usize) -> Self {
         Self {
             states: StateInterner::inferred(),
-            stages: vec![StageData::default(); num_stages],
+            stages: vec![StageData::default(); num_stages].into_boxed_slice(),
         }
     }
 
     pub fn new_with_lanes(num_stages: usize, lanes_per_side: usize) -> Self {
         Self {
             states: StateInterner::new(lanes_per_side),
-            stages: vec![StageData::default(); num_stages],
+            stages: vec![StageData::default(); num_stages].into_boxed_slice(),
         }
     }
 
