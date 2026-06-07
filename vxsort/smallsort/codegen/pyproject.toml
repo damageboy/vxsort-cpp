@@ -41,6 +41,9 @@ addopts = "-m 'not slow'"
 [tool.pyrefly]
 project-includes = ["**/*.py*", "**/*.ipynb"]
 
+[tool.ruff]
+extend-exclude = ["uica"]
+
 [tool.vulture]
 paths = ["."]
-exclude = [".venv", "build", "dist"]
+exclude = [".venv", "build", "dist", "uica"]

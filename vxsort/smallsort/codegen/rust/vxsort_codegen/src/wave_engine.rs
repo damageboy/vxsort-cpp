@@ -1560,7 +1560,7 @@ impl WaveEngine {
         )
     }
 
-    /// Runs one complete wave with no runtime events or trace output.
+    /// Runs one complete wave with the provided runtime session and trace.
     ///
     /// A wave selects the current target stage, runs that stage, then
     /// propagates newly discovered states through later stages. It also polls
@@ -1568,21 +1568,6 @@ impl WaveEngine {
     /// Use [`Self::run_sync`] when you want the normal repeated-wave search
     /// loop.
     pub fn run_wave_sync(
-        &mut self,
-        attempt_budget: usize,
-        output_budget: usize,
-    ) -> Result<WaveRunResult, SynthesisError> {
-        let mut session = NullRuntimeSession;
-        let mut trace = RuntimeTrace::disabled();
-        self.run_wave_sync_with_session_and_trace(
-            attempt_budget,
-            output_budget,
-            &mut session,
-            &mut trace,
-        )
-    }
-
-    fn run_wave_sync_with_session_and_trace(
         &mut self,
         attempt_budget: usize,
         output_budget: usize,
@@ -1818,12 +1803,7 @@ impl WaveEngine {
                         "wave": self.wave_count,
                         "target_stage": target_stage,
             });
-            let wave = self.run_wave_sync_with_session_and_trace(
-                attempt_budget,
-                output_budget,
-                session,
-                trace,
-            )?;
+            let wave = self.run_wave_sync(attempt_budget, output_budget, session, trace)?;
             for snapshot in self.stage_progress_snapshots() {
                 session.on_event(RuntimeEvent::StageUpdated(snapshot));
             }

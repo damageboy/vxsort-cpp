@@ -11,6 +11,7 @@ use vxsort_codegen::scoring::{AssignedPath, GadgetCost, PathCost, Scorer};
 use vxsort_codegen::transition_table::{TransitionKey, TransitionTable};
 use vxsort_codegen::wave_engine::{WaveConfig, WaveEngine};
 use vxsort_codegen::{ArchArg, DTypeArg, WorkerBackendArg};
+use vxsort_codegen::{runtime::NullRuntimeSession, runtime_trace::RuntimeTrace};
 
 fn state(top: &[u64], bottom: &[u64]) -> gadget_synth::VectorState {
     gadget_synth::VectorState::new(top.to_vec(), bottom.to_vec())
@@ -474,8 +475,10 @@ fn run_wave_sync_exhausts_stage_with_inputs_but_no_remaining_jobs() {
     engine
         .run_stage_sync(0, candidate_count, usize::MAX)
         .expect("stage run should consume all stage 0 candidates");
+    let mut session = NullRuntimeSession;
+    let mut trace = RuntimeTrace::disabled();
     let result = engine
-        .run_wave_sync(5, 1)
+        .run_wave_sync(5, 1, &mut session, &mut trace)
         .expect("wave run should not error");
 
     assert_eq!(result.target_stage(), 0);
@@ -495,9 +498,11 @@ fn select_target_stage_starts_at_stage_zero() {
 #[test]
 fn run_wave_sync_runs_selected_stage_and_increments_wave_count() {
     let mut engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
+    let mut session = NullRuntimeSession;
+    let mut trace = RuntimeTrace::disabled();
 
     let result = engine
-        .run_wave_sync(5, 100)
+        .run_wave_sync(5, 100, &mut session, &mut trace)
         .expect("wave run should not error");
 
     assert_eq!(result.wave(), 0);
@@ -512,9 +517,11 @@ fn run_wave_sync_runs_selected_stage_and_increments_wave_count() {
 #[test]
 fn run_wave_sync_records_zero_output_budget_for_target_stage() {
     let mut engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
+    let mut session = NullRuntimeSession;
+    let mut trace = RuntimeTrace::disabled();
 
     let result = engine
-        .run_wave_sync(0, 1)
+        .run_wave_sync(0, 1, &mut session, &mut trace)
         .expect("wave run should not error");
 
     assert_eq!(result.target_stage(), 0);
@@ -531,9 +538,16 @@ fn run_wave_sync_records_zero_output_budget_for_target_stage() {
 #[test]
 fn run_wave_sync_propagates_new_outputs_to_downstream_stage() {
     let mut engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
+    let mut session = NullRuntimeSession;
+    let mut trace = RuntimeTrace::disabled();
 
     let result = engine
-        .run_wave_sync(engine.shallow_candidates().len(), 1)
+        .run_wave_sync(
+            engine.shallow_candidates().len(),
+            1,
+            &mut session,
+            &mut trace,
+        )
         .expect("wave run should not error");
 
     assert_eq!(result.target_stage(), 0);
@@ -600,9 +614,11 @@ fn run_wave_sync_marks_downstream_stage_without_inputs_as_stalled() {
     })
     .expect("wave engine should initialize");
     engine.transition_table_mut().record_attempt(1, 1);
+    let mut session = NullRuntimeSession;
+    let mut trace = RuntimeTrace::disabled();
 
     let result = engine
-        .run_wave_sync(5, 1)
+        .run_wave_sync(5, 1, &mut session, &mut trace)
         .expect("wave run should not error");
 
     assert_eq!(result.target_stage(), 2);
