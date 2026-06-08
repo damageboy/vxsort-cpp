@@ -15,12 +15,12 @@ The rule for this port is strict parity: every test in `tests/test_z3_avx.py` an
 
 ## Shared Rust infrastructure
 
-- Create `rust/z3_avx/src/canonical.rs` for reusable dead-bit constraints:
+- Create `z3_avx/src/canonical.rs` for reusable dead-bit constraints:
   - scalar low-bit immediates: constrain `[width-1:live_bits] == 0`
   - per-lane low-bit controls: constrain unused high bits in each element
   - arbitrary live bit ranges for cases like `permutevar_pd` and `permute2x128`
   - k-mask high-bit canonicalization
-- Create or extend `rust/z3_avx/src/mask.rs` for shared AVX512 writemask merge helpers for 32-bit and 64-bit element widths.
+- Create or extend `z3_avx/src/mask.rs` for shared AVX512 writemask merge helpers for 32-bit and 64-bit element widths.
 - Keep instruction semantics split by family rather than adding a single large module.
 - Add Rust canonicalization tests before implementing each family.
 
@@ -29,13 +29,13 @@ The rule for this port is strict parity: every test in `tests/test_z3_avx.py` an
 ### Batch 0: Infrastructure and already-started coverage
 
 Files:
-- Modify: `rust/z3_avx/src/lib.rs`
-- Create: `rust/z3_avx/src/canonical.rs`
-- Create: `rust/z3_avx/src/mask.rs`
-- Modify: `rust/z3_avx/src/control.rs`
-- Modify: `rust/z3_avx/src/permute.rs`
-- Modify: `rust/z3_avx/tests/control.rs`
-- Modify: `rust/z3_avx/tests/permute_ps.rs`
+- Modify: `z3_avx/src/lib.rs`
+- Create: `z3_avx/src/canonical.rs`
+- Create: `z3_avx/src/mask.rs`
+- Modify: `z3_avx/src/control.rs`
+- Modify: `z3_avx/src/permute.rs`
+- Modify: `z3_avx/tests/control.rs`
+- Modify: `z3_avx/tests/permute_ps.rs`
 
 Work:
 - Finish exact test parity for `_MM_SHUFFLE`, `_MM_SHUFFLE2`, and decode/string helpers.
@@ -56,10 +56,10 @@ Families:
 - `_mm256_permute4x64_epi64`
 
 Files:
-- Create: `rust/z3_avx/src/permute_pd.rs`
-- Create: `rust/z3_avx/src/shuffle_ps.rs`
-- Create: `rust/z3_avx/src/shuffle_pd.rs`
-- Create: `rust/z3_avx/src/permute4x64.rs`
+- Create: `z3_avx/src/permute_pd.rs`
+- Create: `z3_avx/src/shuffle_ps.rs`
+- Create: `z3_avx/src/shuffle_pd.rs`
+- Create: `z3_avx/src/permute4x64.rs`
 - Create/modify matching test files listed in the reports.
 
 Canonicalization:
@@ -75,8 +75,8 @@ Families:
 - `_mm512_shuffle_i32x4`, `_mm512_mask_shuffle_i32x4`
 
 Files:
-- Create: `rust/z3_avx/src/permute2x128.rs`
-- Create: `rust/z3_avx/src/shuffle_i32x4.rs`
+- Create: `z3_avx/src/permute2x128.rs`
+- Create: `z3_avx/src/shuffle_i32x4.rs`
 - Create/modify matching test files listed in the reports.
 
 Canonicalization:
@@ -93,8 +93,8 @@ Families:
 - `_mm512_permutex2var_epi64`, `_mm512_mask_permutex2var_epi64`
 
 Files:
-- Create: `rust/z3_avx/src/permutexvar.rs`
-- Create: `rust/z3_avx/src/permutex2var.rs`
+- Create: `z3_avx/src/permutexvar.rs`
+- Create: `z3_avx/src/permutex2var.rs`
 - Create/modify matching test files listed in the reports.
 
 Canonicalization:
@@ -111,7 +111,7 @@ Families:
 - `_mm256_permutevar_pd`, `_mm512_permutevar_pd`, `_mm512_mask_permutevar_pd`
 
 Files:
-- Create: `rust/z3_avx/src/permutevar.rs`
+- Create: `z3_avx/src/permutevar.rs`
 - Create/modify matching test files listed in the reports.
 
 Canonicalization:
@@ -128,8 +128,8 @@ Families:
 - `_mm256_blendv_pd`, `_mm256_blendv_ps`
 
 Files:
-- Create: `rust/z3_avx/src/unpack.rs`
-- Create: `rust/z3_avx/src/blend.rs`
+- Create: `z3_avx/src/unpack.rs`
+- Create: `z3_avx/src/blend.rs`
 - Create/modify matching test files listed in the reports.
 
 Canonicalization:
@@ -148,8 +148,8 @@ Families:
 - `_mm256_min_epi64`, `_mm256_max_epi64`, `_mm512_min_epi64`, `_mm512_max_epi64`
 
 Files:
-- Create: `rust/z3_avx/src/alignr.rs`
-- Create: `rust/z3_avx/src/minmax.rs`
+- Create: `z3_avx/src/alignr.rs`
+- Create: `z3_avx/src/minmax.rs`
 - Create/modify matching test files listed in the reports.
 
 Canonicalization:
@@ -162,8 +162,8 @@ Canonicalization:
 
 For each batch, dispatch one worker per independent family. Example for Batch 3:
 
-- Worker A owns `rust/z3_avx/src/permutexvar.rs`, `rust/z3_avx/tests/permutexvar_epi32.rs`, `rust/z3_avx/tests/permutexvar_epi64.rs`, and `docs/z3-avx-rust-port/intrinsics/permutexvar.md`.
-- Worker B owns `rust/z3_avx/src/permutex2var.rs`, `rust/z3_avx/tests/permutex2var_epi32.rs`, `rust/z3_avx/tests/permutex2var_epi64.rs`, and `docs/z3-avx-rust-port/intrinsics/permutex2var.md`.
+- Worker A owns `z3_avx/src/permutexvar.rs`, `z3_avx/tests/permutexvar_epi32.rs`, `z3_avx/tests/permutexvar_epi64.rs`, and `docs/z3-avx-rust-port/intrinsics/permutexvar.md`.
+- Worker B owns `z3_avx/src/permutex2var.rs`, `z3_avx/tests/permutex2var_epi32.rs`, `z3_avx/tests/permutex2var_epi64.rs`, and `docs/z3-avx-rust-port/intrinsics/permutex2var.md`.
 
 Each worker must:
 - port tests first,

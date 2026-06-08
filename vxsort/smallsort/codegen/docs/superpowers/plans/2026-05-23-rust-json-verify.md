@@ -14,29 +14,29 @@
 
 ## File Structure
 
-- Modify `rust/gadget_synth/src/intrinsics.rs`: expose concrete intrinsic dispatch to verifier.
-- Modify `rust/gadget_synth/src/lib.rs`: re-export the dispatch helper.
-- Create `rust/vxsort_codegen/src/verifier.rs`: symbolic verifier core, chunking, concrete gadget application, and JSON verification API.
-- Modify `rust/vxsort_codegen/src/lib.rs`: add `VerifyJsonArgs`, `CliCommand::Verify`, module export, and public verify API.
-- Modify `rust/vxsort_codegen/src/main.rs`: route `verify` subcommand and print success/failure.
-- Create `rust/vxsort_codegen/tests/verifier.rs`: focused verifier unit/integration tests.
-- Modify `rust/vxsort_codegen/tests/cli.rs`: CLI parse/binary behavior tests for `verify`.
-- Modify `rust/vxsort_codegen/Cargo.toml`: add direct `z3` and `z3_avx` dependencies if needed by verifier.
+- Modify `gadget_synth/src/intrinsics.rs`: expose concrete intrinsic dispatch to verifier.
+- Modify `gadget_synth/src/lib.rs`: re-export the dispatch helper.
+- Create `bitonic_codegen/src/verifier.rs`: symbolic verifier core, chunking, concrete gadget application, and JSON verification API.
+- Modify `bitonic_codegen/src/lib.rs`: add `VerifyJsonArgs`, `CliCommand::Verify`, module export, and public verify API.
+- Modify `bitonic_codegen/src/main.rs`: route `verify` subcommand and print success/failure.
+- Create `bitonic_codegen/tests/verifier.rs`: focused verifier unit/integration tests.
+- Modify `bitonic_codegen/tests/cli.rs`: CLI parse/binary behavior tests for `verify`.
+- Modify `bitonic_codegen/Cargo.toml`: add direct `z3` and `z3_avx` dependencies if needed by verifier.
 
 ## Task 1: CLI Contract and JSON-Only Boundary
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/lib.rs`
-- Modify: `rust/vxsort_codegen/src/main.rs`
-- Modify: `rust/vxsort_codegen/tests/cli.rs`
+- Modify: `bitonic_codegen/src/lib.rs`
+- Modify: `bitonic_codegen/src/main.rs`
+- Modify: `bitonic_codegen/tests/cli.rs`
 
 - [x] **Step 1: Write failing CLI tests**
 
-Add tests that `vxsort-codegen verify --input fixture.json --top-k 1 --workers 1` parses, and the binary rejects unsupported/missing input cleanly.
+Add tests that `bitonic-codegen verify --input fixture.json --top-k 1 --workers 1` parses, and the binary rejects unsupported/missing input cleanly.
 
 - [x] **Step 2: Run tests to verify RED**
 
-Run: `cargo test --release -q -p vxsort_codegen --test cli verify`
+Run: `cargo test --release -q -p bitonic_codegen --test cli verify`
 
 Expected: FAIL because `CliCommand::Verify` does not exist.
 
@@ -50,18 +50,18 @@ Route `CliCommand::Verify` to a not-yet-implemented `verify_solution_json` funct
 
 - [x] **Step 5: Re-run focused CLI tests**
 
-Run: `cargo test --release -q -p vxsort_codegen --test cli verify`
+Run: `cargo test --release -q -p bitonic_codegen --test cli verify`
 
 Expected: CLI parse tests pass; execution test may still fail until Task 3.
 
 ## Task 2: Verifier Core
 
 **Files:**
-- Modify: `rust/gadget_synth/src/intrinsics.rs`
-- Modify: `rust/gadget_synth/src/lib.rs`
-- Create: `rust/vxsort_codegen/src/verifier.rs`
-- Modify: `rust/vxsort_codegen/Cargo.toml`
-- Create: `rust/vxsort_codegen/tests/verifier.rs`
+- Modify: `gadget_synth/src/intrinsics.rs`
+- Modify: `gadget_synth/src/lib.rs`
+- Create: `bitonic_codegen/src/verifier.rs`
+- Modify: `bitonic_codegen/Cargo.toml`
+- Create: `bitonic_codegen/tests/verifier.rs`
 
 - [x] **Step 1: Write failing verifier tests**
 
@@ -72,13 +72,13 @@ Add tests for:
 
 - [x] **Step 2: Run tests to verify RED**
 
-Run: `cargo test --release -q -p vxsort_codegen --test verifier`
+Run: `cargo test --release -q -p bitonic_codegen --test verifier`
 
 Expected: FAIL because the verifier module/API does not exist.
 
 - [x] **Step 3: Expose intrinsic dispatch**
 
-Make `gadget_synth::intrinsics` or a narrow `dispatch_concrete_intrinsic` wrapper public enough for `vxsort_codegen::verifier` to apply concrete `InstructionSpec`s.
+Make `gadget_synth::intrinsics` or a narrow `dispatch_concrete_intrinsic` wrapper public enough for `bitonic_codegen::verifier` to apply concrete `InstructionSpec`s.
 
 - [x] **Step 4: Implement verifier data types**
 
@@ -94,17 +94,17 @@ Port Python's recursion boundaries, chunk levels, precondition sorted groups, pe
 
 - [x] **Step 7: Re-run focused verifier tests**
 
-Run: `cargo test --release -q -p vxsort_codegen --test verifier`
+Run: `cargo test --release -q -p bitonic_codegen --test verifier`
 
 Expected: PASS.
 
 ## Task 3: Integration and Verification
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/lib.rs`
-- Modify: `rust/vxsort_codegen/src/main.rs`
-- Modify: `rust/vxsort_codegen/tests/cli.rs`
-- Modify: `rust/vxsort_codegen/tests/verifier.rs`
+- Modify: `bitonic_codegen/src/lib.rs`
+- Modify: `bitonic_codegen/src/main.rs`
+- Modify: `bitonic_codegen/tests/cli.rs`
+- Modify: `bitonic_codegen/tests/verifier.rs`
 
 - [x] **Step 1: Wire `verify_solution_json`**
 
@@ -120,7 +120,7 @@ Use temporary JSON fixtures to test success and failure paths.
 
 - [x] **Step 4: Run focused Rust tests**
 
-Run: `cargo test --release -q -p vxsort_codegen --test verifier --test cli`
+Run: `cargo test --release -q -p bitonic_codegen --test verifier --test cli`
 
 Expected: PASS and under one minute.
 
@@ -129,6 +129,6 @@ Expected: PASS and under one minute.
 Run:
 - `cargo fmt --all --check`
 - `cargo clippy --all-targets --all-features --release -- -D warnings`
-- `cargo test --release -q -p vxsort_codegen --test verifier --test cli`
+- `cargo test --release -q -p bitonic_codegen --test verifier --test cli`
 
 Expected: PASS. If the full workspace is needed due shared crate changes, run the full command set from `AGENTS.md`.

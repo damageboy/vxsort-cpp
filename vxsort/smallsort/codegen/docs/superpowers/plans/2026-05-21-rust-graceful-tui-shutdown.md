@@ -13,8 +13,8 @@
 ### Task 1: Cooperative Cancel State
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/runtime_tui.rs`
-- Test: `rust/vxsort_codegen/tests/runtime_tui.rs`
+- Modify: `bitonic_codegen/src/runtime_tui.rs`
+- Test: `bitonic_codegen/tests/runtime_tui.rs`
 
 - [x] **Step 1: Write failing tests**
 
@@ -29,7 +29,7 @@ Add tests proving:
 Run:
 
 ```bash
-cargo test -p vxsort_codegen --test runtime_tui cancel -q
+cargo test -p bitonic_codegen --test runtime_tui cancel -q
 ```
 
 Expected: fail because quit currently marks the app finished and there is no exposed cancellation state.
@@ -43,7 +43,7 @@ Add `cancel_requested` to `TuiState`, expose `cancel_requested()`, and add a met
 Run:
 
 ```bash
-cargo test -p vxsort_codegen --test runtime_tui cancel -q
+cargo test -p bitonic_codegen --test runtime_tui cancel -q
 ```
 
 Expected: pass.
@@ -51,8 +51,8 @@ Expected: pass.
 ### Task 2: Cancellation Rendering
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/runtime_tui.rs`
-- Test: `rust/vxsort_codegen/tests/runtime_tui.rs`
+- Modify: `bitonic_codegen/src/runtime_tui.rs`
+- Test: `bitonic_codegen/tests/runtime_tui.rs`
 
 - [x] **Step 1: Write failing render test**
 
@@ -67,7 +67,7 @@ cancelling - waiting for engine shutdown
 Run:
 
 ```bash
-cargo test -p vxsort_codegen --test runtime_tui cancelling_render -q
+cargo test -p bitonic_codegen --test runtime_tui cancelling_render -q
 ```
 
 Expected: fail because the text is not rendered yet.
@@ -81,7 +81,7 @@ Show cancellation status in the summary and/or footer. Keep the UI compact and a
 Run:
 
 ```bash
-cargo test -p vxsort_codegen --test runtime_tui cancelling_render -q
+cargo test -p bitonic_codegen --test runtime_tui cancelling_render -q
 ```
 
 Expected: pass.
@@ -92,6 +92,6 @@ Expected: pass.
 - Rust workspace only.
 
 - [x] **Step 1:** Run `cargo fmt --all --check`.
-- [x] **Step 2:** Run `cargo test -p vxsort_codegen -q`.
+- [x] **Step 2:** Run `cargo test -p bitonic_codegen -q`.
 - [x] **Step 3:** Run `cargo test --release -q`.
 - [x] **Step 4:** Do not run Python tests/tooling for this Rust-only change.

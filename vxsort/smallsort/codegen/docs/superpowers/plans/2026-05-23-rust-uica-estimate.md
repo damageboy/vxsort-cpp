@@ -15,24 +15,24 @@
 - Python entrypoint: `pyproject.toml` maps `estimate = "bitonic_compiler:estimate_main"`.
 - Python command path: `src/bitonic_compiler.py::estimate_main()` injects `--estimate-only`, then `estimate_only_from_json()` loads JSON/checkpoints and calls `perf_estimator.estimate_solutions()`.
 - Python estimator behavior to preserve only at the user-experience level: `src/perf_estimator.py::estimate_solutions()` reads selected paths, emits per-path artifacts, runs a simulator, and `print_estimation_table()` prints a final ranked table. Its LLVM-MCA-specific assembly and analysis path is legacy context, not a Rust implementation target.
-- Rust already has the intended simulation engine: `rust/vxsort_codegen/src/uica_scoring.rs::UiPackScorer::full_score_block()` lowers modeled instructions to synthetic `DecodedInstruction`s and calls `uica_core::simulate()`.
+- Rust already has the intended simulation engine: `bitonic_codegen/src/uica_scoring.rs::UiPackScorer::full_score_block()` lowers modeled instructions to synthetic `DecodedInstruction`s and calls `uica_core::simulate()`.
 - Rust uiCA trace support already exists: `uica_core::simulate()` with `SimulationOptions { include_reports: true, .. }` returns `ReportBundle`, and `uica_core::report::render_trace_html(&reports.trace)` renders the Python-compatible `Execution Trace` HTML.
 - Rust CLI currently has `score-json`, but it is a debug command for one path/prefix and prints instruction keys. It does not batch, rank, write traces, or produce the Python estimate-style final table.
 
 ## File Structure
 
-- Modify `rust/vxsort_codegen/src/lib.rs`
+- Modify `bitonic_codegen/src/lib.rs`
   - Add `EstimateJsonArgs`.
   - Add `CliCommand::Estimate`.
   - Export new estimator types/API.
-- Modify `rust/vxsort_codegen/src/main.rs`
+- Modify `bitonic_codegen/src/main.rs`
   - Route `estimate`.
   - Print progress and the final ranked table.
   - Keep `score-json` available as a verbose debug command.
-- Modify `rust/vxsort_codegen/src/uica_scoring.rs`
+- Modify `bitonic_codegen/src/uica_scoring.rs`
   - Add a public simulation/report method that returns throughput, cycle counts, instruction counts, and optional reports.
   - Make `full_score_block()` call that method to avoid duplicate uiCA setup.
-- Create `rust/vxsort_codegen/src/uica_estimator.rs`
+- Create `bitonic_codegen/src/uica_estimator.rs`
   - Read/import solution JSON.
   - Lower assigned paths or graph paths to `InstructionStream`.
   - Select paths by deterministic JSON order before simulation.
@@ -40,11 +40,11 @@
   - Write HTML trace files.
   - Sort finite results by throughput, then instruction count, then original path index.
   - Return a structured report for CLI printing and tests.
-- Create `rust/vxsort_codegen/tests/uica_estimator.rs`
+- Create `bitonic_codegen/tests/uica_estimator.rs`
   - Focused library tests for selection, trace writing, ranking, and per-path error handling.
-- Modify `rust/vxsort_codegen/tests/uica_scoring.rs`
+- Modify `bitonic_codegen/tests/uica_scoring.rs`
   - Add a report-producing simulation test.
-- Modify `rust/vxsort_codegen/tests/cli.rs`
+- Modify `bitonic_codegen/tests/cli.rs`
   - Add parse and binary smoke tests for `estimate`.
 
 ## Command Contract
@@ -52,7 +52,7 @@
 Target command:
 
 ```bash
-cargo run -p vxsort_codegen -- estimate \
+cargo run -p bitonic_codegen -- estimate \
   --input bitonic_solutions_AVX2_i64.json \
   --target-cpu SKL \
   --uica-data-dir uica-data \
@@ -94,10 +94,10 @@ Out of scope for the first pass:
 ## Task 1: CLI Shape and Public Estimator API
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/lib.rs`
-- Modify: `rust/vxsort_codegen/src/main.rs`
-- Create: `rust/vxsort_codegen/src/uica_estimator.rs`
-- Modify: `rust/vxsort_codegen/tests/cli.rs`
+- Modify: `bitonic_codegen/src/lib.rs`
+- Modify: `bitonic_codegen/src/main.rs`
+- Create: `bitonic_codegen/src/uica_estimator.rs`
+- Modify: `bitonic_codegen/tests/cli.rs`
 
 - [ ] **Step 1: Write failing CLI parse tests**
 
@@ -105,7 +105,7 @@ Add tests that parse:
 
 ```rust
 CliArgs::try_parse_from([
-    "vxsort-codegen",
+    "bitonic-codegen",
     "estimate",
     "--input",
     "solutions.json",
@@ -196,7 +196,7 @@ In `main.rs`, route `CliCommand::Estimate(args)` to `estimate_solution_json(&arg
 Run:
 
 ```bash
-cargo test --release -q -p vxsort_codegen --test cli estimate
+cargo test --release -q -p bitonic_codegen --test cli estimate
 ```
 
 Expected: CLI parse tests pass; binary behavior tests may still be pending.
@@ -204,8 +204,8 @@ Expected: CLI parse tests pass; binary behavior tests may still be pending.
 ## Task 2: Reusable uiCA Simulation With Reports
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/uica_scoring.rs`
-- Modify: `rust/vxsort_codegen/tests/uica_scoring.rs`
+- Modify: `bitonic_codegen/src/uica_scoring.rs`
+- Modify: `bitonic_codegen/tests/uica_scoring.rs`
 
 - [ ] **Step 1: Write a failing report test**
 
@@ -271,8 +271,8 @@ Keep `include_trace: false`; HTML traces come from reports, not the plain event 
 Run:
 
 ```bash
-cargo test --release -q -p vxsort_codegen --test uica_scoring simulate_block
-cargo test --release -q -p vxsort_codegen --test uica_scoring full_score
+cargo test --release -q -p bitonic_codegen --test uica_scoring simulate_block
+cargo test --release -q -p bitonic_codegen --test uica_scoring full_score
 ```
 
 Expected: PASS.
@@ -280,8 +280,8 @@ Expected: PASS.
 ## Task 3: JSON Import, Path Selection, and Block Lowering
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/uica_estimator.rs`
-- Create: `rust/vxsort_codegen/tests/uica_estimator.rs`
+- Modify: `bitonic_codegen/src/uica_estimator.rs`
+- Create: `bitonic_codegen/tests/uica_estimator.rs`
 
 - [ ] **Step 1: Write failing selection/lowering tests**
 
@@ -317,7 +317,7 @@ If no paths are present, return an `EstimateReport` with zero results and no err
 Run:
 
 ```bash
-cargo test --release -q -p vxsort_codegen --test uica_estimator selection
+cargo test --release -q -p bitonic_codegen --test uica_estimator selection
 ```
 
 Expected: PASS.
@@ -325,8 +325,8 @@ Expected: PASS.
 ## Task 4: Batch Simulation, Trace Writing, and Ranking
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/uica_estimator.rs`
-- Modify: `rust/vxsort_codegen/tests/uica_estimator.rs`
+- Modify: `bitonic_codegen/src/uica_estimator.rs`
+- Modify: `bitonic_codegen/tests/uica_estimator.rs`
 
 - [ ] **Step 1: Write failing trace/ranking tests**
 
@@ -396,7 +396,7 @@ Set `rank` only on successful finite rows.
 Run:
 
 ```bash
-cargo test --release -q -p vxsort_codegen --test uica_estimator
+cargo test --release -q -p bitonic_codegen --test uica_estimator
 ```
 
 Expected: PASS.
@@ -404,15 +404,15 @@ Expected: PASS.
 ## Task 5: Final CLI Table and Hyperlinks
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/main.rs`
-- Modify: `rust/vxsort_codegen/tests/cli.rs`
+- Modify: `bitonic_codegen/src/main.rs`
+- Modify: `bitonic_codegen/tests/cli.rs`
 
 - [ ] **Step 1: Write failing binary smoke test**
 
 Create a temp JSON and temp uiCA data directory, then use the existing binary-test style:
 
 ```rust
-let output = Command::new(env!("CARGO_BIN_EXE_vxsort_codegen"))
+let output = Command::new(env!("CARGO_BIN_EXE_bitonic_codegen"))
     .args([
         "estimate",
         "--input",
@@ -475,7 +475,7 @@ Warnings:
 Run:
 
 ```bash
-cargo test --release -q -p vxsort_codegen --test cli estimate
+cargo test --release -q -p bitonic_codegen --test cli estimate
 ```
 
 Expected: PASS.
@@ -510,7 +510,7 @@ Expected: PASS.
 Run:
 
 ```bash
-cargo test --release -q -p vxsort_codegen --test uica_scoring --test uica_estimator --test cli
+cargo test --release -q -p bitonic_codegen --test uica_scoring --test uica_estimator --test cli
 ```
 
 Expected: PASS and under one minute.
@@ -520,7 +520,7 @@ Expected: PASS and under one minute.
 If local `uica-data` contains `SKL`, run:
 
 ```bash
-cargo run -p vxsort_codegen -- estimate \
+cargo run -p bitonic_codegen -- estimate \
   --input <small-solution-json> \
   --target-cpu SKL \
   --uica-data-dir uica-data \

@@ -13,8 +13,8 @@
 ### Task 1: Worker Config
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/lib.rs`
-- Test: `rust/vxsort_codegen/tests/cli.rs`
+- Modify: `bitonic_codegen/src/lib.rs`
+- Test: `bitonic_codegen/tests/cli.rs`
 
 - [x] **Step 1:** Add a failing CLI/config test for `--workers`.
 - [x] **Step 2:** Add `workers` CLI parsing and `RunConfig::worker_count`.
@@ -24,8 +24,8 @@
 ### Task 2: Deterministic Worker Execution
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/wave_engine.rs`
-- Test: `rust/vxsort_codegen/tests/wave_engine.rs`
+- Modify: `bitonic_codegen/src/wave_engine.rs`
+- Test: `bitonic_codegen/tests/wave_engine.rs`
 
 - [x] **Step 1:** Add a failing equivalence test comparing one-worker and two-worker stage execution.
 - [x] **Step 2:** Split pure job synthesis from transition-table mutation.
@@ -40,6 +40,6 @@
 
 - [x] **Step 1:** Run `cargo fmt --all --check`.
 - [x] **Step 2:** Run focused worker/CLI tests.
-- [x] **Step 3:** Run `cargo test -p vxsort_codegen -q`.
+- [x] **Step 3:** Run `cargo test -p bitonic_codegen -q`.
 - [x] **Step 4:** Run `cargo test --release -q`.
 - [x] **Step 5:** Do not run Python tests/tooling for this Rust-only change.

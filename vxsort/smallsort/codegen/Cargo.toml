@@ -1,9 +1,9 @@
 [workspace]
 members = [
-    "rust/z3_avx",
-    "rust/gadget_synth",
-    "rust/gadget_viz",
-    "rust/vxsort_codegen",
+    "z3_avx",
+    "gadget_synth",
+    "gadget_viz",
+    "bitonic_codegen",
 ]
 exclude = ["uica"]
 resolver = "3"

@@ -12,23 +12,23 @@
 
 ## File Structure
 
-- Modify `rust/vxsort_codegen/src/transition_table.rs`
+- Modify `bitonic_codegen/src/transition_table.rs`
   - Own state interning, per-stage transition arrays, transition lookup indexes, path discovery, and compatibility state-resolution helpers.
-- Modify `rust/vxsort_codegen/src/scoring.rs`
+- Modify `bitonic_codegen/src/scoring.rs`
   - Convert `AssignedPath` and `AssignedPathKey` from copied `(stage, input, output)` tuples to transition/gadget IDs.
-- Modify `rust/vxsort_codegen/src/wave_engine.rs`
+- Modify `bitonic_codegen/src/wave_engine.rs`
   - Carry `StateId` through synthesis jobs where the input state is already known, insert output states through the interner, and store scored paths by ID-based complete paths.
-- Modify `rust/vxsort_codegen/src/instruction_stream.rs`
+- Modify `bitonic_codegen/src/instruction_stream.rs`
   - Resolve ID-based complete/assigned paths against `TransitionTable` during lowering.
-- Modify `rust/vxsort_codegen/src/json_exporter.rs`
+- Modify `bitonic_codegen/src/json_exporter.rs`
   - Export the existing JSON shape by resolving state IDs on demand.
-- Modify `rust/vxsort_codegen/src/json_importer.rs`
+- Modify `bitonic_codegen/src/json_importer.rs`
   - Import existing JSON into interned states and ID-based paths.
-- Modify `rust/vxsort_codegen/src/asm_exporter.rs`
+- Modify `bitonic_codegen/src/asm_exporter.rs`
   - Keep ASM export behavior while accepting ID-based paths.
-- Modify `rust/vxsort_codegen/src/verifier.rs`
+- Modify `bitonic_codegen/src/verifier.rs`
   - Resolve ID-based paths to concrete states and gadgets for verification.
-- Modify tests under `rust/vxsort_codegen/tests/`
+- Modify tests under `bitonic_codegen/tests/`
   - Update transition table, scoring, wave engine, lowering, JSON, ASM, verifier, and uiCA scoring tests.
 
 ## Representation Decisions
@@ -155,8 +155,8 @@ For this plan, add the registry only if it simplifies `WaveEngine`; otherwise ke
 ### Task 1: Add ID Types and State Interner Tests
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/transition_table.rs`
-- Test: `rust/vxsort_codegen/tests/transition_table.rs`
+- Modify: `bitonic_codegen/src/transition_table.rs`
+- Test: `bitonic_codegen/tests/transition_table.rs`
 
 - [ ] **Step 1: Write failing state interner tests**
 
@@ -189,7 +189,7 @@ fn state_rejects_label_outside_declared_element_range() {
 Run:
 
 ```bash
-cargo test --release -q -p vxsort_codegen --test transition_table
+cargo test --release -q -p bitonic_codegen --test transition_table
 ```
 
 Expected: compile failure because `StateInterner` and `State` do not exist yet.
@@ -234,8 +234,8 @@ Run the same focused command.
 ### Task 2: Refactor TransitionTable Storage Behind Existing Public Behavior
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/transition_table.rs`
-- Test: `rust/vxsort_codegen/tests/transition_table.rs`
+- Modify: `bitonic_codegen/src/transition_table.rs`
+- Test: `bitonic_codegen/tests/transition_table.rs`
 
 - [ ] **Step 1: Write failing transition insertion tests**
 
@@ -263,7 +263,7 @@ fn transition_table_returns_stable_transition_index_for_same_state_pair() {
 Run:
 
 ```bash
-cargo test --release -q -p vxsort_codegen --test transition_table transition_table_returns_stable_transition_index_for_same_state_pair
+cargo test --release -q -p bitonic_codegen --test transition_table transition_table_returns_stable_transition_index_for_same_state_pair
 ```
 
 - [ ] **Step 3: Replace `StageData::transitions` map with transition array plus indexes**
@@ -335,7 +335,7 @@ The compatibility `add_transition` may re-intern the input; live wave-engine cod
 Run:
 
 ```bash
-cargo test --release -q -p vxsort_codegen --test transition_table
+cargo test --release -q -p bitonic_codegen --test transition_table
 ```
 
 Expected: pass.
@@ -345,8 +345,8 @@ Expected: pass.
 ### Task 3: Convert Path Discovery to TransitionIndex-Based CompletePath
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/transition_table.rs`
-- Test: `rust/vxsort_codegen/tests/transition_table.rs`
+- Modify: `bitonic_codegen/src/transition_table.rs`
+- Test: `bitonic_codegen/tests/transition_table.rs`
 
 - [ ] **Step 1: Write failing ID-based path discovery tests**
 
@@ -377,7 +377,7 @@ transition[i].output == transition[i + 1].input
 Run:
 
 ```bash
-cargo test --release -q -p vxsort_codegen --test transition_table complete_path_stores_transition_indexes_not_state_tuples
+cargo test --release -q -p bitonic_codegen --test transition_table complete_path_stores_transition_indexes_not_state_tuples
 ```
 
 - [ ] **Step 3: Replace path aliases**
@@ -443,7 +443,7 @@ The wrapper resolves the state tuples to IDs, looks up the transition index, the
 Run:
 
 ```bash
-cargo test --release -q -p vxsort_codegen --test transition_table
+cargo test --release -q -p bitonic_codegen --test transition_table
 ```
 
 Expected: pass.
@@ -453,9 +453,9 @@ Expected: pass.
 ### Task 4: Convert Scoring AssignedPath to Transition/Gadget IDs
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/scoring.rs`
-- Test: `rust/vxsort_codegen/tests/scoring.rs`
-- Test: `rust/vxsort_codegen/tests/uica_scoring.rs`
+- Modify: `bitonic_codegen/src/scoring.rs`
+- Test: `bitonic_codegen/tests/scoring.rs`
+- Test: `bitonic_codegen/tests/uica_scoring.rs`
 
 - [ ] **Step 1: Write failing scoring tests**
 
@@ -476,7 +476,7 @@ assert_eq!(
 Run:
 
 ```bash
-cargo test --release -q -p vxsort_codegen --test scoring --test uica_scoring
+cargo test --release -q -p bitonic_codegen --test scoring --test uica_scoring
 ```
 
 - [ ] **Step 3: Replace copied-state AssignedStep storage**
@@ -540,7 +540,7 @@ pub fn transition_table_from_assigned_paths(
 Run:
 
 ```bash
-cargo test --release -q -p vxsort_codegen --test scoring --test uica_scoring
+cargo test --release -q -p bitonic_codegen --test scoring --test uica_scoring
 ```
 
 Expected: pass.
@@ -550,9 +550,9 @@ Expected: pass.
 ### Task 5: Update WaveEngine to Carry StateId on the Hot Path
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/wave_engine.rs`
-- Test: `rust/vxsort_codegen/tests/wave_engine.rs`
-- Test: `rust/vxsort_codegen/tests/runtime.rs`
+- Modify: `bitonic_codegen/src/wave_engine.rs`
+- Test: `bitonic_codegen/tests/wave_engine.rs`
+- Test: `bitonic_codegen/tests/runtime.rs`
 
 - [ ] **Step 1: Write failing wave-engine tests for input ID preservation**
 
@@ -563,7 +563,7 @@ Add a test that records a transition from a known input state and asserts the in
 Run:
 
 ```bash
-cargo test --release -q -p vxsort_codegen --test wave_engine input_state_id_is_preserved_when_recording_transition
+cargo test --release -q -p bitonic_codegen --test wave_engine input_state_id_is_preserved_when_recording_transition
 ```
 
 - [ ] **Step 3: Change job/input selection to use StateId**
@@ -638,7 +638,7 @@ Use `trace_paths_ending_at`.
 Run:
 
 ```bash
-cargo test --release -q -p vxsort_codegen --test wave_engine --test runtime
+cargo test --release -q -p bitonic_codegen --test wave_engine --test runtime
 ```
 
 Expected: pass.
@@ -648,15 +648,15 @@ Expected: pass.
 ### Task 6: Update Lowering, Export, Import, and Verification Boundaries
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/instruction_stream.rs`
-- Modify: `rust/vxsort_codegen/src/json_exporter.rs`
-- Modify: `rust/vxsort_codegen/src/json_importer.rs`
-- Modify: `rust/vxsort_codegen/src/asm_exporter.rs`
-- Modify: `rust/vxsort_codegen/src/verifier.rs`
-- Test: `rust/vxsort_codegen/tests/instruction_stream.rs`
-- Test: `rust/vxsort_codegen/tests/json_exporter.rs`
-- Test: `rust/vxsort_codegen/tests/json_importer.rs`
-- Test: `rust/vxsort_codegen/tests/asm_exporter.rs`
+- Modify: `bitonic_codegen/src/instruction_stream.rs`
+- Modify: `bitonic_codegen/src/json_exporter.rs`
+- Modify: `bitonic_codegen/src/json_importer.rs`
+- Modify: `bitonic_codegen/src/asm_exporter.rs`
+- Modify: `bitonic_codegen/src/verifier.rs`
+- Test: `bitonic_codegen/tests/instruction_stream.rs`
+- Test: `bitonic_codegen/tests/json_exporter.rs`
+- Test: `bitonic_codegen/tests/json_importer.rs`
+- Test: `bitonic_codegen/tests/asm_exporter.rs`
 
 - [ ] **Step 1: Write failing boundary tests for ID-based paths**
 
@@ -674,7 +674,7 @@ Then verify lowering/export/import/ASM/verifier still sees the expected concrete
 Run:
 
 ```bash
-cargo test --release -q -p vxsort_codegen --test instruction_stream --test json_exporter --test json_importer --test asm_exporter
+cargo test --release -q -p bitonic_codegen --test instruction_stream --test json_exporter --test json_importer --test asm_exporter
 ```
 
 - [ ] **Step 3: Add transition/path resolver helpers**
@@ -719,7 +719,7 @@ Verifier can keep using one-based `StateTuple` internally at first. Resolve ID p
 Run the same focused command. Then run:
 
 ```bash
-cargo test --release -q -p vxsort_codegen --test verifier
+cargo test --release -q -p bitonic_codegen --test verifier
 ```
 
 Expected: pass.
@@ -729,10 +729,10 @@ Expected: pass.
 ### Task 7: Update Full Scoring and Final Export Flow
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/lib.rs`
-- Modify: `rust/vxsort_codegen/src/uica_scoring.rs`
-- Test: `rust/vxsort_codegen/tests/uica_scoring.rs`
-- Test: `rust/vxsort_codegen/tests/cli.rs`
+- Modify: `bitonic_codegen/src/lib.rs`
+- Modify: `bitonic_codegen/src/uica_scoring.rs`
+- Test: `bitonic_codegen/tests/uica_scoring.rs`
+- Test: `bitonic_codegen/tests/cli.rs`
 
 - [ ] **Step 1: Write failing final-scoring regression tests**
 
@@ -749,7 +749,7 @@ exported JSON remains compatible with existing importer tests
 Run:
 
 ```bash
-cargo test --release -q -p vxsort_codegen --test uica_scoring --test cli
+cargo test --release -q -p bitonic_codegen --test uica_scoring --test cli
 ```
 
 - [ ] **Step 3: Update `UiPackScorer::score_assigned_path`**
@@ -771,7 +771,7 @@ Use ID-based `ScoredPath` and resolve selected gadgets through the table when bu
 Run:
 
 ```bash
-cargo test --release -q -p vxsort_codegen --test uica_scoring --test cli
+cargo test --release -q -p bitonic_codegen --test uica_scoring --test cli
 ```
 
 Expected: pass.
@@ -781,9 +781,9 @@ Expected: pass.
 ### Task 8: Remove Legacy Tuple-Based Hot-Path APIs
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/transition_table.rs`
-- Modify: `rust/vxsort_codegen/src/scoring.rs`
-- Modify: `rust/vxsort_codegen/src/wave_engine.rs`
+- Modify: `bitonic_codegen/src/transition_table.rs`
+- Modify: `bitonic_codegen/src/scoring.rs`
+- Modify: `bitonic_codegen/src/wave_engine.rs`
 - Test: all relevant Rust tests
 
 - [ ] **Step 1: Search for remaining hot-path tuple APIs**
@@ -791,7 +791,7 @@ Expected: pass.
 Run:
 
 ```bash
-rg -n "PathStep|TransitionKey|StateTuple|trace_paths_ending_with|get_all_transitions|get_transitions|as_complete_path|selection_key\\(" rust/vxsort_codegen/src rust/vxsort_codegen/tests -g '*.rs'
+rg -n "PathStep|TransitionKey|StateTuple|trace_paths_ending_with|get_all_transitions|get_transitions|as_complete_path|selection_key\\(" bitonic_codegen/src bitonic_codegen/tests -g '*.rs'
 ```
 
 - [ ] **Step 2: Decide which compatibility APIs stay**
@@ -861,7 +861,7 @@ Expected: pass.
 Run:
 
 ```bash
-cargo test --release -q -p vxsort_codegen
+cargo test --release -q -p bitonic_codegen
 ```
 
 Expected: pass in about the same time as the current release-mode package tests, under the repository's one-minute guideline.
@@ -871,7 +871,7 @@ Expected: pass in about the same time as the current release-mode package tests,
 Run a small solve to verify runtime behavior:
 
 ```bash
-./target/release/vxsort_codegen solve \
+./target/release/bitonic_codegen solve \
   --vector-machine AVX2 \
   --datatype i64 \
   --wave-attempts 20 \

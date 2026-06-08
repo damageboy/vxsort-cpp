@@ -113,6 +113,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4512299f36f043ab09a583e57bceb5a5aab7a73db1805848e8fef3c9e8c78b3"
 
 [[package]]
+name = "bitonic_codegen"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "clap",
+ "comfy-table",
+ "crossterm 0.29.0",
+ "gadget_synth",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "uica-core",
+ "uica-data",
+ "uica-decode-ir",
+ "uica-model",
+ "ureq",
+ "z3",
+ "z3_avx",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1645,27 +1666,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "vxsort_codegen"
-version = "0.1.0"
-dependencies = [
- "bincode",
- "clap",
- "comfy-table",
- "crossterm 0.29.0",
- "gadget_synth",
- "ratatui",
- "serde",
- "serde_json",
- "uica-core",
- "uica-data",
- "uica-decode-ir",
- "uica-model",
- "ureq",
- "z3",
- "z3_avx",
-]
 
 [[package]]
 name = "walkdir"

@@ -13,22 +13,22 @@
 ### Task 1: Channel Runtime Session
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/runtime.rs`
-- Test: `rust/vxsort_codegen/tests/runtime.rs`
+- Modify: `bitonic_codegen/src/runtime.rs`
+- Test: `bitonic_codegen/tests/runtime.rs`
 
 - [x] **Step 1: Write failing tests** proving a runtime session can forward events into a channel and reflect a shared cancel flag through `should_stop()`.
-- [x] **Step 2: Run focused test** with `cargo test -p vxsort_codegen --test runtime channel -q`; expect unresolved `ChannelRuntimeSession`.
+- [x] **Step 2: Run focused test** with `cargo test -p bitonic_codegen --test runtime channel -q`; expect unresolved `ChannelRuntimeSession`.
 - [x] **Step 3: Implement `ChannelRuntimeSession`** using `std::sync::mpsc::Sender<RuntimeEvent>` and `Arc<AtomicBool>`.
 - [x] **Step 4: Re-run focused test** and confirm it passes.
 
 ### Task 2: Main-Thread TUI Event Loop
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/runtime_tui.rs`
-- Test: `rust/vxsort_codegen/tests/runtime_tui.rs`
+- Modify: `bitonic_codegen/src/runtime_tui.rs`
+- Test: `bitonic_codegen/tests/runtime_tui.rs`
 
 - [x] **Step 1: Write failing test** for non-terminal state behavior: applying channel events and ticking without blocking, and setting cancellation on quit.
-- [x] **Step 2: Run focused test** with `cargo test -p vxsort_codegen --test runtime_tui async -q`; expect missing async app API.
+- [x] **Step 2: Run focused test** with `cargo test -p bitonic_codegen --test runtime_tui async -q`; expect missing async app API.
 - [x] **Step 3: Split TUI into `TuiApp`/state operations plus terminal wrapper** so event draining and key handling can be tested separately.
 - [x] **Step 4: Implement `run_tui_event_loop(receiver, cancel_flag)`** that owns terminal drawing on the main thread, polls channel events, polls keys, redraws on ticks, and exits on `RunFinished`, disconnect, `q`, or `Esc`.
 - [x] **Step 5: Re-run focused TUI tests** and confirm they pass.
@@ -36,9 +36,9 @@
 ### Task 3: Spawn Engine For Textual TTY
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/lib.rs`
-- Modify: `rust/vxsort_codegen/src/main.rs`
-- Test: `rust/vxsort_codegen/tests/cli.rs`
+- Modify: `bitonic_codegen/src/lib.rs`
+- Modify: `bitonic_codegen/src/main.rs`
+- Test: `bitonic_codegen/tests/cli.rs`
 
 - [x] **Step 1: Write failing unit test** proving `RunConfig` can be cloned for background engine ownership.
 - [x] **Step 2: Add `Clone` derives** to config/summary types needed for thread transfer.
@@ -52,6 +52,6 @@
 - Rust workspace only.
 
 - [x] **Step 1:** Run `cargo fmt --all --check`.
-- [x] **Step 2:** Run `cargo test -p vxsort_codegen -q`.
+- [x] **Step 2:** Run `cargo test -p bitonic_codegen -q`.
 - [x] **Step 3:** Run `cargo test --release -q`.
 - [x] **Step 4:** Do not run Python tests/tooling for this Rust-only change.

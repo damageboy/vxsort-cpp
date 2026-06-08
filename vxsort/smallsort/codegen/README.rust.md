@@ -1,23 +1,55 @@
-# Rust gadget tooling
+# bitonic codegen
 
-This directory contains the Rust ports used by the bitonic super-optimizer work:
-
-- `rust/z3_avx`: symbolic AVX intrinsic semantics.
-- `rust/gadget_synth`: gadget/minigraph candidate generation and parity dump tooling.
-- `rust/gadget_viz`: template JSONL visualization as Mermaid, Markdown, or HTML.
+This directory contains the Rust super-optimizer used to generate bitonic sorter
+building blocks for vxsort. It searches for efficient AVX permutation/shuffle
+gadgets for each bitonic comparison stage, proves candidate gadgets with Z3,
+scores complete paths with uiCA, and exports solution JSON or assembly.
 
 Run commands from `vxsort/smallsort/codegen`.
 
-## Fresh checkout quick start
+## Crates
 
-The Rust workspace uses the in-tree `uica/` submodule for Rust uiCA crates.
+- `z3_avx`: symbolic AVX intrinsic semantics.
+- `gadget_synth`: gadget/minigraph candidate generation and Z3 solving.
+- `gadget_viz`: template JSONL visualization as Mermaid, Markdown, or HTML.
+- `bitonic_codegen`: solver CLI, wave engine, JSON/ASM export, verifier, runtime tracing, and uiCA scoring.
 
-From a clean checkout:
+## Search Flow
+
+1. `BitonicSorter` generates the comparison stages for the requested element count.
+2. `gadget_synth` enumerates candidate AVX instruction graphs for each stage.
+3. `z3_avx` gives those instructions symbolic semantics and Z3 validates the gadget output state.
+4. `WaveEngine` records valid stage transitions and discovers complete root-to-terminal paths.
+5. Scoring ranks paths first by rough instruction cost, then by uiCA when requested.
+6. Exporters write solution JSON and annotated x86-64 assembly from the same lowered instruction stream.
+
+Core data structures:
+
+- `VectorState`: element labels in the top/bottom vectors.
+- `InstructionSpec`: one AVX instruction plus operands.
+- `PermutationGadget`: concrete top/bottom instruction sequences for one transition.
+- `TransitionTable`: stage-indexed transitions and complete paths.
+- `AssignedPath`: a complete path plus selected gadget index per transition.
+
+## Supported Targets
+
+The CLI accepts `AVX2` and `AVX512`. Solver synthesis currently supports `i32`
+and `i64`; other primitive types are accepted for JSON/ASM import/export paths
+where applicable.
+
+Useful AVX instruction families include:
+
+- 32-bit elements: `VSHUFPS`, `VUNPCK*PS`, `VPUNPCK*DQ`, `VPSHUFD`, `VPERMILPS`, `VPERMD`, `VPERMPS`, `VPERM2F128`/`VPERM2I128`, and blends.
+- 64-bit elements: `VUNPCK*PD`, `VPUNPCK*QDQ`, `VSHUFPD`, `VPERMILPD`, `VPERMQ`, `VPERMPD`, `VPERM2F128`/`VPERM2I128`, and blends.
+
+## Fresh Checkout
+
+The workspace uses the in-tree `uica/` submodule for Rust uiCA crates.
 
 ```bash
-cargo test --release -q -p vxsort_codegen
+cargo test --release -q -p bitonic_codegen
 
-cargo run -q -p vxsort_codegen -- \
+cargo run -q -p bitonic_codegen -- \
   fetch-uica-data \
   --target-cpu SKL
 ```
@@ -26,10 +58,23 @@ cargo run -q -p vxsort_codegen -- \
 from `https://uica.houmus.org/data` into `uica-data/`. The `uica-data/`
 directory is local cache data and is intentionally ignored by git.
 
+## Build and Test
+
+```bash
+cargo fmt --all --check
+cargo clippy --all-targets --all-features --release -- -D warnings
+cargo test --release -q
+```
+
+The Rust workspace is rooted at `Cargo.toml`; crates live directly under this
+directory.
+
+## Solve
+
 Run a small scored solver pass:
 
 ```bash
-cargo run -q -p vxsort_codegen -- \
+cargo run -q -p bitonic_codegen -- \
   solve \
   --vector-machine AVX2 \
   --datatype i64 \
@@ -55,11 +100,11 @@ rough candidates and re-ranks them with the Rust uiCA simulator.
 Multiple targets are comma-separated:
 
 ```bash
-cargo run -q -p vxsort_codegen -- \
+cargo run -q -p bitonic_codegen -- \
   fetch-uica-data \
   --target-cpu SKL,TGL
 
-cargo run -q -p vxsort_codegen -- \
+cargo run -q -p bitonic_codegen -- \
   solve \
   --vector-machine AVX2 \
   --datatype i64 \
@@ -78,10 +123,30 @@ With multiple CPUs, outputs are suffixed by target CPU, for example
 `/tmp/vxsort-solutions.SKL.json`, `/tmp/vxsort-solutions.TGL.json`, and matching
 `.asm` files.
 
-Convert an existing exported solution JSON to assembly:
+## Runtime Tracing
+
+Use `--runtime-ui textual` for line-oriented progress, or `--runtime-ui none`
+for quiet batch runs. Use `--runtime-trace PATH` to write JSONL trace events.
 
 ```bash
-cargo run -q -p vxsort_codegen -- \
+cargo run -q -p bitonic_codegen -- \
+  solve \
+  --vector-machine AVX2 \
+  --datatype i64 \
+  --target-cpu SKL \
+  --top-k 5 \
+  --gadget-depth 1 \
+  --max-waves 1 \
+  --runtime-ui textual \
+  --runtime-trace /tmp/vxsort-runtime.jsonl
+```
+
+## JSON, ASM, Verify, and Score
+
+Convert an exported solution JSON to assembly:
+
+```bash
+cargo run -q -p bitonic_codegen -- \
   json-to-asm \
   --input /tmp/vxsort-solutions.json \
   --output /tmp/vxsort-solutions.asm
@@ -91,23 +156,53 @@ cargo run -q -p vxsort_codegen -- \
 It reconstructs the transition table and root-to-leaf solution paths, then uses
 the same assembly lowering/emission path as `--asm-output-path`.
 
-## Build and test
+Verify solution JSON with Z3:
 
 ```bash
-cargo fmt --all --check
-cargo clippy --all-targets --all-features --release -- -D warnings
-cargo test --release -q
+cargo run -q -p bitonic_codegen -- \
+  verify \
+  --input /tmp/vxsort-solutions.json \
+  --top-k 1 \
+  --workers 1
 ```
 
-The Rust workspace is rooted at `Cargo.toml`; the crates live under `rust/`.
+Estimate an existing solution JSON with uiCA:
 
-## Dump gadget templates
+```bash
+cargo run -q -p bitonic_codegen -- \
+  estimate \
+  --input /tmp/vxsort-solutions.json \
+  --target-cpu SKL \
+  --uica-data-dir uica-data \
+  --top-k 5 \
+  --output-dir /tmp/vxsort-uica-estimate
+```
 
-The dumpers export **template records only**. A template is a candidate minigraph shape before Z3 solving: intrinsic nodes, input references, symbolic immediates/control vectors/masks, mux nodes, and top/bottom outputs.
+Inspect the lowered instructions and uiCA score for selected paths:
 
-Synthesized concrete gadgets are intentionally not exported here. The template dump is the inspection/parity artifact for candidate generation.
+```bash
+cargo run -q -p bitonic_codegen -- \
+  score-json \
+  --input /tmp/vxsort-solutions.json \
+  --target-cpu SKL \
+  --uica-data-dir uica-data \
+  --path-index 0
+```
 
-### Rust dumper
+Generated artifacts:
+
+- `*.json`: solution graph, roots, nodes, transitions, and optional concrete path assignments.
+- `*.asm`: annotated x86-64 assembly emitted through the canonical assembly exporter.
+- `uica-data/`: local uiCA manifest and architecture pack cache.
+
+## Dump Gadget Templates
+
+Template dumps export candidate minigraph shapes before Z3 solving: intrinsic
+nodes, input references, symbolic immediates/control vectors/masks, mux nodes,
+and top/bottom outputs.
+
+Synthesized concrete gadgets are intentionally not exported here. The template
+dump is the inspection artifact for candidate generation.
 
 ```bash
 cargo run -q -p gadget_synth --bin dump_gadget_synth -- \
@@ -119,19 +214,7 @@ cargo run -q -p gadget_synth --bin dump_gadget_synth -- \
   --output /tmp/avx2-i64-depth2-templates.jsonl
 ```
 
-### Python reference dumper
-
-```bash
-uv run python tools/dump_gadget_synth.py \
-  templates \
-  --vector-machine AVX2 \
-  --datatype i64 \
-  --gadget-depth 2 \
-  --exclude-shared-prefix \
-  --output /tmp/python-avx2-i64-depth2-templates.jsonl
-```
-
-### Useful dump options
+Useful dump options:
 
 - `--gadget-depth 1|2`: candidate graph depth. Depths above 2 are not supported yet.
 - `--exclude-shared-prefix`: omit depth-2 shared-prefix templates.
@@ -150,24 +233,7 @@ cargo run -q -p gadget_synth --bin dump_gadget_synth -- \
   --output /tmp/avx512-i64-filtered-templates.jsonl
 ```
 
-## Compare Python and Rust dumps
-
-Use the comparer to verify candidate-generation parity:
-
-```bash
-uv run python tools/compare_gadget_synth_dumps.py \
-  /tmp/python-avx2-i64-depth2-templates.jsonl \
-  /tmp/avx2-i64-depth2-templates.jsonl \
-  --max-diffs 10
-```
-
-Expected success output:
-
-```text
-Dumps match
-```
-
-## Template JSONL schema
+## Template JSONL Schema
 
 Each line is one normalized template record:
 
@@ -192,13 +258,14 @@ Graph nodes may be:
 - `mux`: a symbolic selector plus source alternatives and optional pruning.
 - `intrinsic`: an intrinsic name plus normalized operands.
 
-Symbolic IDs (`v0`, `v1`, ...) are stable within a record and preserve aliasing without leaking Python/Rust object identities.
+Symbolic IDs (`v0`, `v1`, ...) are stable within a record and preserve aliasing
+without leaking object identities.
 
-## Visualize templates
+## Visualize Templates
 
 `gadget_viz` reads template JSONL and renders selected records or the full file.
 
-### Render one record to HTML
+Render one record to HTML:
 
 ```bash
 cargo run -q -p gadget_viz -- \
@@ -208,9 +275,7 @@ cargo run -q -p gadget_viz -- \
   --output /tmp/gadget-template-0.html
 ```
 
-Open `/tmp/gadget-template-0.html` in a browser. HTML output uses the `mermaid-rs-renderer` library in-process, embeds rendered SVGs as base64 data URIs, and does not load Mermaid in the browser.
-
-### Render all records to an HTML gallery
+Render all records to an HTML gallery:
 
 ```bash
 cargo run -q -p gadget_viz -- \
@@ -219,7 +284,7 @@ cargo run -q -p gadget_viz -- \
   --output /tmp/gadget-templates.html
 ```
 
-### Emit raw Mermaid
+Emit raw Mermaid:
 
 ```bash
 cargo run -q -p gadget_viz -- \
@@ -235,11 +300,11 @@ Supported formats:
 - `markdown`: metadata plus fenced Mermaid diagrams.
 - `html`: standalone browser-viewable page with pre-rendered inline SVG diagrams.
 
-If `--index N` is omitted, all JSONL records are rendered. `--index` is zero-based. Full depth-2 dumps can contain thousands of records, so prefer `--index` while inspecting individual templates.
+If `--index N` is omitted, all JSONL records are rendered. `--index` is
+zero-based. Full depth-2 dumps can contain thousands of records, so prefer
+`--index` while inspecting individual templates.
 
-## What the diagrams show
-
-The Mermaid graph represents the **template dataflow only**:
+The Mermaid graph represents template dataflow only:
 
 ```text
 top input / bottom input
@@ -247,27 +312,5 @@ top input / bottom input
   -> top output / bottom output
 ```
 
-Record metadata such as `arch`, `dtype`, `gadget_depth`, and `tier` appears outside the Mermaid graph in Markdown/HTML output. It is not drawn as gadget dataflow.
-
-`gadget_viz` rejects non-template records, including old synthesized dumps, because this tooling is now template-only.
-
-## Quick end-to-end example
-
-```bash
-PY=/tmp/python-avx2-i64-depth2-templates.jsonl
-RS=/tmp/rust-avx2-i64-depth2-templates.jsonl
-HTML=/tmp/rust-avx2-i64-depth2-templates.html
-
-uv run python tools/dump_gadget_synth.py templates \
-  --vector-machine AVX2 --datatype i64 --gadget-depth 2 \
-  --exclude-shared-prefix --output "$PY"
-
-cargo run -q -p gadget_synth --bin dump_gadget_synth -- templates \
-  --arch avx2 --dtype i64 --gadget-depth 2 \
-  --exclude-shared-prefix --output "$RS"
-
-uv run python tools/compare_gadget_synth_dumps.py "$PY" "$RS"
-
-cargo run -q -p gadget_viz -- \
-  --input "$RS" --format html --output "$HTML"
-```
+Record metadata such as `arch`, `dtype`, `gadget_depth`, and `tier` appears
+outside the Mermaid graph in Markdown/HTML output.

@@ -6,7 +6,7 @@
 
 **Architecture:** Introduce a Rust `instruction_stream` module that lowers solution paths into a canonical modeled instruction stream. The stream owns instruction mnemonics, operands, comments, rodata/constants, virtual/physical register choices, and constant materialization reuse. `asm_exporter` becomes a renderer over that stream. Future UICA integration will consume the same stream directly instead of parsing or dumping assembly.
 
-**Tech Stack:** Rust workspace (`vxsort_codegen`, `gadget_synth`), release-mode cargo tests, clippy with warnings denied.
+**Tech Stack:** Rust workspace (`bitonic_codegen`, `gadget_synth`), release-mode cargo tests, clippy with warnings denied.
 
 ---
 
@@ -33,21 +33,21 @@
 
 ### Create
 
-- `rust/vxsort_codegen/src/instruction_stream.rs`
+- `bitonic_codegen/src/instruction_stream.rs`
   - Defines `InstructionStream`, `InstructionBlock`, `ModeledInstruction`, `Operand`, `Register`, `ConstantData`, `LoweringOptions`.
   - Provides lowering entry points from `TransitionTable` + `CompletePath`.
   - Owns constant pooling/GVN decisions.
 
 ### Modify
 
-- `rust/vxsort_codegen/src/lib.rs`
+- `bitonic_codegen/src/lib.rs`
   - Export `instruction_stream` module.
-- `rust/vxsort_codegen/src/asm_exporter.rs`
+- `bitonic_codegen/src/asm_exporter.rs`
   - Replace direct string construction for instruction lines with stream rendering.
   - Keep `generate_solution_asm_for_paths` and `write_solution_asm_for_paths` public APIs stable.
-- `rust/vxsort_codegen/tests/asm_exporter.rs`
+- `bitonic_codegen/tests/asm_exporter.rs`
   - Keep existing behavior tests.
-- Add `rust/vxsort_codegen/tests/instruction_stream.rs`
+- Add `bitonic_codegen/tests/instruction_stream.rs`
   - Unit tests for lowering and constant reuse.
 
 ---
@@ -55,9 +55,9 @@
 ### Task 1: Add Modeled Instruction Stream Types
 
 **Files:**
-- Create: `rust/vxsort_codegen/src/instruction_stream.rs`
-- Modify: `rust/vxsort_codegen/src/lib.rs`
-- Test: `rust/vxsort_codegen/tests/instruction_stream.rs`
+- Create: `bitonic_codegen/src/instruction_stream.rs`
+- Modify: `bitonic_codegen/src/lib.rs`
+- Test: `bitonic_codegen/tests/instruction_stream.rs`
 
 - [ ] **Step 1: Write failing type/constructor tests**
 
@@ -95,15 +95,15 @@ pub mod instruction_stream;
 
 ```bash
 cargo fmt --all --check
-cargo test --release -q -p vxsort_codegen --test instruction_stream
+cargo test --release -q -p bitonic_codegen --test instruction_stream
 ```
 
 ### Task 2: Lower Complete Paths to InstructionStream
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/instruction_stream.rs`
-- Test: `rust/vxsort_codegen/tests/instruction_stream.rs`
-- Reference: current `rust/vxsort_codegen/src/asm_exporter.rs`
+- Modify: `bitonic_codegen/src/instruction_stream.rs`
+- Test: `bitonic_codegen/tests/instruction_stream.rs`
+- Reference: current `bitonic_codegen/src/asm_exporter.rs`
 
 - [ ] **Step 1: Add failing lowering test for a one-stage AVX2 i64 path**
 
@@ -130,15 +130,15 @@ Support:
 
 ```bash
 cargo fmt --all --check
-cargo test --release -q -p vxsort_codegen --test instruction_stream
+cargo test --release -q -p bitonic_codegen --test instruction_stream
 ```
 
 ### Task 3: Make ASM Exporter Render InstructionStream
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/asm_exporter.rs`
-- Test: `rust/vxsort_codegen/tests/asm_exporter.rs`
-- Test: `rust/vxsort_codegen/tests/cli.rs`
+- Modify: `bitonic_codegen/src/asm_exporter.rs`
+- Test: `bitonic_codegen/tests/asm_exporter.rs`
+- Test: `bitonic_codegen/tests/cli.rs`
 
 - [ ] **Step 1: Add/keep failing regression expectations**
 
@@ -161,17 +161,17 @@ Renderer should not inspect `TransitionTable`, allocate temps, or perform consta
 
 ```bash
 cargo fmt --all --check
-cargo test --release -q -p vxsort_codegen --test asm_exporter
-cargo test --release -q -p vxsort_codegen --test cli
+cargo test --release -q -p bitonic_codegen --test asm_exporter
+cargo test --release -q -p bitonic_codegen --test cli
 ```
 
 ### Task 4: Add Constant Materialization / GVN Foundation
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/instruction_stream.rs`
-- Modify: `rust/vxsort_codegen/src/asm_exporter.rs`
-- Test: `rust/vxsort_codegen/tests/instruction_stream.rs`
-- Test: `rust/vxsort_codegen/tests/asm_exporter.rs`
+- Modify: `bitonic_codegen/src/instruction_stream.rs`
+- Modify: `bitonic_codegen/src/asm_exporter.rs`
+- Test: `bitonic_codegen/tests/instruction_stream.rs`
+- Test: `bitonic_codegen/tests/asm_exporter.rs`
 
 - [ ] **Step 1: Add failing tests for constant reuse**
 
@@ -233,16 +233,16 @@ For currently unsupported instruction forms, emit `Operand::Unsupported` with en
 
 ```bash
 cargo fmt --all --check
-cargo test --release -q -p vxsort_codegen --test instruction_stream
-cargo test --release -q -p vxsort_codegen --test asm_exporter
+cargo test --release -q -p bitonic_codegen --test instruction_stream
+cargo test --release -q -p bitonic_codegen --test asm_exporter
 ```
 
 ### Task 5: Preserve Current ASM Behavior Across Supported Configs
 
 **Files:**
-- Modify: `rust/vxsort_codegen/src/instruction_stream.rs`
-- Modify: `rust/vxsort_codegen/src/asm_exporter.rs`
-- Test: `rust/vxsort_codegen/tests/asm_exporter.rs`
+- Modify: `bitonic_codegen/src/instruction_stream.rs`
+- Modify: `bitonic_codegen/src/asm_exporter.rs`
+- Test: `bitonic_codegen/tests/asm_exporter.rs`
 
 - [ ] **Step 1: Add compare-swap regression tests**
 
@@ -260,7 +260,7 @@ If a gadget cannot be fully rendered yet, the stream/ASM must contain an `unsupp
 
 ```bash
 cargo fmt --all --check
-cargo test --release -q -p vxsort_codegen --test asm_exporter
+cargo test --release -q -p bitonic_codegen --test asm_exporter
 ```
 
 ### Task 6: Full Rust Verification Gate
