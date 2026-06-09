@@ -35,6 +35,30 @@ fn empty_gadget() -> gadget_synth::PermutationGadget {
     gadget_synth::PermutationGadget::new(Vec::new(), Vec::new())
 }
 
+fn state_from_one_based_pairs(pairs: &[(usize, usize)]) -> gadget_synth::VectorState {
+    gadget_synth::VectorState::new(
+        pairs.iter().map(|(top, _)| (top - 1) as u8).collect(),
+        pairs.iter().map(|(_, bottom)| (bottom - 1) as u8).collect(),
+    )
+}
+
+fn visit_pair_permutations(
+    pairs: &mut [(usize, usize)],
+    start: usize,
+    visit: &mut impl FnMut(&[(usize, usize)]),
+) {
+    if start >= pairs.len() {
+        visit(pairs);
+        return;
+    }
+
+    for idx in start..pairs.len() {
+        pairs.swap(start, idx);
+        visit_pair_permutations(pairs, start + 1, visit);
+        pairs.swap(start, idx);
+    }
+}
+
 fn run_stage_sync(
     engine: &mut WaveEngine,
     stage: usize,
@@ -227,6 +251,23 @@ fn natural_order_appends_final_reorder_stage() {
 }
 
 #[test]
+fn construction_computes_stage_output_limits() {
+    let engine = WaveEngine::new(fast_config()).expect("engine should initialize");
+    let with_natural = WaveEngine::new(WaveConfig {
+        natural_order: true,
+        ..fast_config()
+    })
+    .expect("engine should initialize");
+
+    assert_eq!(engine.stage_output_limit(0), 24);
+    assert_eq!(engine.stage_output_limit(1), 24);
+    assert_eq!(
+        with_natural.stage_output_limit(with_natural.stages().len() - 1),
+        1
+    );
+}
+
+#[test]
 fn construction_precomputes_candidate_tiers() {
     let engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
 
@@ -270,6 +311,37 @@ fn retroactive_input_forwards_and_exhausts_stage_zero() {
             .is_empty()
     );
     assert_eq!(engine.select_target_stage(), Some(1));
+}
+
+#[test]
+fn select_target_stage_skips_output_saturated_stage() {
+    let mut engine = WaveEngine::new(WaveConfig {
+        retroactive_input: true,
+        ..fast_config()
+    })
+    .expect("wave engine should initialize");
+    let stage0_output = engine
+        .transition_table()
+        .get_unique_outputs(0)
+        .values()
+        .next()
+        .expect("retroactive input should create stage 0 outputs")
+        .clone();
+    let mut stage1_pairs = engine.stages()[1].pairs().to_vec();
+
+    visit_pair_permutations(&mut stage1_pairs, 0, &mut |permuted| {
+        let output = state_from_one_based_pairs(permuted);
+        engine
+            .transition_table_mut()
+            .add_transition(1, &stage0_output, &output, empty_gadget());
+    });
+
+    assert_eq!(
+        engine.transition_table().unique_output_count(1),
+        engine.stage_output_limit(1)
+    );
+    assert!(engine.stage_output_saturated(1));
+    assert_eq!(engine.select_target_stage(), Some(2));
 }
 
 #[test]
@@ -412,6 +484,33 @@ fn execute_job_records_attempt_and_successful_transitions() {
     );
     assert!(engine.transition_table().unique_output_count(0) > 0);
     assert!(!engine.transition_table().get_all_transitions(0).is_empty());
+}
+
+#[test]
+fn downstream_known_outputs_do_not_count_toward_output_budget() {
+    let mut engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
+    let input = state(&[1, 2, 3, 4], &[5, 6, 7, 8]);
+    let downstream_known_output = state(&[1, 3, 2, 4], &[5, 7, 6, 8]);
+    let fresh_output = state(&[2, 1, 4, 3], &[6, 5, 8, 7]);
+
+    let input_id = engine
+        .transition_table_mut()
+        .intern_zero_based_state(&input);
+    let downstream_known_output_id = engine
+        .transition_table_mut()
+        .intern_zero_based_state(&downstream_known_output);
+    engine
+        .transition_table_mut()
+        .record_attempted_pair_by_id(1, downstream_known_output_id, 0);
+
+    let known_result =
+        engine.record_transition(0, input_id, &downstream_known_output, empty_gadget());
+    assert!(known_result.transition_added());
+    assert!(!known_result.budget_output_added());
+
+    let fresh_result = engine.record_transition(0, input_id, &fresh_output, empty_gadget());
+    assert!(fresh_result.transition_added());
+    assert!(fresh_result.budget_output_added());
 }
 
 #[test]

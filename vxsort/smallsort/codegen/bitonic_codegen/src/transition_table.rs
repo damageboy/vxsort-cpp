@@ -263,6 +263,8 @@ impl TransitionRecord {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TransitionInsertResult {
     pub transition: TransitionRef,
+    pub output: StateId,
+    pub output_was_new: bool,
     pub transition_was_new: bool,
     pub gadget_was_new: bool,
     pub gadget_index: Option<GadgetIndex>,
@@ -286,6 +288,7 @@ pub struct StageData {
     unique_outputs: HashSet<StateId>,
     unique_inputs: HashSet<StateId>,
     attempted_pairs: HashSet<(StateId, usize)>,
+    attempted_inputs: HashSet<StateId>,
     forwarded_outputs: HashSet<StateId>,
     consecutive_zero_budgets: usize,
     unproductive_waves: usize,
@@ -536,6 +539,8 @@ impl TransitionTable {
                         stage: stage_ref,
                         transition,
                     },
+                    output,
+                    output_was_new: false,
                     transition_was_new: false,
                     gadget_was_new: false,
                     gadget_index: Some(GadgetIndex(
@@ -560,12 +565,15 @@ impl TransitionTable {
                     stage: stage_ref,
                     transition,
                 },
+                output,
+                output_was_new: false,
                 transition_was_new: false,
                 gadget_was_new: true,
                 gadget_index: Some(gadget_index),
             };
         }
 
+        let output_was_new = !stage_data.unique_outputs.contains(&output);
         let transition = TransitionIndex(
             stage_data
                 .transitions
@@ -604,6 +612,8 @@ impl TransitionTable {
                 stage: stage_ref,
                 transition,
             },
+            output,
+            output_was_new,
             transition_was_new: true,
             gadget_was_new: true,
             gadget_index: Some(GadgetIndex(0)),
@@ -651,6 +661,7 @@ impl TransitionTable {
     ) {
         let stage_data = &mut self.stages[stage];
         stage_data.attempted_pairs.insert((input, candidate_index));
+        stage_data.attempted_inputs.insert(input);
         stage_data.dirty = true;
     }
 
@@ -688,10 +699,7 @@ impl TransitionTable {
     }
 
     pub fn was_input_attempted_by_id(&self, stage: usize, input: StateId) -> bool {
-        self.stages[stage]
-            .attempted_pairs
-            .iter()
-            .any(|(attempted_input, _)| *attempted_input == input)
+        self.stages[stage].attempted_inputs.contains(&input)
     }
 
     pub fn was_input_attempted(&self, stage: usize, input_tuple: &StateTuple) -> bool {

@@ -96,6 +96,8 @@ pub struct WaveEngine {
     stages: Vec<BitonicStage>,
     /// Zero-based comparator target pairs for each stage.
     stage_target_pairs: Vec<Box<[TargetPair]>>,
+    /// Upper bound on distinct output states each stage can produce.
+    stage_output_limits: Vec<usize>,
     /// Candidate gadget graphs in the low-depth tier.
     shallow_candidates: Vec<GadgetGraph>,
     /// Candidate gadget graphs in the higher-depth tier.
@@ -221,12 +223,17 @@ impl ScoredPath {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TransitionRecordResult {
     transition_added: bool,
+    budget_output_added: bool,
     discovered_paths: usize,
 }
 
 impl TransitionRecordResult {
     pub fn transition_added(&self) -> bool {
         self.transition_added
+    }
+
+    pub fn budget_output_added(&self) -> bool {
+        self.budget_output_added
     }
 
     pub fn discovered_paths(&self) -> usize {
@@ -482,6 +489,7 @@ pub struct JobExecutionResult {
     valid_output_count: usize,
     transition_count: usize,
     new_transition_count: usize,
+    budget_output_count: usize,
     discovered_paths: usize,
 }
 
@@ -510,6 +518,10 @@ impl JobExecutionResult {
         self.new_transition_count
     }
 
+    pub fn budget_output_count(&self) -> usize {
+        self.budget_output_count
+    }
+
     pub fn discovered_paths(&self) -> usize {
         self.discovered_paths
     }
@@ -526,6 +538,7 @@ pub struct StageRunResult {
     attempts: usize,
     valid_outputs: usize,
     new_outputs: usize,
+    budget_outputs: usize,
     new_transitions: usize,
     discovered_paths: usize,
 }
@@ -545,6 +558,10 @@ impl StageRunResult {
 
     pub fn new_outputs(&self) -> usize {
         self.new_outputs
+    }
+
+    pub fn budget_outputs(&self) -> usize {
+        self.budget_outputs
     }
 
     pub fn new_transitions(&self) -> usize {
@@ -599,9 +616,8 @@ impl WaveRunResult {
 
 /// Summary returned after running waves until exhaustion or a configured stop.
 ///
-/// `search_exhausted` is true only when all stages are exhausted or stalled
-/// according to the wave scheduler; a `max_waves` limit can end the search
-/// with this set to false.
+/// `search_exhausted` is true only when no stage remains eligible for frontier
+/// expansion; a `max_waves` limit can end the search with this set to false.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WaveSearchResult {
     wave_count: usize,
@@ -1069,6 +1085,7 @@ impl WaveEngine {
             .iter()
             .map(target_pairs_for_stage)
             .collect::<Vec<_>>();
+        let stage_output_limits = stage_output_limits(&stages, config.natural_order);
 
         let synth =
             GadgetSynthesizer::new(to_synth_arch(config.arch), to_synth_dtype(config.dtype));
@@ -1097,6 +1114,7 @@ impl WaveEngine {
             total_elements,
             stages,
             stage_target_pairs,
+            stage_output_limits,
             shallow_candidates,
             deep_candidates,
             transition_table,
@@ -1148,6 +1166,14 @@ impl WaveEngine {
 
     pub fn stages(&self) -> &[BitonicStage] {
         &self.stages
+    }
+
+    pub fn stage_output_limit(&self, stage: usize) -> usize {
+        self.stage_output_limits[stage]
+    }
+
+    pub fn stage_output_saturated(&self, stage: usize) -> bool {
+        self.transition_table.unique_output_count(stage) >= self.stage_output_limits[stage]
     }
 
     pub fn shallow_candidates(&self) -> &[GadgetGraph] {
@@ -1322,6 +1348,8 @@ impl WaveEngine {
         let insert =
             self.transition_table
                 .add_transition_by_id(stage, input, output_state.clone(), gadget);
+        let budget_output_added =
+            insert.output_was_new && self.output_counts_toward_stage_budget(stage, insert.output);
         let discovered_paths = if insert.gadget_was_new {
             if insert.transition_was_new {
                 self.discover_paths_through_transition_for_reason(
@@ -1341,8 +1369,25 @@ impl WaveEngine {
 
         TransitionRecordResult {
             transition_added: insert.gadget_was_new,
+            budget_output_added,
             discovered_paths,
         }
+    }
+
+    fn output_counts_toward_stage_budget(&self, stage: usize, output: StateId) -> bool {
+        let next_stage = stage + 1;
+        if next_stage >= self.stages.len() {
+            return true;
+        }
+
+        !self
+            .transition_table
+            .was_input_attempted_by_id(next_stage, output)
+            && !self
+                .transition_table
+                .stage(next_stage)
+                .unique_input_ids()
+                .contains(&output)
     }
 
     /// Chooses which stage the next wave should target.
@@ -1375,7 +1420,7 @@ impl WaveEngine {
 
         // This kicks in when on the first wave but stage 0 is already exhausted.
         // The reason this is even possible is because of --retroactive-input.
-        if self.wave_count == 0 && !self.exhausted_stages.contains(&0) {
+        if self.wave_count == 0 && self.stage_is_frontier_selectable(0) {
             return Some(0);
         }
 
@@ -1386,9 +1431,7 @@ impl WaveEngine {
 
         if needs_bubble_up {
             for upstream in (0..target).rev() {
-                if !self.exhausted_stages.contains(&upstream)
-                    && !self.stalled_stages.contains(&upstream)
-                {
+                if self.stage_is_frontier_selectable(upstream) {
                     return Some(upstream);
                 }
             }
@@ -1399,13 +1442,17 @@ impl WaveEngine {
 
     fn pick_target_stage(&self) -> Option<usize> {
         (0..self.stages.len())
-            .filter(|stage| {
-                !self.exhausted_stages.contains(stage) && !self.stalled_stages.contains(stage)
-            })
+            .filter(|stage| self.stage_is_frontier_selectable(*stage))
             .min_by_key(|stage| {
                 let stats = self.transition_table.stage_stats(*stage);
                 (stats.distinct_outputs, stats.attempts, *stage)
             })
+    }
+
+    fn stage_is_frontier_selectable(&self, stage: usize) -> bool {
+        !self.exhausted_stages.contains(&stage)
+            && !self.stalled_stages.contains(&stage)
+            && !self.stage_output_saturated(stage)
     }
 
     /// Enumerates the [`SynthesisJob`]s for one sorting-network `stage`.
@@ -1593,12 +1640,16 @@ impl WaveEngine {
 
         let valid_output_count = output.results.len();
         let mut new_transition_count = 0;
+        let mut budget_output_count = 0;
         let mut discovered_paths = 0;
         for (gadget, output_state) in output.results {
             let result = self.record_transition(id.stage, id.input, &output_state, gadget);
             if result.transition_added() {
                 new_transition_count += 1;
                 discovered_paths += result.discovered_paths();
+            }
+            if result.budget_output_added() {
+                budget_output_count += 1;
             }
         }
 
@@ -1609,6 +1660,7 @@ impl WaveEngine {
             valid_output_count,
             transition_count: valid_output_count,
             new_transition_count,
+            budget_output_count,
             discovered_paths,
         }
     }
@@ -1923,6 +1975,8 @@ impl WaveEngine {
                     "gadgets": data.total_gadget_count(),
                     "unique_inputs": data.unique_input_ids().len(),
                     "unique_outputs": data.unique_output_ids().len(),
+                    "output_limit": self.stage_output_limit(stage),
+                    "output_saturated": self.stage_output_saturated(stage),
                     "attempted_pairs": data.attempted_pair_count(),
                     "forwarded_outputs": data.forwarded_output_count(),
                     "transitions_by_input_entries": data.transitions_by_input_entry_count(),
@@ -2198,7 +2252,7 @@ impl WaveEngine {
     }
 
     fn search_exhausted(&self) -> bool {
-        self.exhausted_stages.len() >= self.stages.len()
+        !(0..self.stages.len()).any(|stage| self.stage_is_frontier_selectable(stage))
     }
 
     fn retain_top_k_paths(&mut self) {
@@ -2522,6 +2576,7 @@ impl WaveEngine {
 
         let mut attempts = 0;
         let mut valid_outputs = 0;
+        let mut budget_outputs = 0;
         let mut new_transitions = 0;
         let mut discovered_paths = 0;
 
@@ -2538,6 +2593,7 @@ impl WaveEngine {
             let result = self.execute_job(&job)?;
             attempts += result.attempts();
             valid_outputs += result.valid_output_count();
+            budget_outputs += result.budget_output_count();
             new_transitions += result.new_transition_count();
             discovered_paths += result.discovered_paths();
             self.poll_scoring_jobs_for_reason("stage_job_finished");
@@ -2546,7 +2602,7 @@ impl WaveEngine {
             self.emit_stage_update(stage, session);
 
             let new_outputs = self.transition_table.unique_output_count(stage) - outputs_at_start;
-            if new_outputs >= output_budget {
+            if budget_outputs >= output_budget {
                 self.set_stage_worker_state(stage, 0, 0, 0);
                 self.emit_stage_update(stage, session);
                 return Ok(StageRunResult {
@@ -2554,6 +2610,7 @@ impl WaveEngine {
                     attempts,
                     valid_outputs,
                     new_outputs,
+                    budget_outputs,
                     new_transitions,
                     discovered_paths,
                 });
@@ -2567,6 +2624,7 @@ impl WaveEngine {
             attempts,
             valid_outputs,
             new_outputs: self.transition_table.unique_output_count(stage) - outputs_at_start,
+            budget_outputs,
             new_transitions,
             discovered_paths,
         })
@@ -2715,6 +2773,7 @@ impl WaveEngine {
             let mut applied_jobs = 0;
             let mut attempts = 0;
             let mut valid_outputs = 0;
+            let mut budget_outputs = 0;
             let mut new_transitions = 0;
             let mut discovered_paths = 0;
             let mut buffered_results = BTreeMap::new();
@@ -2923,6 +2982,7 @@ impl WaveEngine {
                                     let apply_result = self.apply_synthesis_output(output);
                                     attempts += apply_result.attempts();
                                     valid_outputs += apply_result.valid_output_count();
+                                    budget_outputs += apply_result.budget_output_count();
                                     new_transitions += apply_result.new_transition_count();
                                     discovered_paths += apply_result.discovered_paths();
                                     applied_jobs += 1;
@@ -2965,10 +3025,12 @@ impl WaveEngine {
                                                 "candidate_index": candidate_index,
                                                 "attempts": apply_result.attempts(),
                                                 "valid_outputs": apply_result.valid_output_count(),
+                                                "budget_outputs": apply_result.budget_output_count(),
                                                 "new_transitions": apply_result.new_transition_count(),
                                                 "discovered_paths": apply_result.discovered_paths(),
                                                 "total_attempts": attempts,
                                                 "total_valid_outputs": valid_outputs,
+                                                "total_budget_outputs": budget_outputs,
                                                 "total_new_transitions": new_transitions,
                                                 "stage_new_outputs": stage_new_outputs,
                                     });
@@ -2999,13 +3061,14 @@ impl WaveEngine {
                                     let new_outputs =
                                         self.transition_table.unique_output_count(stage)
                                             - outputs_at_start;
-                                    if new_outputs >= output_budget {
+                                    if budget_outputs >= output_budget {
                                         stop_sending = true;
                                         stop_applying = true;
                                         crate::trace!(self.trace, "worker_pool_stop_requested", {
                                                 "stage": stage,
                                                 "reason": "output_budget",
                                                 "new_outputs": new_outputs,
+                                                "budget_outputs": budget_outputs,
                                                 "output_budget": output_budget,
                                                 "next_to_send": next_to_send,
                                                 "in_flight": in_flight,
@@ -3139,6 +3202,7 @@ impl WaveEngine {
                     "attempts": attempts,
                     "valid_outputs": valid_outputs,
                     "new_outputs": new_outputs,
+                    "budget_outputs": budget_outputs,
                     "new_transitions": new_transitions,
                     "discovered_paths": discovered_paths,
                     "job_count": jobs.len(),
@@ -3151,6 +3215,7 @@ impl WaveEngine {
                 attempts,
                 valid_outputs,
                 new_outputs,
+                budget_outputs,
                 new_transitions,
                 discovered_paths,
             })
@@ -3432,6 +3497,24 @@ where
         permute_pairs(pairs, start + 1, visit);
         pairs.swap(start, idx);
     }
+}
+
+fn stage_output_limits(stages: &[BitonicStage], natural_order: bool) -> Vec<usize> {
+    stages
+        .iter()
+        .enumerate()
+        .map(|(stage, bitonic_stage)| {
+            if natural_order && stage + 1 == stages.len() {
+                1
+            } else {
+                saturating_factorial(bitonic_stage.pairs().len())
+            }
+        })
+        .collect()
+}
+
+fn saturating_factorial(n: usize) -> usize {
+    (1..=n).fold(1usize, usize::saturating_mul)
 }
 
 fn create_initial_state(first_stage: &BitonicStage) -> VectorState {
