@@ -1,8 +1,7 @@
 use std::collections::BTreeMap;
 
 use bitonic_codegen::transition_table::{
-    CompletePath, PathRegistry, State, StateInterner, TransitionIndex, TransitionRef,
-    TransitionTable,
+    CompletePath, PathRegistry, StateInterner, TransitionIndex, TransitionRef, TransitionTable,
 };
 use gadget_synth::{InstructionArg, InstructionSpec, PermutationGadget, VectorState};
 
@@ -48,7 +47,7 @@ fn path_for(
 #[test]
 fn interning_same_state_returns_same_id() {
     let mut interner = StateInterner::new(4);
-    let state = State::from_top_bottom([0, 1, 2, 3], [4, 5, 6, 7]);
+    let state = VectorState::from_top_bottom([0, 1, 2, 3], [4, 5, 6, 7]);
 
     let first = interner.intern(state.clone());
     let second = interner.intern(state);

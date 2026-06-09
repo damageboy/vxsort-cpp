@@ -21,15 +21,140 @@ pub type LaneLabel = u8;
 /// One comparator target pair expressed as zero-based lane labels.
 pub type TargetPair = (LaneLabel, LaneLabel);
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct VectorState {
-    top: Vec<LaneLabel>,
-    bottom: Vec<LaneLabel>,
+    top: Box<[LaneLabel]>,
+    bottom: Box<[LaneLabel]>,
 }
 
 impl VectorState {
     pub fn new(top: Vec<LaneLabel>, bottom: Vec<LaneLabel>) -> Self {
-        Self { top, bottom }
+        assert_eq!(
+            top.len(),
+            bottom.len(),
+            "vector state top/bottom lane counts differ"
+        );
+        Self {
+            top: top.into_boxed_slice(),
+            bottom: bottom.into_boxed_slice(),
+        }
+    }
+
+    pub fn from_top_bottom<const LANES: usize>(
+        top: [LaneLabel; LANES],
+        bottom: [LaneLabel; LANES],
+    ) -> Self {
+        Self {
+            top: top.into_iter().collect::<Vec<_>>().into_boxed_slice(),
+            bottom: bottom.into_iter().collect::<Vec<_>>().into_boxed_slice(),
+        }
+    }
+
+    pub fn try_from_zero_based_u64(top: &[u64], bottom: &[u64]) -> Result<Self, String> {
+        if top.len() != bottom.len() {
+            return Err(format!(
+                "state top/bottom lane counts differ: {} vs {}",
+                top.len(),
+                bottom.len()
+            ));
+        }
+        let top = top
+            .iter()
+            .map(|label| {
+                LaneLabel::try_from(*label)
+                    .map_err(|_| format!("state label {label} does not fit in u8"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let bottom = bottom
+            .iter()
+            .map(|label| {
+                LaneLabel::try_from(*label)
+                    .map_err(|_| format!("state label {label} does not fit in u8"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self::new(top, bottom))
+    }
+
+    pub fn try_from_zero_based_labels(
+        top: &[LaneLabel],
+        bottom: &[LaneLabel],
+    ) -> Result<Self, String> {
+        if top.len() != bottom.len() {
+            return Err(format!(
+                "state top/bottom lane counts differ: {} vs {}",
+                top.len(),
+                bottom.len()
+            ));
+        }
+        Ok(Self {
+            top: top.into(),
+            bottom: bottom.into(),
+        })
+    }
+
+    pub fn try_from_one_based_u64(top: &[u64], bottom: &[u64]) -> Result<Self, String> {
+        if top.len() != bottom.len() {
+            return Err(format!(
+                "state top/bottom lane counts differ: {} vs {}",
+                top.len(),
+                bottom.len()
+            ));
+        }
+        let mut converted_top = Vec::with_capacity(top.len());
+        for label in top {
+            if *label == 0 {
+                return Err("one-based state label 0 is out of range".to_owned());
+            }
+            let zero_based = label - 1;
+            converted_top.push(
+                LaneLabel::try_from(zero_based)
+                    .map_err(|_| format!("state label {label} does not fit in u8"))?,
+            );
+        }
+        let mut converted_bottom = Vec::with_capacity(bottom.len());
+        for label in bottom {
+            if *label == 0 {
+                return Err("one-based state label 0 is out of range".to_owned());
+            }
+            let zero_based = label - 1;
+            converted_bottom.push(
+                LaneLabel::try_from(zero_based)
+                    .map_err(|_| format!("state label {label} does not fit in u8"))?,
+            );
+        }
+        Ok(Self::new(converted_top, converted_bottom))
+    }
+
+    pub fn try_from_one_based_labels(
+        top: &[LaneLabel],
+        bottom: &[LaneLabel],
+    ) -> Result<Self, String> {
+        if top.len() != bottom.len() {
+            return Err(format!(
+                "state top/bottom lane counts differ: {} vs {}",
+                top.len(),
+                bottom.len()
+            ));
+        }
+        let mut converted_top = Vec::with_capacity(top.len());
+        for label in top {
+            if *label == 0 {
+                return Err("one-based state label 0 is out of range".to_owned());
+            }
+            converted_top.push(label - 1);
+        }
+        let mut converted_bottom = Vec::with_capacity(bottom.len());
+        for label in bottom {
+            if *label == 0 {
+                return Err("one-based state label 0 is out of range".to_owned());
+            }
+            converted_bottom.push(label - 1);
+        }
+        Ok(Self::new(converted_top, converted_bottom))
+    }
+
+    pub fn lanes_per_side(&self) -> usize {
+        self.top.len()
     }
 
     pub fn top(&self) -> &[LaneLabel] {
@@ -41,7 +166,24 @@ impl VectorState {
     }
 
     pub fn as_tuple(&self) -> (Vec<LaneLabel>, Vec<LaneLabel>) {
-        (self.top.clone(), self.bottom.clone())
+        self.to_zero_based_tuple()
+    }
+
+    pub fn to_zero_based_tuple(&self) -> (Vec<LaneLabel>, Vec<LaneLabel>) {
+        (self.top().to_vec(), self.bottom().to_vec())
+    }
+
+    pub fn to_one_based_tuple(&self) -> (Vec<LaneLabel>, Vec<LaneLabel>) {
+        (
+            self.top()
+                .iter()
+                .map(|label| label.checked_add(1).expect("lane label should stay in u8"))
+                .collect(),
+            self.bottom()
+                .iter()
+                .map(|label| label.checked_add(1).expect("lane label should stay in u8"))
+                .collect(),
+        )
     }
 }
 

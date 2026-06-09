@@ -22,7 +22,7 @@ use crate::scoring::{
     AssignedPath, AssignedPathKey, DummyScorer, PathCost, PathScoringSnapshot, Scorer,
 };
 use crate::transition_table::{
-    CompletePath, PathId, PathRegistry, State, StateId, TransitionRef, TransitionTable,
+    CompletePath, PathId, PathRegistry, StateId, TransitionRef, TransitionTable,
 };
 use crate::{ArchArg, DTypeArg, WorkerBackendArg};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -1319,11 +1319,9 @@ impl WaveEngine {
         output_state: &VectorState,
         gadget: PermutationGadget,
     ) -> TransitionRecordResult {
-        let output = State::try_from_zero_based_labels(output_state.top(), output_state.bottom())
-            .expect("synthesized output labels should fit in compact state storage");
-        let insert = self
-            .transition_table
-            .add_transition_by_id(stage, input, output, gadget);
+        let insert =
+            self.transition_table
+                .add_transition_by_id(stage, input, output_state.clone(), gadget);
         let discovered_paths = if insert.gadget_was_new {
             if insert.transition_was_new {
                 self.discover_paths_through_transition_for_reason(

@@ -32,148 +32,11 @@ pub struct TransitionRef {
     pub transition: TransitionIndex,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
-pub struct State {
-    lanes: Vec<LaneLabel>,
-}
-
-impl State {
-    pub fn from_top_bottom<const LANES: usize>(
-        top: [LaneLabel; LANES],
-        bottom: [LaneLabel; LANES],
-    ) -> Self {
-        let mut lanes = Vec::with_capacity(2 * LANES);
-        lanes.extend(top);
-        lanes.extend(bottom);
-        Self { lanes }
-    }
-
-    pub fn try_from_zero_based_u64(top: &[u64], bottom: &[u64]) -> Result<Self, String> {
-        if top.len() != bottom.len() {
-            return Err(format!(
-                "state top/bottom lane counts differ: {} vs {}",
-                top.len(),
-                bottom.len()
-            ));
-        }
-        let mut lanes = Vec::with_capacity(top.len() + bottom.len());
-        for label in top.iter().chain(bottom.iter()) {
-            let label = LaneLabel::try_from(*label)
-                .map_err(|_| format!("state label {label} does not fit in u8"))?;
-            lanes.push(label);
-        }
-        Ok(Self { lanes })
-    }
-
-    pub fn try_from_zero_based_labels(
-        top: &[LaneLabel],
-        bottom: &[LaneLabel],
-    ) -> Result<Self, String> {
-        if top.len() != bottom.len() {
-            return Err(format!(
-                "state top/bottom lane counts differ: {} vs {}",
-                top.len(),
-                bottom.len()
-            ));
-        }
-        let mut lanes = Vec::with_capacity(top.len() + bottom.len());
-        lanes.extend(top);
-        lanes.extend(bottom);
-        Ok(Self { lanes })
-    }
-
-    pub fn try_from_one_based_u64(top: &[u64], bottom: &[u64]) -> Result<Self, String> {
-        if top.len() != bottom.len() {
-            return Err(format!(
-                "state top/bottom lane counts differ: {} vs {}",
-                top.len(),
-                bottom.len()
-            ));
-        }
-        let mut lanes = Vec::with_capacity(top.len() + bottom.len());
-        for label in top.iter().chain(bottom.iter()) {
-            if *label == 0 {
-                return Err("one-based state label 0 is out of range".to_owned());
-            }
-            let zero_based = label - 1;
-            let zero_based = LaneLabel::try_from(zero_based)
-                .map_err(|_| format!("state label {label} does not fit in u8"))?;
-            lanes.push(zero_based);
-        }
-        Ok(Self { lanes })
-    }
-
-    pub fn try_from_one_based_labels(
-        top: &[LaneLabel],
-        bottom: &[LaneLabel],
-    ) -> Result<Self, String> {
-        if top.len() != bottom.len() {
-            return Err(format!(
-                "state top/bottom lane counts differ: {} vs {}",
-                top.len(),
-                bottom.len()
-            ));
-        }
-        let mut lanes = Vec::with_capacity(top.len() + bottom.len());
-        for label in top.iter().chain(bottom.iter()) {
-            if *label == 0 {
-                return Err("one-based state label 0 is out of range".to_owned());
-            }
-            lanes.push(label - 1);
-        }
-        Ok(Self { lanes })
-    }
-
-    pub fn lanes(&self) -> &[LaneLabel] {
-        &self.lanes
-    }
-
-    pub fn lanes_per_side(&self) -> usize {
-        self.lanes.len() / 2
-    }
-
-    pub fn top(&self) -> &[LaneLabel] {
-        let split = self.lanes_per_side();
-        &self.lanes[..split]
-    }
-
-    pub fn bottom(&self) -> &[LaneLabel] {
-        let split = self.lanes_per_side();
-        &self.lanes[split..]
-    }
-
-    pub fn to_zero_based_tuple(&self) -> StateTuple {
-        (self.top().to_vec(), self.bottom().to_vec())
-    }
-
-    pub fn to_one_based_tuple(&self) -> StateTuple {
-        (
-            self.top()
-                .iter()
-                .map(|label| label.checked_add(1).expect("lane label should stay in u8"))
-                .collect(),
-            self.bottom()
-                .iter()
-                .map(|label| label.checked_add(1).expect("lane label should stay in u8"))
-                .collect(),
-        )
-    }
-
-    pub fn to_zero_based_vector_state(&self) -> VectorState {
-        VectorState::new(self.top().to_vec(), self.bottom().to_vec())
-    }
-
-    pub fn to_one_based_vector_state(&self) -> VectorState {
-        let (top, bottom) = self.to_one_based_tuple();
-        VectorState::new(top, bottom)
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StateInterner {
     lanes_per_side: Option<usize>,
-    states: Vec<State>,
-    by_state: HashMap<State, StateId>,
+    states: Vec<VectorState>,
+    by_state: HashMap<VectorState, StateId>,
 }
 
 impl StateInterner {
@@ -205,7 +68,7 @@ impl StateInterner {
         self.lanes_per_side
     }
 
-    pub fn intern(&mut self, state: State) -> StateId {
+    pub fn intern(&mut self, state: VectorState) -> StateId {
         self.ensure_shape(&state);
         if let Some(id) = self.by_state.get(&state) {
             return *id;
@@ -222,17 +85,18 @@ impl StateInterner {
         id
     }
 
-    pub fn lookup(&self, state: &State) -> Option<StateId> {
+    pub fn lookup(&self, state: &VectorState) -> Option<StateId> {
         self.by_state.get(state).copied()
     }
 
-    pub fn get(&self, id: StateId) -> &State {
+    pub fn get(&self, id: StateId) -> &VectorState {
         &self.states[id.0 as usize]
     }
 
-    fn ensure_shape(&mut self, state: &State) {
-        assert!(
-            state.lanes.len().is_multiple_of(2),
+    fn ensure_shape(&mut self, state: &VectorState) {
+        assert_eq!(
+            state.top().len(),
+            state.bottom().len(),
             "state must contain equal top/bottom lane counts"
         );
         let lanes_per_side = state.lanes_per_side();
@@ -536,7 +400,7 @@ impl TransitionTable {
         &self.states
     }
 
-    pub fn state(&self, id: StateId) -> &State {
+    pub fn state(&self, id: StateId) -> &VectorState {
         self.states.get(id)
     }
 
@@ -549,29 +413,27 @@ impl TransitionTable {
     }
 
     pub fn state_as_vector_state(&self, id: StateId) -> VectorState {
-        self.state(id).to_zero_based_vector_state()
+        self.state(id).clone()
     }
 
     pub fn intern_zero_based_state(&mut self, state: &VectorState) -> StateId {
-        let state = State::try_from_zero_based_labels(state.top(), state.bottom())
-            .expect("vector state labels should fit in compact state storage");
-        self.states.intern(state)
+        self.states.intern(state.clone())
     }
 
     pub fn intern_zero_based_tuple(&mut self, state: &StateTuple) -> StateId {
-        let state = State::try_from_zero_based_labels(&state.0, &state.1)
+        let state = VectorState::try_from_zero_based_labels(&state.0, &state.1)
             .expect("state tuple labels should fit in compact state storage");
         self.states.intern(state)
     }
 
     pub fn intern_one_based_tuple(&mut self, state: &StateTuple) -> StateId {
-        let state = State::try_from_one_based_labels(&state.0, &state.1)
+        let state = VectorState::try_from_one_based_labels(&state.0, &state.1)
             .expect("one-based state tuple labels should fit in compact state storage");
         self.states.intern(state)
     }
 
     pub fn lookup_zero_based_tuple(&self, state: &StateTuple) -> Option<StateId> {
-        let state = State::try_from_zero_based_labels(&state.0, &state.1).ok()?;
+        let state = VectorState::try_from_zero_based_labels(&state.0, &state.1).ok()?;
         self.states.lookup(&state)
     }
 
@@ -630,8 +492,9 @@ impl TransitionTable {
         input_tuple: &StateTuple,
         output_tuple: &StateTuple,
     ) -> Option<TransitionRef> {
-        let input = State::try_from_one_based_labels(&input_tuple.0, &input_tuple.1).ok()?;
-        let output = State::try_from_one_based_labels(&output_tuple.0, &output_tuple.1).ok()?;
+        let input = VectorState::try_from_one_based_labels(&input_tuple.0, &input_tuple.1).ok()?;
+        let output =
+            VectorState::try_from_one_based_labels(&output_tuple.0, &output_tuple.1).ok()?;
         let input = self.states.lookup(&input)?;
         let output = self.states.lookup(&output)?;
         self.transition_ref_for_ids(stage, input, output)
@@ -641,7 +504,7 @@ impl TransitionTable {
         &mut self,
         stage: usize,
         input: StateId,
-        output: State,
+        output: VectorState,
         gadget: PermutationGadget,
     ) -> TransitionInsertResult {
         let output = self.states.intern(output);
@@ -755,9 +618,7 @@ impl TransitionTable {
         gadget: PermutationGadget,
     ) -> bool {
         let input = self.intern_zero_based_state(input_state);
-        let output = State::try_from_zero_based_labels(output_state.top(), output_state.bottom())
-            .expect("vector state labels should fit in compact state storage");
-        self.add_transition_by_id(stage, input, output, gadget)
+        self.add_transition_by_id(stage, input, output_state.clone(), gadget)
             .gadget_was_new
     }
 
@@ -768,9 +629,9 @@ impl TransitionTable {
         output_tuple: &StateTuple,
         gadget: PermutationGadget,
     ) -> TransitionInsertResult {
-        let input = State::try_from_one_based_labels(&input_tuple.0, &input_tuple.1)
+        let input = VectorState::try_from_one_based_labels(&input_tuple.0, &input_tuple.1)
             .expect("one-based input state labels should fit in compact state storage");
-        let output = State::try_from_one_based_labels(&output_tuple.0, &output_tuple.1)
+        let output = VectorState::try_from_one_based_labels(&output_tuple.0, &output_tuple.1)
             .expect("one-based output state labels should fit in compact state storage");
         let input = self.states.intern(input);
         self.add_transition_by_id(stage, input, output, gadget)
@@ -889,8 +750,7 @@ impl TransitionTable {
             .iter()
             .map(|state_id| {
                 let state = self.state_as_zero_based_tuple(*state_id);
-                let vector_state = VectorState::new(state.0.clone(), state.1.clone());
-                (state, vector_state)
+                (state, self.state_as_vector_state(*state_id))
             })
             .collect()
     }
