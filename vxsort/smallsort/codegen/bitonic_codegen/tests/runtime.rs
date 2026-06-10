@@ -238,7 +238,7 @@ fn run_sync_emits_async_scoring_progress() {
 }
 
 #[test]
-fn run_sync_with_retroactive_input_emits_initial_stage_zero_outputs_before_first_wave() {
+fn run_sync_with_retroactive_input_starts_from_virtual_stage_one_frontier() {
     let mut engine = WaveEngine::new(WaveConfig {
         retroactive_input: true,
         ..fast_config()
@@ -248,27 +248,18 @@ fn run_sync_with_retroactive_input_emits_initial_stage_zero_outputs_before_first
 
     run_engine_sync(&mut engine, Some(1), 0, 1, &mut session).expect("run should complete");
 
-    let stage_zero_update = session
-        .events
-        .iter()
-        .position(|event| {
-            matches!(
-                event,
-                RuntimeEvent::StageUpdated(snapshot)
-                    if snapshot.stage() == 0 && snapshot.distinct_outputs() == 24
-            )
-        })
-        .expect("retroactive stage 0 outputs should be emitted");
-    let first_wave = session
-        .events
-        .iter()
-        .position(|event| matches!(event, RuntimeEvent::WaveStarted { .. }))
-        .expect("run should start a wave");
-
-    assert!(
-        stage_zero_update < first_wave,
-        "UI should see retroactive stage 0 outputs before wave work starts"
-    );
+    assert!(!session.events.iter().any(|event| matches!(
+        event,
+        RuntimeEvent::StageUpdated(snapshot)
+            if snapshot.stage() == 0 && snapshot.distinct_outputs() == 24
+    )));
+    assert!(session.events.iter().any(|event| matches!(
+        event,
+        RuntimeEvent::WaveStarted {
+            wave: 0,
+            target_stage: 1,
+        }
+    )));
 }
 
 #[test]

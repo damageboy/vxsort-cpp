@@ -1,0 +1,31 @@
+{
+  "title": "Review Lazy Retroactive Input",
+  "description": "Review tour for replacing eager retroactive stage-0 permutation materialization with lazy factorial-ranked stage-1 paging.",
+  "ref": "nextgen",
+  "steps": [
+    {
+      "file": "bitonic_codegen/src/wave_engine.rs",
+      "pattern": "struct RetroactiveInputSource",
+      "title": "Virtual Factorial Space",
+      "description": "This is the core representation change: retroactive inputs are now stored as a virtual factorial-rank space rather than as eager stage-0 identity transitions. Reviewers should check that `state_for_rank` produces the intended deterministic pair ordering and that `u128` is sufficient for the supported wide cases. The relevant behavioral tests are in [the wave-engine test file](./bitonic_codegen/tests/wave_engine.rs)."
+    },
+    {
+      "file": "bitonic_codegen/src/wave_engine.rs",
+      "pattern": "fn make_retroactive_stage1_jobs",
+      "title": "Paged Stage-One Jobs",
+      "description": "Stage 1 now asks the virtual source for a bounded page of ranked inputs when `--retroactive-input` is enabled. This step is where the old `N!` transition-table blow-up disappears. It still returns normal `SynthesisJob` values, so subprocess and in-process worker execution remain mostly unchanged from [#1].\n\n>> cargo test --release -q -p bitonic_codegen --test wave_engine -- --nocapture"
+    },
+    {
+      "file": "bitonic_codegen/src/wave_engine.rs",
+      "pattern": "fn materialize_retroactive_stage0_identity",
+      "title": "On-Demand Prefixes",
+      "description": "Successful stage-1 transitions need an explicit zero-cost stage-0 prefix so path tracing and scoring can still resolve complete paths. This helper backfills exactly that one identity transition and marks it forwarded, rather than exposing a new stage-0 frontier. Review this together with `record_transition` to confirm scoring remains exact."
+    },
+    {
+      "file": "bitonic_codegen/tests/runtime.rs",
+      "pattern": "run_sync_with_retroactive_input_starts_from_virtual_stage_one_frontier",
+      "title": "Runtime Contract",
+      "description": "The runtime contract changed from reporting eager stage-0 outputs to starting wave 0 at stage 1. This test is the user-visible guardrail for the new behavior, while [#2] covers ranked paging and [#3] covers path-prefix materialization.\n\n>> cargo run --release -q -p bitonic_codegen -- solve --vector-machine avx512 --datatype i32 --retroactive-input --max-waves 1 --wave-attempts 1 --wave-outputs 1 --workers 1 --worker-backend in-process --runtime-ui none --top-k 1 --target-cpu TGL"
+    }
+  ]
+}

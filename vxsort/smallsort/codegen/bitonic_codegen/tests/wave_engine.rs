@@ -276,7 +276,7 @@ fn construction_precomputes_candidate_tiers() {
 }
 
 #[test]
-fn retroactive_input_prepopulates_stage_zero_with_free_identity_permutations() {
+fn retroactive_input_keeps_stage_zero_virtual_until_needed() {
     let engine = WaveEngine::new(WaveConfig {
         retroactive_input: true,
         ..fast_config()
@@ -285,18 +285,12 @@ fn retroactive_input_prepopulates_stage_zero_with_free_identity_permutations() {
 
     let stage_zero = engine.transition_table().get_all_transitions(0);
 
-    assert_eq!(stage_zero.len(), 24);
-    assert_eq!(engine.transition_table().unique_output_count(0), 24);
-    for ((input, output), gadgets) in stage_zero {
-        assert_eq!(input, output);
-        assert_eq!(gadgets.len(), 1);
-        assert!(gadgets[0].top_instructions().is_empty());
-        assert!(gadgets[0].bottom_instructions().is_empty());
-    }
+    assert!(stage_zero.is_empty());
+    assert_eq!(engine.transition_table().unique_output_count(0), 0);
 }
 
 #[test]
-fn retroactive_input_forwards_and_exhausts_stage_zero() {
+fn retroactive_input_exhausts_stage_zero_without_forwarded_outputs() {
     let engine = WaveEngine::new(WaveConfig {
         retroactive_input: true,
         ..fast_config()
@@ -314,26 +308,82 @@ fn retroactive_input_forwards_and_exhausts_stage_zero() {
 }
 
 #[test]
+fn retroactive_input_pages_stage_one_jobs_by_factorial_rank() {
+    let mut engine = WaveEngine::new(WaveConfig {
+        retroactive_input: true,
+        ..fast_config()
+    })
+    .expect("wave engine should initialize");
+
+    let jobs = engine.make_jobs(1, None, Some(3));
+
+    assert_eq!(jobs.len(), 3);
+    assert!(jobs.iter().all(|job| job.stage() == 1));
+    assert!(jobs.iter().all(|job| job.candidate_index() == 0));
+    assert_eq!(
+        job_state(&engine, &jobs[0]),
+        state(&[0, 2, 4, 6], &[1, 3, 5, 7])
+    );
+    assert_eq!(
+        job_state(&engine, &jobs[1]),
+        state(&[0, 2, 6, 4], &[1, 3, 7, 5])
+    );
+    assert_eq!(
+        job_state(&engine, &jobs[2]),
+        state(&[0, 4, 2, 6], &[1, 5, 3, 7])
+    );
+    assert!(engine.transition_table().get_all_transitions(0).is_empty());
+}
+
+#[test]
+fn retroactive_input_materializes_identity_prefix_for_successful_stage_one_transition() {
+    let mut engine = WaveEngine::new(WaveConfig {
+        retroactive_input: true,
+        ..fast_config()
+    })
+    .expect("wave engine should initialize");
+    let jobs = engine.make_jobs(1, None, Some(1));
+    let input = jobs[0].input();
+    let input_state = job_state(&engine, &jobs[0]);
+
+    engine.record_transition(1, input, &input_state, empty_gadget());
+
+    let stage_zero = engine.transition_table().get_all_transitions(0);
+    assert_eq!(stage_zero.len(), 1);
+    for ((input_tuple, output_tuple), gadgets) in stage_zero {
+        assert_eq!(input_tuple, input_state.as_tuple());
+        assert_eq!(output_tuple, input_state.as_tuple());
+        assert_eq!(gadgets.len(), 1);
+        assert!(gadgets[0].top_instructions().is_empty());
+        assert!(gadgets[0].bottom_instructions().is_empty());
+    }
+    assert!(
+        engine
+            .transition_table()
+            .get_unforwarded_outputs(0)
+            .is_empty()
+    );
+}
+
+#[test]
 fn select_target_stage_skips_output_saturated_stage() {
     let mut engine = WaveEngine::new(WaveConfig {
         retroactive_input: true,
         ..fast_config()
     })
     .expect("wave engine should initialize");
-    let stage0_output = engine
-        .transition_table()
-        .get_unique_outputs(0)
-        .values()
-        .next()
-        .expect("retroactive input should create stage 0 outputs")
-        .clone();
+    let stage1_input_job = engine
+        .make_jobs(1, None, Some(1))
+        .pop()
+        .expect("retroactive input should page a stage 1 input");
+    let stage1_input = job_state(&engine, &stage1_input_job);
     let mut stage1_pairs = engine.stages()[1].pairs().to_vec();
 
     visit_pair_permutations(&mut stage1_pairs, 0, &mut |permuted| {
         let output = state_from_one_based_pairs(permuted);
         engine
             .transition_table_mut()
-            .add_transition(1, &stage0_output, &output, empty_gadget());
+            .add_transition(1, &stage1_input, &output, empty_gadget());
     });
 
     assert_eq!(
@@ -346,7 +396,7 @@ fn select_target_stage_skips_output_saturated_stage() {
 
 #[test]
 fn make_jobs_for_stage_zero_uses_initial_state_and_candidate_indices() {
-    let engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
+    let mut engine = WaveEngine::new(fast_config()).expect("wave engine should initialize");
 
     let jobs = engine.make_jobs(0, None, Some(3));
 
@@ -701,18 +751,16 @@ fn select_target_stage_bubbles_up_after_repeated_zero_output_budgets() {
         ..fast_config()
     })
     .expect("wave engine should initialize");
-    let stage0_output = engine
-        .transition_table()
-        .get_unique_outputs(0)
-        .values()
-        .next()
-        .expect("retroactive input should create stage 0 outputs")
-        .clone();
+    let stage1_input_job = engine
+        .make_jobs(1, None, Some(1))
+        .pop()
+        .expect("retroactive input should page a stage 1 input");
+    let stage1_input = job_state(&engine, &stage1_input_job);
     let stage1_output = gadget_synth::VectorState::new(vec![1, 2, 3, 4], vec![5, 6, 7, 8]);
 
     engine.transition_table_mut().add_transition(
         1,
-        &stage0_output,
+        &stage1_input,
         &stage1_output,
         gadget_synth::PermutationGadget::new(Vec::new(), Vec::new()),
     );

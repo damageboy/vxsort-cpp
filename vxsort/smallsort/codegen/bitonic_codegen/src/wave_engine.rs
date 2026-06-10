@@ -61,8 +61,8 @@ pub struct WaveConfig {
     /// Whether to append the final reorder stage that restores natural lane
     /// order.
     pub natural_order: bool,
-    /// Whether stage 0 should be prepopulated from retroactive inputs instead
-    /// of only forwarding from the initial state.
+    /// Whether stage 1 should be seeded from a lazy retroactive permutation
+    /// source instead of only forwarding from the initial state.
     pub retroactive_input: bool,
     /// Number of rough-scored paths to keep. `None` means no top-k pruning.
     pub top_k: Option<usize>,
@@ -102,6 +102,8 @@ pub struct WaveEngine {
     shallow_candidates: Vec<GadgetGraph>,
     /// Candidate gadget graphs in the higher-depth tier.
     deep_candidates: Vec<GadgetGraph>,
+    /// Lazy source for `--retroactive-input` stage-1 jobs.
+    retroactive_input_source: Option<RetroactiveInputSource>,
     /// Interned states, transitions, gadgets, and per-stage attempt statistics.
     transition_table: TransitionTable,
     /// UI progress denominators, indexed by stage.
@@ -247,6 +249,7 @@ pub struct SynthesisJob {
     stage: usize,
     input: StateId,
     candidate_index: usize,
+    retroactive_rank: Option<u128>,
 }
 
 impl SynthesisJob {
@@ -260,6 +263,90 @@ impl SynthesisJob {
 
     pub fn candidate_index(&self) -> usize {
         self.candidate_index
+    }
+
+    fn retroactive_rank(&self) -> Option<u128> {
+        self.retroactive_rank
+    }
+}
+
+/// Lazy factorial-rank source for retroactive stage-0 inputs.
+///
+/// The first bitonic stage consists of independent compare pairs. Retroactive
+/// input treats any ordering of those pairs as a valid zero-cost prefix. This
+/// source keeps that factorial space virtual and materializes only the ranks
+/// needed by the current stage-1 page.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RetroactiveInputSource {
+    pairs: Box<[(LaneLabel, LaneLabel)]>,
+    factorials: Box<[u128]>,
+    total_ranks: u128,
+    next_rank_by_candidate: Vec<u128>,
+}
+
+impl RetroactiveInputSource {
+    fn new(first_stage: &BitonicStage, candidate_count: usize) -> Self {
+        let pairs = first_stage
+            .pairs()
+            .iter()
+            .map(|(top, bottom)| {
+                (
+                    lane_label_from_one_based(*top),
+                    lane_label_from_one_based(*bottom),
+                )
+            })
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        let factorials = checked_factorials_u128(pairs.len());
+        let total_ranks = factorials[pairs.len()];
+
+        Self {
+            pairs,
+            factorials,
+            total_ranks,
+            next_rank_by_candidate: vec![0; candidate_count],
+        }
+    }
+
+    fn total_ranks(&self) -> u128 {
+        self.total_ranks
+    }
+
+    fn next_rank(&self, candidate_index: usize) -> u128 {
+        self.next_rank_by_candidate
+            .get(candidate_index)
+            .copied()
+            .unwrap_or(self.total_ranks)
+    }
+
+    fn set_next_rank(&mut self, candidate_index: usize, rank: u128) {
+        if let Some(next_rank) = self.next_rank_by_candidate.get_mut(candidate_index) {
+            *next_rank = rank.min(self.total_ranks);
+        }
+    }
+
+    fn state_for_rank(&self, rank: u128) -> VectorState {
+        assert!(
+            rank < self.total_ranks,
+            "retroactive input rank should be inside factorial space"
+        );
+
+        let mut rank = rank;
+        let mut remaining = self.pairs.to_vec();
+        let mut ordered = Vec::with_capacity(remaining.len());
+
+        for slot_count in (1..=self.pairs.len()).rev() {
+            let chunk = self.factorials[slot_count - 1];
+            let index =
+                usize::try_from(rank / chunk).expect("factorial rank digit should fit in usize");
+            rank %= chunk;
+            ordered.push(remaining.remove(index));
+        }
+
+        VectorState::new(
+            ordered.iter().map(|(top, _)| *top).collect(),
+            ordered.iter().map(|(_, bottom)| *bottom).collect(),
+        )
     }
 }
 
@@ -316,6 +403,7 @@ struct ProcessWorkerJob {
     input: u32,
     input_state: VectorState,
     candidate_index: usize,
+    retroactive_rank: Option<u128>,
     target_pairs: Box<[TargetPair]>,
     allow_any_lane_order: bool,
 }
@@ -328,6 +416,7 @@ impl ProcessWorkerJob {
             input: worker_job.id.input.0,
             input_state: worker_job.input_state,
             candidate_index: worker_job.id.candidate_index,
+            retroactive_rank: worker_job.id.retroactive_rank,
             target_pairs: worker_job.target_pairs,
             allow_any_lane_order: worker_job.allow_any_lane_order,
         }
@@ -338,6 +427,7 @@ impl ProcessWorkerJob {
             stage: self.stage,
             input: StateId(self.input),
             candidate_index: self.candidate_index,
+            retroactive_rank: self.retroactive_rank,
         }
     }
 }
@@ -1091,18 +1181,17 @@ impl WaveEngine {
             GadgetSynthesizer::new(to_synth_arch(config.arch), to_synth_dtype(config.dtype));
         let (shallow_candidates, deep_candidates) =
             synth.precompute_candidates_stratified(config.gadget_depth)?;
+        let candidate_count = shallow_candidates.len() + deep_candidates.len();
+        let retroactive_input_source = if config.retroactive_input {
+            Some(RetroactiveInputSource::new(&stages[0], candidate_count))
+        } else {
+            None
+        };
         let mut transition_table =
             TransitionTable::new_with_lanes(stages.len(), elements_per_vector);
         let initial_state_id = transition_table.intern_zero_based_state(&initial_state);
         let mut exhausted_stages = HashSet::new();
         if config.retroactive_input {
-            prepopulate_retroactive_stage0(&mut transition_table, &stages[0]);
-            let forwarded = transition_table
-                .get_unforwarded_output_ids(0)
-                .into_iter()
-                .map(|(state_id, _)| state_id)
-                .collect::<Vec<_>>();
-            transition_table.mark_forwarded_ids(0, &forwarded);
             exhausted_stages.insert(0);
         }
 
@@ -1117,6 +1206,7 @@ impl WaveEngine {
             stage_output_limits,
             shallow_candidates,
             deep_candidates,
+            retroactive_input_source,
             transition_table,
             stage_progress_totals: vec![0; stage_count],
             active_worker_counts: vec![0; stage_count],
@@ -1345,6 +1435,10 @@ impl WaveEngine {
         output_state: &VectorState,
         gadget: PermutationGadget,
     ) -> TransitionRecordResult {
+        if self.should_materialize_retroactive_prefix(stage) {
+            self.materialize_retroactive_stage0_identity(input);
+        }
+
         let insert =
             self.transition_table
                 .add_transition_by_id(stage, input, output_state.clone(), gadget);
@@ -1469,9 +1563,10 @@ impl WaveEngine {
     ///
     /// - `Some(input_states)`: use exactly these states, keeping only the ones
     ///   already known to the transition table (unknown states are silently
-    ///   dropped). Used to drive synthesis from an explicit frontier, e.g.
-    ///   `--retroactive-input`.
+    ///   dropped). Used to drive synthesis from an explicit frontier.
     /// - `None` and `stage == 0`: use the engine's single initial state.
+    /// - `None`, `stage == 1`, and `--retroactive-input`: page virtual
+    ///   factorial-ranked permutations from stage 0's comparison pairs.
     /// - `None` and `stage > 0`: use the unique output states produced by the
     ///   previous stage (`stage - 1`).
     ///
@@ -1500,11 +1595,15 @@ impl WaveEngine {
     /// [`was_attempted_by_id`](crate::transition_table). An empty vector is
     /// returned when there are no usable inputs or no candidates.
     pub fn make_jobs(
-        &self,
+        &mut self,
         stage: usize,
         input_states: Option<&[VectorState]>,
         limit: Option<usize>,
     ) -> Vec<SynthesisJob> {
+        if input_states.is_none() && self.should_use_virtual_retroactive_inputs(stage) {
+            return self.make_retroactive_stage1_jobs(stage, limit);
+        }
+
         let owned_inputs;
         let inputs = if let Some(input_states) = input_states {
             let input_states = input_states
@@ -1549,6 +1648,7 @@ impl WaveEngine {
                         stage,
                         input: *input,
                         candidate_index,
+                        retroactive_rank: None,
                     });
 
                     if limit.is_some_and(|limit| jobs.len() >= limit) {
@@ -1558,6 +1658,128 @@ impl WaveEngine {
             }
         }
         jobs
+    }
+
+    fn should_use_virtual_retroactive_inputs(&self, stage: usize) -> bool {
+        self.config.retroactive_input && stage == 1 && self.retroactive_input_source.is_some()
+    }
+
+    fn make_retroactive_stage1_jobs(
+        &mut self,
+        stage: usize,
+        limit: Option<usize>,
+    ) -> Vec<SynthesisJob> {
+        let candidate_count = self.shallow_candidates.len() + self.deep_candidates.len();
+        let job_limit = limit.unwrap_or(candidate_count);
+        let mut jobs = Vec::new();
+
+        if job_limit == 0 || candidate_count == 0 {
+            return jobs;
+        }
+
+        for candidate_index in 0..candidate_count {
+            let Some(mut rank) = self
+                .retroactive_input_source
+                .as_ref()
+                .map(|source| source.next_rank(candidate_index))
+            else {
+                return jobs;
+            };
+            let total_ranks = self
+                .retroactive_input_source
+                .as_ref()
+                .expect("retroactive source should exist")
+                .total_ranks();
+
+            while rank < total_ranks {
+                let state = self
+                    .retroactive_input_source
+                    .as_ref()
+                    .expect("retroactive source should exist")
+                    .state_for_rank(rank);
+                let input = self.transition_table.intern_zero_based_state(&state);
+
+                if !self
+                    .transition_table
+                    .was_attempted_by_id(stage, input, candidate_index)
+                {
+                    jobs.push(SynthesisJob {
+                        stage,
+                        input,
+                        candidate_index,
+                        retroactive_rank: Some(rank),
+                    });
+
+                    if jobs.len() >= job_limit {
+                        return jobs;
+                    }
+                }
+
+                rank += 1;
+            }
+        }
+
+        jobs
+    }
+
+    fn should_materialize_retroactive_prefix(&self, stage: usize) -> bool {
+        self.config.retroactive_input && stage == 1
+    }
+
+    fn materialize_retroactive_stage0_identity(&mut self, input: StateId) {
+        let state = self.transition_table.state_as_vector_state(input);
+        self.transition_table.add_transition_by_id(
+            0,
+            input,
+            state,
+            PermutationGadget::new(Vec::new(), Vec::new()),
+        );
+        self.transition_table.mark_forwarded_ids(0, &[input]);
+    }
+
+    fn advance_retroactive_cursor_for_job(&mut self, job: SynthesisJob) {
+        if job.retroactive_rank().is_none() {
+            return;
+        }
+
+        let candidate_index = job.candidate_index();
+        loop {
+            let Some((rank, total_ranks)) = self
+                .retroactive_input_source
+                .as_ref()
+                .map(|source| (source.next_rank(candidate_index), source.total_ranks()))
+            else {
+                return;
+            };
+
+            if rank >= total_ranks {
+                return;
+            }
+
+            let state = self
+                .retroactive_input_source
+                .as_ref()
+                .expect("retroactive source should exist")
+                .state_for_rank(rank);
+            let Some(input) = self
+                .transition_table
+                .lookup_zero_based_tuple(&state.as_tuple())
+            else {
+                return;
+            };
+
+            if !self
+                .transition_table
+                .was_attempted_by_id(job.stage(), input, candidate_index)
+            {
+                return;
+            }
+
+            self.retroactive_input_source
+                .as_mut()
+                .expect("retroactive source should exist")
+                .set_next_rank(candidate_index, rank + 1);
+        }
     }
 
     /// Synthesizes and applies a single [`SynthesisJob`] in-process.
@@ -1637,6 +1859,7 @@ impl WaveEngine {
         self.transition_table.record_attempt(id.stage, 1);
         self.transition_table
             .record_attempted_pair_by_id(id.stage, id.input, id.candidate_index);
+        self.advance_retroactive_cursor_for_job(id);
 
         let valid_output_count = output.results.len();
         let mut new_transition_count = 0;
@@ -2484,10 +2707,12 @@ impl WaveEngine {
     }
 
     fn stage_has_inputs(&self, stage: usize) -> bool {
-        stage == 0 || self.transition_table.unique_output_count(stage - 1) > 0
+        stage == 0
+            || self.should_use_virtual_retroactive_inputs(stage)
+            || self.transition_table.unique_output_count(stage - 1) > 0
     }
 
-    fn stage_has_remaining_jobs(&self, stage: usize) -> bool {
+    fn stage_has_remaining_jobs(&mut self, stage: usize) -> bool {
         !self.make_jobs(stage, None, Some(1)).is_empty()
     }
 
@@ -3461,44 +3686,6 @@ fn synthesize_worker_job(
     })
 }
 
-fn prepopulate_retroactive_stage0(table: &mut TransitionTable, first_stage: &BitonicStage) {
-    let mut pairs = first_stage.pairs().to_vec();
-    permute_pairs(&mut pairs, 0, &mut |permuted| {
-        let state = VectorState::new(
-            permuted
-                .iter()
-                .map(|(top, _)| lane_label_from_one_based(*top))
-                .collect(),
-            permuted
-                .iter()
-                .map(|(_, bottom)| lane_label_from_one_based(*bottom))
-                .collect(),
-        );
-        table.add_transition(
-            0,
-            &state,
-            &state,
-            PermutationGadget::new(Vec::new(), Vec::new()),
-        );
-    });
-}
-
-fn permute_pairs<F>(pairs: &mut [(usize, usize)], start: usize, visit: &mut F)
-where
-    F: FnMut(&[(usize, usize)]),
-{
-    if start >= pairs.len() {
-        visit(pairs);
-        return;
-    }
-
-    for idx in start..pairs.len() {
-        pairs.swap(start, idx);
-        permute_pairs(pairs, start + 1, visit);
-        pairs.swap(start, idx);
-    }
-}
-
 fn stage_output_limits(stages: &[BitonicStage], natural_order: bool) -> Vec<usize> {
     stages
         .iter()
@@ -3515,6 +3702,16 @@ fn stage_output_limits(stages: &[BitonicStage], natural_order: bool) -> Vec<usiz
 
 fn saturating_factorial(n: usize) -> usize {
     (1..=n).fold(1usize, usize::saturating_mul)
+}
+
+fn checked_factorials_u128(n: usize) -> Box<[u128]> {
+    let mut factorials = vec![1_u128; n + 1];
+    for value in 1..=n {
+        factorials[value] = factorials[value - 1]
+            .checked_mul(value as u128)
+            .expect("retroactive input factorial should fit in u128");
+    }
+    factorials.into_boxed_slice()
 }
 
 fn create_initial_state(first_stage: &BitonicStage) -> VectorState {
@@ -3590,6 +3787,7 @@ mod tests {
             stage: 0,
             input: StateId(7),
             candidate_index: 3,
+            retroactive_rank: None,
         };
         let input_state = VectorState::new(vec![0_u8], vec![1]);
         let job: SynthesisJob = id;
