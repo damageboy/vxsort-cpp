@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
 
-use bitonic_codegen::asm_exporter::generate_solution_asm_for_paths;
+use bitonic_codegen::asm_exporter::{
+    generate_solution_asm_for_assigned_paths, generate_solution_asm_for_paths,
+};
 use bitonic_codegen::json_exporter::SolutionJsonMetadata;
 use bitonic_codegen::transition_table::TransitionTable;
-use bitonic_codegen::{ArchArg, DTypeArg};
+use bitonic_codegen::{ArchArg, DTypeArg, read_solution_json};
 use gadget_synth::{InstructionArg, InstructionSpec, PermutationGadget, VectorState};
 
 fn state(top: &[u8], bottom: &[u8]) -> VectorState {
@@ -59,6 +61,11 @@ fn assert_mnemonic_count(asm: &str, mnemonic: &str, expected: usize) {
     );
 }
 
+fn blacher_fixture_path() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../bitonic_solutions_2xAVX2_i32_blacher.json")
+}
+
 #[test]
 fn emits_nasm_style_solution_with_gadget_and_compare_swap() {
     let input = state(&[1, 3, 5, 7], &[2, 4, 6, 8]);
@@ -89,6 +96,25 @@ fn emits_nasm_style_solution_with_gadget_and_compare_swap() {
     assert!(asm.contains("vpcmpgtq"));
     assert!(asm.contains("vblendvpd"));
     assert!(asm.contains("ret"));
+}
+
+#[test]
+fn blacher_i32_fixture_imports_to_reference_asm_mix() {
+    let imported =
+        read_solution_json(blacher_fixture_path()).expect("Blacher fixture should import");
+    let asm = generate_solution_asm_for_assigned_paths(
+        &imported.metadata,
+        &imported.transition_table,
+        &imported.assigned_paths,
+    );
+
+    assert_mnemonic_count(&asm, "vpminsd", 10);
+    assert_mnemonic_count(&asm, "vpmaxsd", 10);
+    assert_mnemonic_count(&asm, "vpshufd", 4);
+    assert_mnemonic_count(&asm, "vshufps", 12);
+    assert_mnemonic_count(&asm, "vpermd", 3);
+    assert_mnemonic_count(&asm, "vpblendd", 2);
+    assert!(!asm.contains("unsupported"), "{asm}");
 }
 
 #[test]

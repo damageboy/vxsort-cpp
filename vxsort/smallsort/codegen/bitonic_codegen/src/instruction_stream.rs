@@ -865,6 +865,7 @@ fn intrinsic_immediate_type(name: &str) -> Option<ImmediateType> {
     Some(match name {
         "_mm256_permute4x64_epi64"
         | "_mm256_permute_ps"
+        | "_mm256_shuffle_epi32"
         | "_mm256_shuffle_ps"
         | "_mm512_permute_ps"
         | "_mm512_shuffle_ps"
@@ -1118,6 +1119,7 @@ fn intrinsic_to_asm_mnemonic(name: &str) -> &'static str {
         "_mm256_permute_ps" | "_mm512_permute_ps" | "_mm512_mask_permute_ps" => "vpermilps",
         "_mm256_shuffle_pd" | "_mm512_shuffle_pd" | "_mm512_mask_shuffle_pd" => "vshufpd",
         "_mm256_shuffle_ps" | "_mm512_shuffle_ps" | "_mm512_mask_shuffle_ps" => "vshufps",
+        "_mm256_shuffle_epi32" => "vpshufd",
         "_mm256_permutexvar_epi32" | "_mm512_permutexvar_epi32" => "vpermd",
         "_mm512_permutex2var_epi32" | "_mm512_mask_permutex2var_epi32" => "vpermi2d",
         "_mm512_permutex2var_epi64" | "_mm512_mask_permutex2var_epi64" => "vpermi2q",
@@ -1142,6 +1144,7 @@ fn intrinsic_to_asm_mnemonic(name: &str) -> &'static str {
         "_mm256_alignr_epi64" | "_mm512_alignr_epi64" | "_mm512_mask_alignr_epi64" => "valignq",
         "_mm256_blend_pd" => "vblendpd",
         "_mm256_blend_ps" => "vblendps",
+        "_mm256_blend_epi32" => "vpblendd",
         _ => "unsupported",
     }
 }

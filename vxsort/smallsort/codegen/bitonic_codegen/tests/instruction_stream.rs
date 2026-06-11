@@ -41,6 +41,15 @@ fn avx2_i64_metadata() -> SolutionJsonMetadata {
     }
 }
 
+fn avx2_i32_metadata() -> SolutionJsonMetadata {
+    SolutionJsonMetadata {
+        natural_order: false,
+        arch: ArchArg::Avx2,
+        dtype: DTypeArg::I32,
+        num_vecs: 2,
+    }
+}
+
 fn avx512_i64_metadata() -> SolutionJsonMetadata {
     SolutionJsonMetadata {
         natural_order: false,
@@ -517,6 +526,42 @@ fn lower_avx2_i64_vpermq_operands() {
         "unexpected vpermq operands: {:?}",
         vpermq.operands
     );
+}
+
+#[test]
+fn lower_avx2_i32_blacher_shuffle_epi32_mnemonic() {
+    let input = state(&[1, 3, 5, 7, 9, 11, 13, 15], &[2, 4, 6, 8, 10, 12, 14, 16]);
+    let output = input.clone();
+    let gadget = PermutationGadget::new(
+        vec![inst(
+            "_mm256_shuffle_epi32",
+            &[
+                ("a", InstructionArg::Input("top".to_owned())),
+                ("imm8", InstructionArg::U64(0xb1)),
+            ],
+        )],
+        Vec::new(),
+    );
+    let mut table = TransitionTable::new(1);
+    table.add_transition(0, &input, &output, gadget);
+    let path = path_for(&table, 0, &input, &output);
+
+    let stream = lower_solution_paths(
+        &avx2_i32_metadata(),
+        &table,
+        &[path],
+        LoweringOptions {
+            include_comments: false,
+        },
+    );
+
+    let mnemonics: Vec<&str> = stream.blocks[0]
+        .instructions
+        .iter()
+        .map(|instruction| instruction.mnemonic.as_str())
+        .collect();
+    assert!(mnemonics.contains(&"vpshufd"), "{mnemonics:?}");
+    assert!(!mnemonics.contains(&"unsupported"), "{mnemonics:?}");
 }
 
 /// Extra operands that lowering does not yet support stay explicit in the IR.
