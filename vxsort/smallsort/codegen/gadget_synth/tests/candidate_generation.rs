@@ -45,6 +45,19 @@ fn avx2_i64_depth2_candidate_counts_match_python_menus() {
 }
 
 #[test]
+fn avx2_i64_depth2_candidate_tiers_split_shared_prefix_from_full_deep() {
+    let synth = GadgetSynthesizer::new(Arch::Avx2, DType::I64);
+
+    let tiers = synth
+        .precompute_candidate_tiers(2)
+        .expect("depth-2 tiered candidate generation should succeed");
+
+    assert_eq!(tiers.shallow.len(), 224);
+    assert_eq!(tiers.shared_prefix_deep.len(), 128);
+    assert_eq!(tiers.full_deep.len(), 8800);
+}
+
+#[test]
 fn candidate_graph_templates_rejects_depths_above_two() {
     let synth = GadgetSynthesizer::new(Arch::Avx2, DType::I64);
 

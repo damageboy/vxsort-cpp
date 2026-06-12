@@ -1,7 +1,7 @@
 use bitonic_codegen::{
-    ArchArg, CliArgs, CliCommand, DTypeArg, FetchUicaDataConfig, PruneScoreArg, RunConfig,
-    RuntimeUiArg, WorkerBackendArg, build_dry_run_summary, fetch_uica_data, parse_run_config,
-    run_solver_with_session, runtime::NullRuntimeSession,
+    ArchArg, CliArgs, CliCommand, DTypeArg, DeepSearchModeArg, FetchUicaDataConfig, PruneScoreArg,
+    RunConfig, RuntimeUiArg, WorkerBackendArg, build_dry_run_summary, fetch_uica_data,
+    parse_run_config, run_solver_with_session, runtime::NullRuntimeSession,
 };
 use clap::Parser;
 use serde_json::Value;
@@ -21,6 +21,8 @@ fn parses_python_compatible_solve_flags() {
         "3",
         "--gadget-depth",
         "2",
+        "--deep-search-mode",
+        "adaptive",
         "--top-k",
         "5",
         "--max-waves",
@@ -57,6 +59,7 @@ fn parses_python_compatible_solve_flags() {
             top_k: Some(5),
             prune_score: PruneScoreArg::Rough,
             gadget_depth: 2,
+            deep_search_mode: DeepSearchModeArg::Adaptive,
             natural_order: true,
             retroactive_input: true,
             max_gadget_solutions: 7,
@@ -120,6 +123,30 @@ fn solve_parses_uica_prune_score_mode() {
     let config = parse_run_config(args).expect("run config should be built");
 
     assert_eq!(config.prune_score, PruneScoreArg::Uica);
+    assert_eq!(config.deep_search_mode, DeepSearchModeArg::Baseline);
+}
+
+#[test]
+fn solve_parses_shared_prefix_deep_search_mode() {
+    let args = CliArgs::try_parse_from([
+        "bitonic-codegen",
+        "solve",
+        "--vector-machine",
+        "AVX2",
+        "--datatype",
+        "i64",
+        "--target-cpu",
+        "SKL",
+        "--top-k",
+        "1",
+        "--deep-search-mode",
+        "shared-prefix",
+    ])
+    .expect("shared-prefix deep search mode should parse");
+
+    let config = parse_run_config(args).expect("run config should be built");
+
+    assert_eq!(config.deep_search_mode, DeepSearchModeArg::SharedPrefix);
 }
 
 #[test]

@@ -13,7 +13,7 @@ use bitonic_codegen::transition_table::{TransitionKey, TransitionTable};
 use bitonic_codegen::wave_engine::{
     StageRunResult, SynthesisJob, WaveConfig, WaveEngine, WaveProgressObserver, WaveSearchResult,
 };
-use bitonic_codegen::{ArchArg, DTypeArg, WorkerBackendArg};
+use bitonic_codegen::{ArchArg, DTypeArg, DeepSearchModeArg, WorkerBackendArg};
 
 fn state(top: &[u8], bottom: &[u8]) -> gadget_synth::VectorState {
     gadget_synth::VectorState::new(top.to_vec(), bottom.to_vec())
@@ -121,6 +121,7 @@ fn fast_config() -> WaveConfig {
         arch: ArchArg::Avx2,
         dtype: DTypeArg::I64,
         gadget_depth: 1,
+        deep_search_mode: DeepSearchModeArg::Baseline,
         natural_order: false,
         retroactive_input: false,
         top_k: None,
@@ -273,6 +274,57 @@ fn construction_precomputes_candidate_tiers() {
 
     assert_eq!(engine.shallow_candidates().len(), 224);
     assert!(engine.deep_candidates().is_empty());
+    assert!(engine.shared_prefix_deep_candidates().is_empty());
+    assert!(engine.full_deep_candidates().is_empty());
+    assert_eq!(engine.normal_candidate_count(), 224);
+}
+
+#[test]
+fn baseline_depth2_normal_search_includes_all_candidate_tiers() {
+    let engine = WaveEngine::new(WaveConfig {
+        gadget_depth: 2,
+        ..fast_config()
+    })
+    .expect("wave engine should initialize");
+
+    assert_eq!(engine.shallow_candidates().len(), 224);
+    assert_eq!(engine.shared_prefix_deep_candidates().len(), 128);
+    assert_eq!(engine.full_deep_candidates().len(), 8800);
+    assert_eq!(engine.deep_candidates().len(), 8928);
+    assert_eq!(engine.normal_candidate_count(), 9152);
+}
+
+#[test]
+fn shared_prefix_mode_normal_search_excludes_full_deep_candidates() {
+    let mut engine = WaveEngine::new(WaveConfig {
+        gadget_depth: 2,
+        deep_search_mode: DeepSearchModeArg::SharedPrefix,
+        ..fast_config()
+    })
+    .expect("wave engine should initialize");
+
+    assert_eq!(engine.normal_candidate_count(), 352);
+    let jobs = engine.make_jobs(0, None, Some(400));
+
+    assert_eq!(jobs.len(), 352);
+    assert!(jobs.iter().all(|job| job.candidate_index() < 352));
+}
+
+#[test]
+fn adaptive_mode_normal_search_excludes_full_deep_candidates() {
+    let mut engine = WaveEngine::new(WaveConfig {
+        gadget_depth: 2,
+        deep_search_mode: DeepSearchModeArg::Adaptive,
+        ..fast_config()
+    })
+    .expect("wave engine should initialize");
+
+    assert_eq!(engine.normal_candidate_count(), 352);
+    assert_eq!(engine.full_deep_candidate_indexes(), 352..9152);
+    let jobs = engine.make_jobs(0, None, Some(400));
+
+    assert_eq!(jobs.len(), 352);
+    assert!(jobs.iter().all(|job| job.candidate_index() < 352));
 }
 
 #[test]

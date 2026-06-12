@@ -265,6 +265,39 @@ fn k_best_assignment_returns_lowest_concrete_gadget_combinations() {
 }
 
 #[test]
+fn score_gadget_counts_shared_prefix_once() {
+    let scorer = scorer_with_records(vec![
+        record("A", "A (YMM)", &[]),
+        record("B", "B (YMM)", &[]),
+        record("C", "C (YMM)", &[]),
+    ]);
+    let shared = InstructionSpec::new("A", BTreeMap::new());
+    let top_tail = InstructionSpec::new("B", BTreeMap::new());
+    let bottom_tail = InstructionSpec::new("C", BTreeMap::new());
+    let gadget = PermutationGadget::new(vec![shared.clone(), top_tail], vec![shared, bottom_tail]);
+
+    let cost = scorer.score_gadget(&gadget);
+
+    assert_eq!(cost.instruction_count(), 3);
+}
+
+#[test]
+fn score_gadget_keeps_non_shared_instruction_count() {
+    let scorer = scorer_with_records(vec![
+        record("A", "A (YMM)", &[]),
+        record("B", "B (YMM)", &[]),
+    ]);
+    let gadget = PermutationGadget::new(
+        vec![InstructionSpec::new("A", BTreeMap::new())],
+        vec![InstructionSpec::new("B", BTreeMap::new())],
+    );
+
+    let cost = scorer.score_gadget(&gadget);
+
+    assert_eq!(cost.instruction_count(), 2);
+}
+
+#[test]
 fn full_score_synthetic_decoded_ir_returns_finite_uica_throughput() {
     let scorer = scorer_with_records(vec![record(
         "VPERMQ_YMMqq_YMMqq_IMMb",

@@ -40,6 +40,13 @@ pub struct GadgetSynthesizer {
     dtype: DType,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CandidateGraphTiers {
+    pub shallow: Vec<GadgetGraph>,
+    pub shared_prefix_deep: Vec<GadgetGraph>,
+    pub full_deep: Vec<GadgetGraph>,
+}
+
 impl GadgetSynthesizer {
     pub fn new(arch: Arch, dtype: DType) -> Self {
         Self { arch, dtype }
@@ -76,17 +83,37 @@ impl GadgetSynthesizer {
         &self,
         gadget_depth: u8,
     ) -> Result<(Vec<GadgetGraph>, Vec<GadgetGraph>), SynthesisError> {
-        let candidates = self.candidate_graph_templates(gadget_depth)?;
+        let tiers = self.precompute_candidate_tiers(gadget_depth)?;
+        let mut deep = tiers.shared_prefix_deep;
+        deep.extend(tiers.full_deep);
+        Ok((tiers.shallow, deep))
+    }
+
+    pub fn precompute_candidate_tiers(
+        &self,
+        gadget_depth: u8,
+    ) -> Result<CandidateGraphTiers, SynthesisError> {
+        reject_unsupported_gadget_depth(gadget_depth)?;
+        let candidates = self.precompute_all_candidates(gadget_depth, false)?;
         let mut shallow = Vec::new();
-        let mut deep = Vec::new();
+        let mut full_deep = Vec::new();
         for graph in candidates {
             if graph_max_depth(&graph) <= 1 {
                 shallow.push(graph);
             } else {
-                deep.push(graph);
+                full_deep.push(graph);
             }
         }
-        Ok((shallow, deep))
+        let shared_prefix_deep = if gadget_depth >= 2 {
+            self.build_shared_prefix_graphs()
+        } else {
+            Vec::new()
+        };
+        Ok(CandidateGraphTiers {
+            shallow,
+            shared_prefix_deep,
+            full_deep,
+        })
     }
 
     pub fn synthesize_graph(

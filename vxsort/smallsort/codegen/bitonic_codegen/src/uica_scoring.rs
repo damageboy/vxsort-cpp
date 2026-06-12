@@ -255,17 +255,13 @@ impl UiPackScorer {
 
 impl Scorer for UiPackScorer {
     fn score_gadget(&self, gadget: &gadget_synth::PermutationGadget) -> GadgetCost {
-        let instruction_count =
-            gadget.top_instructions().len() + gadget.bottom_instructions().len();
+        let instructions = effective_gadget_instructions(gadget);
+        let instruction_count = instructions.len();
         let mut retire_slots = 0;
         let mut port_usage = Vec::new();
         let mut synthetic_unknowns = 0;
 
-        for instruction in gadget
-            .top_instructions()
-            .iter()
-            .chain(gadget.bottom_instructions())
-        {
+        for instruction in instructions {
             let Some(key) = uops_key_for_intrinsic(instruction.intrinsic_name()) else {
                 if instruction.intrinsic_name().starts_with("_mm") {
                     return GadgetCost::new(
@@ -387,6 +383,26 @@ impl Scorer for UiPackScorer {
             .sum();
         PathCost::new(instruction_count, score, score)
     }
+}
+
+fn effective_gadget_instructions(
+    gadget: &gadget_synth::PermutationGadget,
+) -> Vec<&gadget_synth::InstructionSpec> {
+    let top = gadget.top_instructions();
+    let bottom = gadget.bottom_instructions();
+    if top.is_empty() || bottom.is_empty() {
+        return top.iter().chain(bottom.iter()).collect();
+    }
+    let prefix_len = top
+        .iter()
+        .zip(bottom)
+        .take_while(|(left, right)| left == right)
+        .count();
+    top[..prefix_len]
+        .iter()
+        .chain(top[prefix_len..].iter())
+        .chain(bottom[prefix_len..].iter())
+        .collect()
 }
 
 fn add_port_usage(port_usage: &mut Vec<(u128, i32)>, port_data: &BTreeMap<String, i32>) {

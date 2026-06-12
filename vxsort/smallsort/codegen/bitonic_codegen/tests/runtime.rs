@@ -12,7 +12,7 @@ use bitonic_codegen::runtime_trace::RuntimeTrace;
 use bitonic_codegen::wave_engine::{
     WaveConfig, WaveEngine, WaveProgressObserver, WaveSearchResult,
 };
-use bitonic_codegen::{ArchArg, DTypeArg, WorkerBackendArg};
+use bitonic_codegen::{ArchArg, DTypeArg, DeepSearchModeArg, WorkerBackendArg};
 use serde_json::{Value, json};
 
 #[derive(Default)]
@@ -95,6 +95,7 @@ fn fast_config() -> WaveConfig {
         arch: ArchArg::Avx2,
         dtype: DTypeArg::I64,
         gadget_depth: 1,
+        deep_search_mode: DeepSearchModeArg::Baseline,
         natural_order: false,
         retroactive_input: false,
         top_k: None,

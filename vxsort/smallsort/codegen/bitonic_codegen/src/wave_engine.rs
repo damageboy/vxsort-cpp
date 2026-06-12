@@ -9,8 +9,9 @@ use std::{
 };
 
 use gadget_synth::{
-    Arch as SynthArch, DType as SynthDType, GadgetGraph, GadgetSynthesizer, LaneLabel,
-    PermutationGadget, SynthesisError, SynthesisOptions, TargetPair, VectorState,
+    Arch as SynthArch, CandidateGraphTiers, DType as SynthDType, GadgetGraph, GadgetSynthesizer,
+    InstructionSpec, LaneLabel, PermutationGadget, SynthesisError, SynthesisOptions, TargetPair,
+    VectorState,
 };
 
 use crate::bitonic_sorter::{BitonicSorter, BitonicStage};
@@ -24,7 +25,7 @@ use crate::scoring::{
 use crate::transition_table::{
     CompletePath, PathId, PathRegistry, StateId, TransitionRef, TransitionTable,
 };
-use crate::{ArchArg, DTypeArg, WorkerBackendArg};
+use crate::{ArchArg, DTypeArg, DeepSearchModeArg, WorkerBackendArg};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
@@ -58,6 +59,8 @@ pub struct WaveConfig {
     pub dtype: DTypeArg,
     /// Maximum candidate gadget depth passed to the synthesizer.
     pub gadget_depth: u8,
+    /// Search policy for spending depth-2 synthesis work.
+    pub deep_search_mode: DeepSearchModeArg,
     /// Whether to append the final reorder stage that restores natural lane
     /// order.
     pub natural_order: bool,
@@ -100,7 +103,11 @@ pub struct WaveEngine {
     stage_output_limits: Vec<usize>,
     /// Candidate gadget graphs in the low-depth tier.
     shallow_candidates: Vec<GadgetGraph>,
-    /// Candidate gadget graphs in the higher-depth tier.
+    /// Candidate gadget graphs with a shared prefix and depth above one.
+    shared_prefix_deep_candidates: Vec<GadgetGraph>,
+    /// Candidate gadget graphs in the full higher-depth tier.
+    full_deep_candidates: Vec<GadgetGraph>,
+    /// Compatibility view of all higher-depth candidates.
     deep_candidates: Vec<GadgetGraph>,
     /// Lazy source for `--retroactive-input` stage-1 jobs.
     retroactive_input_source: Option<RetroactiveInputSource>,
@@ -150,6 +157,8 @@ pub struct WaveEngine {
     path_registry: PathRegistry,
     /// Idle subprocess synthesis workers kept warm between stage runs.
     process_workers: Vec<ProcessSynthesisWorker>,
+    /// Number of adaptive full-depth attempts already made by `(stage, input)`.
+    adaptive_deep_attempts: HashMap<(usize, StateId), usize>,
     /// Runtime JSON trace sink. Disabled by default.
     trace: RuntimeTrace,
 }
@@ -268,6 +277,16 @@ impl SynthesisJob {
     fn retroactive_rank(&self) -> Option<u128> {
         self.retroactive_rank
     }
+}
+
+#[derive(Debug)]
+struct PreparedStageRun {
+    stage: usize,
+    jobs: Vec<SynthesisJob>,
+    outputs_at_start: usize,
+    attempts_at_start: usize,
+    attempt_budget: usize,
+    output_budget: usize,
 }
 
 /// Lazy factorial-rank source for retroactive stage-0 inputs.
@@ -663,6 +682,57 @@ impl StageRunResult {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AdaptiveDeepRunResult {
+    min_stage: usize,
+    attempts: usize,
+    valid_outputs: usize,
+    new_outputs: usize,
+    budget_outputs: usize,
+    new_transitions: usize,
+    discovered_paths: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AdaptiveTarget {
+    stage: usize,
+    input: StateId,
+    topk_hits: usize,
+    expensive_suffix_count: usize,
+    priority: i64,
+    exploratory: bool,
+}
+
+#[derive(Default)]
+struct AdaptiveTargetAccumulator {
+    topk_hits: usize,
+    expensive_suffix_count: usize,
+}
+
+impl AdaptiveDeepRunResult {
+    fn empty(stage_count: usize) -> Self {
+        Self {
+            min_stage: stage_count,
+            attempts: 0,
+            valid_outputs: 0,
+            new_outputs: 0,
+            budget_outputs: 0,
+            new_transitions: 0,
+            discovered_paths: 0,
+        }
+    }
+
+    fn add_stage_result(&mut self, result: &StageRunResult) {
+        self.min_stage = self.min_stage.min(result.stage());
+        self.attempts += result.attempts();
+        self.valid_outputs += result.valid_outputs();
+        self.new_outputs += result.new_outputs();
+        self.budget_outputs += result.budget_outputs();
+        self.new_transitions += result.new_transitions();
+        self.discovered_paths += result.discovered_paths();
+    }
+}
+
 /// Result for one complete wave.
 ///
 /// A wave has one target-stage expansion plus zero or more propagation stage
@@ -782,6 +852,54 @@ impl ScoringPool {
     fn has_capacity(&self) -> bool {
         self.pending_jobs < self.max_pending_jobs
     }
+}
+
+fn flatten_candidate_tiers(tiers: &CandidateGraphTiers) -> Vec<GadgetGraph> {
+    let mut candidates = tiers.shallow.clone();
+    candidates.extend(tiers.shared_prefix_deep.clone());
+    candidates.extend(tiers.full_deep.clone());
+    candidates
+}
+
+fn normal_candidate_count_for_mode(
+    mode: DeepSearchModeArg,
+    shallow_count: usize,
+    shared_prefix_count: usize,
+    full_deep_count: usize,
+) -> usize {
+    match mode {
+        DeepSearchModeArg::Baseline => shallow_count + shared_prefix_count + full_deep_count,
+        DeepSearchModeArg::SharedPrefix | DeepSearchModeArg::Adaptive => {
+            shallow_count + shared_prefix_count
+        }
+    }
+}
+
+fn deterministic_jitter(stage: usize, input: StateId) -> i64 {
+    let mut value = (stage as u64)
+        .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+        .wrapping_add(u64::from(input.0));
+    value ^= value >> 33;
+    value = value.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    value ^= value >> 33;
+    (value % 10) as i64
+}
+
+fn expensive_gadget_count(gadget: &PermutationGadget) -> usize {
+    gadget
+        .top_instructions()
+        .iter()
+        .chain(gadget.bottom_instructions())
+        .filter(|instruction| is_expensive_permute_instruction(instruction))
+        .count()
+}
+
+fn is_expensive_permute_instruction(instruction: &InstructionSpec) -> bool {
+    let name = instruction.intrinsic_name();
+    name.contains("permutexvar")
+        || name.contains("permutevar")
+        || name.contains("permutex2var")
+        || instruction.args().contains_key("op_idx")
 }
 
 impl Drop for ScoringPool {
@@ -1031,9 +1149,8 @@ impl ProcessWorkerRuntime {
     fn new(config: ProcessWorkerConfig) -> Result<Self, SynthesisError> {
         let synth =
             GadgetSynthesizer::new(to_synth_arch(config.arch), to_synth_dtype(config.dtype));
-        let (shallow, deep) = synth.precompute_candidates_stratified(config.gadget_depth)?;
-        let mut candidates = shallow;
-        candidates.extend(deep);
+        let tiers = synth.precompute_candidate_tiers(config.gadget_depth)?;
+        let candidates = flatten_candidate_tiers(&tiers);
         Ok(Self {
             config,
             candidates,
@@ -1179,9 +1296,20 @@ impl WaveEngine {
 
         let synth =
             GadgetSynthesizer::new(to_synth_arch(config.arch), to_synth_dtype(config.dtype));
-        let (shallow_candidates, deep_candidates) =
-            synth.precompute_candidates_stratified(config.gadget_depth)?;
-        let candidate_count = shallow_candidates.len() + deep_candidates.len();
+        let tiers = synth.precompute_candidate_tiers(config.gadget_depth)?;
+        let CandidateGraphTiers {
+            shallow: shallow_candidates,
+            shared_prefix_deep: shared_prefix_deep_candidates,
+            full_deep: full_deep_candidates,
+        } = tiers;
+        let mut deep_candidates = shared_prefix_deep_candidates.clone();
+        deep_candidates.extend(full_deep_candidates.clone());
+        let candidate_count = normal_candidate_count_for_mode(
+            config.deep_search_mode,
+            shallow_candidates.len(),
+            shared_prefix_deep_candidates.len(),
+            full_deep_candidates.len(),
+        );
         let retroactive_input_source = if config.retroactive_input {
             Some(RetroactiveInputSource::new(&stages[0], candidate_count))
         } else {
@@ -1205,6 +1333,8 @@ impl WaveEngine {
             stage_target_pairs,
             stage_output_limits,
             shallow_candidates,
+            shared_prefix_deep_candidates,
+            full_deep_candidates,
             deep_candidates,
             retroactive_input_source,
             transition_table,
@@ -1230,6 +1360,7 @@ impl WaveEngine {
             pending_registered_rescore_transitions: BTreeSet::new(),
             path_registry: PathRegistry::default(),
             process_workers: Vec::new(),
+            adaptive_deep_attempts: HashMap::new(),
             trace: RuntimeTrace::disabled(),
         })
     }
@@ -1272,6 +1403,28 @@ impl WaveEngine {
 
     pub fn deep_candidates(&self) -> &[GadgetGraph] {
         &self.deep_candidates
+    }
+
+    pub fn shared_prefix_deep_candidates(&self) -> &[GadgetGraph] {
+        &self.shared_prefix_deep_candidates
+    }
+
+    pub fn full_deep_candidates(&self) -> &[GadgetGraph] {
+        &self.full_deep_candidates
+    }
+
+    pub fn normal_candidate_count(&self) -> usize {
+        normal_candidate_count_for_mode(
+            self.config.deep_search_mode,
+            self.shallow_candidates.len(),
+            self.shared_prefix_deep_candidates.len(),
+            self.full_deep_candidates.len(),
+        )
+    }
+
+    pub fn full_deep_candidate_indexes(&self) -> std::ops::Range<usize> {
+        let start = self.shallow_candidates.len() + self.shared_prefix_deep_candidates.len();
+        start..start + self.full_deep_candidates.len()
     }
 
     pub fn transition_table(&self) -> &TransitionTable {
@@ -1621,7 +1774,7 @@ impl WaveEngine {
             self.ordered_inputs_for_stage(stage, owned_inputs)
         };
 
-        let candidate_count = self.shallow_candidates.len() + self.deep_candidates.len();
+        let candidate_count = self.normal_candidate_count();
         let mut jobs = Vec::new();
 
         if inputs.is_empty() || candidate_count == 0 {
@@ -1669,7 +1822,7 @@ impl WaveEngine {
         stage: usize,
         limit: Option<usize>,
     ) -> Vec<SynthesisJob> {
-        let candidate_count = self.shallow_candidates.len() + self.deep_candidates.len();
+        let candidate_count = self.normal_candidate_count();
         let job_limit = limit.unwrap_or(candidate_count);
         let mut jobs = Vec::new();
 
@@ -1959,7 +2112,59 @@ impl WaveEngine {
             }
         }
 
-        for stage in target_stage + 1..self.stages.len() {
+        propagation.extend(self.propagate_downstream_from(
+            target_stage,
+            attempt_budget,
+            output_budget,
+            session,
+        )?);
+
+        let adaptive = self.run_adaptive_deep_search(attempt_budget, output_budget, session)?;
+        if adaptive.new_outputs > 0 {
+            propagation.extend(self.propagate_downstream_from(
+                adaptive.min_stage,
+                attempt_budget,
+                output_budget,
+                session,
+            )?);
+        }
+
+        let last_outputs_after = self.transition_table.unique_output_count(last_stage);
+        if last_outputs_after > last_outputs_before {
+            self.transition_table.reset_unproductive_waves(target_stage);
+        } else {
+            self.transition_table.record_unproductive_wave(target_stage);
+        }
+
+        self.wave_count += 1;
+        self.flush_pending_registered_path_rescores("wave_finished");
+        let scored_paths = self
+            .poll_some_scoring_jobs("wave_finished", SCORING_RESULT_POLL_LIMIT_PER_WAVE_BOUNDARY);
+        let discovered_paths = target.discovered_paths()
+            + adaptive.discovered_paths
+            + propagation
+                .iter()
+                .map(StageRunResult::discovered_paths)
+                .sum::<usize>();
+        Ok(WaveRunResult {
+            wave,
+            target_stage,
+            target,
+            propagation,
+            discovered_paths,
+            scored_paths,
+        })
+    }
+
+    fn propagate_downstream_from(
+        &mut self,
+        start_stage: usize,
+        attempt_budget: usize,
+        output_budget: usize,
+        session: &mut impl RuntimeSession,
+    ) -> Result<Vec<StageRunResult>, SynthesisError> {
+        let mut propagation = Vec::new();
+        for stage in start_stage + 1..self.stages.len() {
             if session.should_stop() {
                 break;
             }
@@ -1993,31 +2198,333 @@ impl WaveEngine {
                 propagation.push(result);
             }
         }
+        Ok(propagation)
+    }
 
-        let last_outputs_after = self.transition_table.unique_output_count(last_stage);
-        if last_outputs_after > last_outputs_before {
-            self.transition_table.reset_unproductive_waves(target_stage);
-        } else {
-            self.transition_table.record_unproductive_wave(target_stage);
+    fn run_adaptive_deep_search(
+        &mut self,
+        wave_attempt_budget: usize,
+        wave_output_budget: usize,
+        session: &mut impl RuntimeSession,
+    ) -> Result<AdaptiveDeepRunResult, SynthesisError> {
+        if self.config.deep_search_mode != DeepSearchModeArg::Adaptive
+            || self.full_deep_candidates.is_empty()
+        {
+            return Ok(AdaptiveDeepRunResult::empty(self.stages.len()));
         }
 
-        self.wave_count += 1;
-        self.flush_pending_registered_path_rescores("wave_finished");
-        let scored_paths = self
-            .poll_some_scoring_jobs("wave_finished", SCORING_RESULT_POLL_LIMIT_PER_WAVE_BOUNDARY);
-        let discovered_paths = target.discovered_paths()
-            + propagation
-                .iter()
-                .map(StageRunResult::discovered_paths)
-                .sum::<usize>();
-        Ok(WaveRunResult {
-            wave,
-            target_stage,
-            target,
-            propagation,
-            discovered_paths,
-            scored_paths,
+        let attempt_budget = (wave_attempt_budget / 5).max(1);
+        let output_budget = (wave_output_budget / 5).max(1);
+        let targets = self.adaptive_deep_targets();
+        let jobs = self.adaptive_deep_jobs(&targets, attempt_budget);
+
+        crate::trace!(self.trace, "adaptive_deep_started", {
+                "wave": self.wave_count,
+                "attempt_budget": attempt_budget,
+                "output_budget": output_budget,
+                "target_count": targets.len(),
+                "job_count": jobs.len(),
+                "full_deep_candidates": self.full_deep_candidates.len(),
+        });
+
+        if jobs.is_empty() {
+            crate::trace!(self.trace, "adaptive_deep_finished", {
+                    "wave": self.wave_count,
+                    "attempts": 0,
+                    "valid_outputs": 0,
+                    "new_outputs": 0,
+                    "budget_outputs": 0,
+                    "new_transitions": 0,
+                    "discovered_paths": 0,
+            });
+            return Ok(AdaptiveDeepRunResult::empty(self.stages.len()));
+        }
+
+        let mut result = AdaptiveDeepRunResult::empty(self.stages.len());
+        let mut remaining_attempts = attempt_budget;
+        let mut remaining_outputs = output_budget;
+        let mut jobs_by_stage: BTreeMap<usize, Vec<SynthesisJob>> = BTreeMap::new();
+        for job in jobs {
+            jobs_by_stage.entry(job.stage()).or_default().push(job);
+        }
+
+        for (stage, mut stage_jobs) in jobs_by_stage {
+            if session.should_stop() || remaining_attempts == 0 || remaining_outputs == 0 {
+                break;
+            }
+            stage_jobs.truncate(remaining_attempts);
+            let selected_jobs = stage_jobs.clone();
+            let outputs_at_start = self.transition_table.unique_output_count(stage);
+            let attempts_at_start = self.transition_table.stage_stats(stage).attempts;
+            let stage_result = self.run_prepared_stage_jobs(
+                PreparedStageRun {
+                    stage,
+                    jobs: stage_jobs,
+                    outputs_at_start,
+                    attempts_at_start,
+                    attempt_budget: remaining_attempts,
+                    output_budget: remaining_outputs,
+                },
+                session,
+            )?;
+            for job in selected_jobs {
+                if self.transition_table.was_attempted_by_id(
+                    job.stage(),
+                    job.input(),
+                    job.candidate_index(),
+                ) {
+                    *self
+                        .adaptive_deep_attempts
+                        .entry((job.stage(), job.input()))
+                        .or_insert(0) += 1;
+                }
+            }
+            remaining_attempts = remaining_attempts.saturating_sub(stage_result.attempts());
+            remaining_outputs = remaining_outputs.saturating_sub(stage_result.budget_outputs());
+            result.add_stage_result(&stage_result);
+        }
+
+        crate::trace!(self.trace, "adaptive_deep_finished", {
+                "wave": self.wave_count,
+                "attempts": result.attempts,
+                "valid_outputs": result.valid_outputs,
+                "new_outputs": result.new_outputs,
+                "budget_outputs": result.budget_outputs,
+                "new_transitions": result.new_transitions,
+                "discovered_paths": result.discovered_paths,
+        });
+
+        Ok(result)
+    }
+
+    fn adaptive_deep_targets(&self) -> Vec<AdaptiveTarget> {
+        let mut accumulators: BTreeMap<(usize, StateId), AdaptiveTargetAccumulator> =
+            BTreeMap::new();
+        for scored_path in &self.scored_paths {
+            let path_steps = scored_path.path().iter().collect::<Vec<_>>();
+            let selected_gadgets = scored_path.assigned_path().gadgets();
+            let mut suffix_expensive = vec![0; path_steps.len()];
+            let mut running = 0;
+            for index in (0..path_steps.len()).rev() {
+                let (stage, transition) = path_steps[index];
+                let transition_ref = TransitionRef {
+                    stage: stage
+                        .try_into()
+                        .expect("stage index should fit in transition ref"),
+                    transition,
+                };
+                let gadget = self
+                    .transition_table
+                    .transition(transition_ref)
+                    .gadget(selected_gadgets[index]);
+                running += expensive_gadget_count(gadget);
+                suffix_expensive[index] = running;
+            }
+
+            for (index, (stage, transition)) in path_steps.into_iter().enumerate() {
+                let transition_ref = TransitionRef {
+                    stage: stage
+                        .try_into()
+                        .expect("stage index should fit in transition ref"),
+                    transition,
+                };
+                let input = self.transition_table.transition(transition_ref).input();
+                let accumulator = accumulators.entry((stage, input)).or_default();
+                accumulator.topk_hits += 1;
+                accumulator.expensive_suffix_count += suffix_expensive[index];
+            }
+        }
+
+        let mut targets = accumulators
+            .into_iter()
+            .filter_map(|((stage, input), accumulator)| {
+                self.adaptive_target_from_parts(stage, input, accumulator, false)
+            })
+            .collect::<Vec<_>>();
+
+        let primary_keys = targets
+            .iter()
+            .map(|target| (target.stage, target.input))
+            .collect::<HashSet<_>>();
+        targets.extend(
+            self.exploratory_adaptive_targets(&primary_keys)
+                .into_iter()
+                .filter_map(|(stage, input)| {
+                    self.adaptive_target_from_parts(
+                        stage,
+                        input,
+                        AdaptiveTargetAccumulator::default(),
+                        true,
+                    )
+                }),
+        );
+
+        targets.sort_by(|left, right| {
+            right
+                .priority
+                .cmp(&left.priority)
+                .then_with(|| left.stage.cmp(&right.stage))
+                .then_with(|| left.input.cmp(&right.input))
+        });
+        targets
+    }
+
+    fn adaptive_target_from_parts(
+        &self,
+        stage: usize,
+        input: StateId,
+        accumulator: AdaptiveTargetAccumulator,
+        exploratory: bool,
+    ) -> Option<AdaptiveTarget> {
+        if !self.full_deep_candidate_indexes().any(|candidate_index| {
+            !self
+                .transition_table
+                .was_attempted_by_id(stage, input, candidate_index)
+        }) {
+            return None;
+        }
+
+        let stage_data = self.transition_table.stage(stage);
+        let stage_stall_bonus = usize::from(
+            self.stalled_stages.contains(&stage) || stage_data.unproductive_waves() > 0,
+        );
+        let known_outputs = self
+            .transition_table
+            .transition_count_for_input_id(stage, input);
+        let low_output_diversity_bonus = usize::from(known_outputs <= 1);
+        let attempts = self
+            .adaptive_deep_attempts
+            .get(&(stage, input))
+            .copied()
+            .unwrap_or_else(|| self.full_deep_attempt_count_for_input(stage, input));
+        let priority = 1000 * accumulator.topk_hits as i64
+            + 100 * accumulator.expensive_suffix_count as i64
+            + 50 * stage_stall_bonus as i64
+            + 25 * low_output_diversity_bonus as i64
+            + deterministic_jitter(stage, input)
+            - 25 * attempts as i64;
+        Some(AdaptiveTarget {
+            stage,
+            input,
+            topk_hits: accumulator.topk_hits,
+            expensive_suffix_count: accumulator.expensive_suffix_count,
+            priority,
+            exploratory,
         })
+    }
+
+    fn exploratory_adaptive_targets(
+        &self,
+        primary_keys: &HashSet<(usize, StateId)>,
+    ) -> Vec<(usize, StateId)> {
+        let mut inputs = Vec::new();
+        for stage in 0..self.stages.len() {
+            for input in self.current_input_ids_for_stage(stage) {
+                if !primary_keys.contains(&(stage, input)) {
+                    inputs.push((stage, input));
+                }
+            }
+        }
+        inputs.sort_by(|left, right| {
+            deterministic_jitter(right.0, right.1)
+                .cmp(&deterministic_jitter(left.0, left.1))
+                .then_with(|| left.0.cmp(&right.0))
+                .then_with(|| left.1.cmp(&right.1))
+        });
+        let reserve = self.config.top_k.unwrap_or(1).max(1);
+        inputs.truncate(reserve);
+        inputs
+    }
+
+    fn current_input_ids_for_stage(&self, stage: usize) -> Vec<StateId> {
+        let mut inputs = if stage == 0 {
+            vec![self.initial_state_id]
+        } else {
+            self.transition_table
+                .get_unique_output_ids(stage - 1)
+                .into_iter()
+                .map(|(state_id, _)| state_id)
+                .collect::<Vec<_>>()
+        };
+        inputs.sort_by_key(|input| self.transition_table.state_as_zero_based_tuple(*input));
+        inputs
+    }
+
+    fn full_deep_attempt_count_for_input(&self, stage: usize, input: StateId) -> usize {
+        self.full_deep_candidate_indexes()
+            .filter(|candidate_index| {
+                self.transition_table
+                    .was_attempted_by_id(stage, input, *candidate_index)
+            })
+            .count()
+    }
+
+    fn adaptive_deep_jobs(
+        &self,
+        targets: &[AdaptiveTarget],
+        attempt_budget: usize,
+    ) -> Vec<SynthesisJob> {
+        if attempt_budget == 0 {
+            return Vec::new();
+        }
+        let exploratory_budget =
+            (attempt_budget / 10).max(usize::from(targets.iter().any(|target| target.exploratory)));
+        let primary_budget = attempt_budget.saturating_sub(exploratory_budget);
+        let mut jobs = Vec::new();
+        self.extend_adaptive_jobs(
+            targets.iter().filter(|target| !target.exploratory),
+            primary_budget,
+            &mut jobs,
+        );
+        self.extend_adaptive_jobs(
+            targets.iter().filter(|target| target.exploratory),
+            attempt_budget.saturating_sub(jobs.len()),
+            &mut jobs,
+        );
+        jobs.truncate(attempt_budget);
+        jobs
+    }
+
+    fn extend_adaptive_jobs<'a>(
+        &self,
+        targets: impl Iterator<Item = &'a AdaptiveTarget> + Clone,
+        budget: usize,
+        jobs: &mut Vec<SynthesisJob>,
+    ) {
+        if budget == 0 {
+            return;
+        }
+        let start_len = jobs.len();
+        for candidate_index in self.full_deep_candidate_indexes() {
+            for target in targets.clone() {
+                if jobs.len().saturating_sub(start_len) >= budget {
+                    return;
+                }
+                if self.transition_table.was_attempted_by_id(
+                    target.stage,
+                    target.input,
+                    candidate_index,
+                ) {
+                    continue;
+                }
+                crate::trace!(self.trace, "adaptive_deep_candidate_selected", {
+                        "wave": self.wave_count,
+                        "stage": target.stage,
+                        "input": target.input.0,
+                        "candidate_index": candidate_index,
+                        "priority": target.priority,
+                        "topk_hits": target.topk_hits,
+                        "expensive_suffix_count": target.expensive_suffix_count,
+                        "exploratory": target.exploratory,
+                });
+                jobs.push(SynthesisJob {
+                    stage: target.stage,
+                    input: target.input,
+                    candidate_index,
+                    retroactive_rank: None,
+                });
+            }
+        }
     }
 
     /// Runs the full wave search loop — the top-level synthesis entry point.
@@ -2771,6 +3278,32 @@ impl WaveEngine {
         let outputs_at_start = self.transition_table.unique_output_count(stage);
         let attempts_at_start = self.transition_table.stage_stats(stage).attempts;
         let jobs = self.make_jobs(stage, input_states, Some(attempt_budget));
+        self.run_prepared_stage_jobs(
+            PreparedStageRun {
+                stage,
+                jobs,
+                outputs_at_start,
+                attempts_at_start,
+                attempt_budget,
+                output_budget,
+            },
+            session,
+        )
+    }
+
+    fn run_prepared_stage_jobs(
+        &mut self,
+        request: PreparedStageRun,
+        session: &mut impl RuntimeSession,
+    ) -> Result<StageRunResult, SynthesisError> {
+        let PreparedStageRun {
+            stage,
+            jobs,
+            outputs_at_start,
+            attempts_at_start,
+            attempt_budget,
+            output_budget,
+        } = request;
         self.stage_progress_totals[stage] =
             self.stage_progress_totals[stage].max(attempts_at_start + jobs.len());
         let worker_capacity = if jobs.is_empty() {
@@ -3495,11 +4028,16 @@ impl WaveEngine {
     }
 
     fn candidate_graph(&self, candidate_index: usize) -> Option<&GadgetGraph> {
-        if candidate_index < self.shallow_candidates.len() {
+        let shared_start = self.shallow_candidates.len();
+        let full_start = shared_start + self.shared_prefix_deep_candidates.len();
+        if candidate_index < shared_start {
             self.shallow_candidates.get(candidate_index)
+        } else if candidate_index < full_start {
+            self.shared_prefix_deep_candidates
+                .get(candidate_index.checked_sub(shared_start)?)
         } else {
-            self.deep_candidates
-                .get(candidate_index.checked_sub(self.shallow_candidates.len())?)
+            self.full_deep_candidates
+                .get(candidate_index.checked_sub(full_start)?)
         }
     }
 
@@ -3780,6 +4318,45 @@ fn to_synth_dtype(dtype: DTypeArg) -> SynthDType {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
+
+    fn test_wave_config() -> WaveConfig {
+        WaveConfig {
+            num_vecs: 2,
+            arch: ArchArg::Avx2,
+            dtype: DTypeArg::I64,
+            gadget_depth: 2,
+            deep_search_mode: DeepSearchModeArg::Adaptive,
+            natural_order: false,
+            retroactive_input: false,
+            top_k: Some(1),
+            worker_count: 1,
+            worker_backend: WorkerBackendArg::InProcess,
+            max_unique_outputs: 3,
+        }
+    }
+
+    fn test_chain_state(index: u8) -> VectorState {
+        let base = index * 8;
+        VectorState::new(
+            vec![base, base + 1, base + 2, base + 3],
+            vec![base + 4, base + 5, base + 6, base + 7],
+        )
+    }
+
+    fn test_empty_gadget() -> PermutationGadget {
+        PermutationGadget::new(Vec::new(), Vec::new())
+    }
+
+    fn test_expensive_gadget() -> PermutationGadget {
+        PermutationGadget::new(
+            vec![InstructionSpec::new(
+                "_mm256_permutexvar_epi32",
+                BTreeMap::new(),
+            )],
+            Vec::new(),
+        )
+    }
 
     #[test]
     fn worker_job_payload_separates_identity_state_and_execution_context() {
@@ -3804,5 +4381,69 @@ mod tests {
         assert_eq!(worker_job.id, id);
         assert_eq!(&*worker_job.target_pairs, &[(0, 1)]);
         assert!(worker_job.allow_any_lane_order);
+    }
+
+    #[test]
+    fn adaptive_deep_jobs_prioritize_topk_state_with_expensive_suffix() {
+        let mut engine = WaveEngine::new(test_wave_config()).expect("engine should initialize");
+        let states = (0..=engine.stages().len())
+            .map(|index| test_chain_state(index as u8))
+            .collect::<Vec<_>>();
+
+        for stage in 0..engine.stages().len() {
+            let gadget = if stage == 0 {
+                test_expensive_gadget()
+            } else {
+                test_empty_gadget()
+            };
+            engine.transition_table_mut().add_transition(
+                stage,
+                &states[stage],
+                &states[stage + 1],
+                gadget,
+            );
+        }
+
+        let first_transition = engine
+            .transition_table()
+            .transition_ref_for_zero_based_tuples(0, &states[0].as_tuple(), &states[1].as_tuple())
+            .expect("first transition should resolve");
+        let first_input = engine
+            .transition_table()
+            .transition(first_transition)
+            .input();
+        let terminal_stage = engine.stages().len() - 1;
+        let terminal = engine
+            .transition_table()
+            .transition_ref_for_zero_based_tuples(
+                terminal_stage,
+                &states[terminal_stage].as_tuple(),
+                &states[terminal_stage + 1].as_tuple(),
+            )
+            .expect("terminal transition should resolve");
+
+        assert_eq!(engine.discover_paths_for_transition(terminal, None), 1);
+        assert_eq!(engine.drain_scoring_jobs(), 1);
+
+        let targets = engine.adaptive_deep_targets();
+        let first_primary = targets
+            .iter()
+            .find(|target| !target.exploratory)
+            .expect("retained top-k path should create primary adaptive targets");
+
+        assert_eq!(first_primary.stage, 0);
+        assert_eq!(first_primary.input, first_input);
+        assert_eq!(first_primary.topk_hits, 1);
+        assert_eq!(first_primary.expensive_suffix_count, 1);
+
+        let jobs = engine.adaptive_deep_jobs(&targets, 10);
+
+        assert_eq!(jobs.len(), 10);
+        assert_eq!(jobs[0].stage(), 0);
+        assert_eq!(jobs[0].input(), first_input);
+        assert_eq!(
+            jobs[0].candidate_index(),
+            engine.full_deep_candidate_indexes().start
+        );
     }
 }

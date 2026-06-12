@@ -97,6 +97,12 @@ case-insensitively. Missing local `.uipack` data is an error; run
 By default, final ranking is bounded: the solver keeps the best `10 * top_k`
 rough candidates and re-ranks them with the Rust uiCA simulator.
 
+Depth-2 search can be scoped with `--deep-search-mode`:
+
+- `baseline`: default. Normal waves try every candidate allowed by `--gadget-depth`.
+- `shared-prefix`: normal waves try depth-1 candidates plus depth-2 shared-prefix candidates only. A shared-prefix candidate is a depth-2 top/bottom expression where common setup work is reused by both outputs. Internally this can look like two instructions per side, but lowering emits the identical prefix once, so the common case is up to four emitted instructions total: `top_prefix`, `bottom_prefix`, `top_tail`, `bottom_tail`.
+- `adaptive`: normal waves use the `shared-prefix` set, then spend extra full depth-2 attempts on prioritized `(stage, input_state)` targets. Use this with `--gadget-depth 2`; adaptive decisions are visible in `--runtime-trace` events named `adaptive_deep_started`, `adaptive_deep_candidate_selected`, and `adaptive_deep_finished`.
+
 Multiple targets are comma-separated:
 
 ```bash

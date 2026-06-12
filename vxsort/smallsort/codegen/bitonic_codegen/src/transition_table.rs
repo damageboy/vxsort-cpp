@@ -702,6 +702,13 @@ impl TransitionTable {
         self.stages[stage].attempted_inputs.contains(&input)
     }
 
+    pub fn transition_count_for_input_id(&self, stage: usize, input: StateId) -> usize {
+        self.stages[stage]
+            .transitions_by_input
+            .get(&input)
+            .map_or(0, Vec::len)
+    }
+
     pub fn was_input_attempted(&self, stage: usize, input_tuple: &StateTuple) -> bool {
         let Some(input) = self.lookup_zero_based_tuple(input_tuple) else {
             return false;

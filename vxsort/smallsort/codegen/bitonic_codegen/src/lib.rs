@@ -79,6 +79,13 @@ pub enum PruneScoreArg {
     Uica,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum, Serialize, Deserialize)]
+pub enum DeepSearchModeArg {
+    Baseline,
+    SharedPrefix,
+    Adaptive,
+}
+
 impl ArchArg {
     pub fn cli_name(self) -> &'static str {
         match self {
@@ -130,6 +137,16 @@ impl PruneScoreArg {
         match self {
             PruneScoreArg::Rough => "rough",
             PruneScoreArg::Uica => "uica",
+        }
+    }
+}
+
+impl DeepSearchModeArg {
+    pub fn cli_name(self) -> &'static str {
+        match self {
+            DeepSearchModeArg::Baseline => "baseline",
+            DeepSearchModeArg::SharedPrefix => "shared-prefix",
+            DeepSearchModeArg::Adaptive => "adaptive",
         }
     }
 }
@@ -187,6 +204,9 @@ pub struct SolveArgs {
 
     #[arg(long = "gadget-depth", default_value_t = 1, value_parser = clap::value_parser!(u8).range(1..=3))]
     pub gadget_depth: u8,
+
+    #[arg(long = "deep-search-mode", value_enum, ignore_case = true, default_value_t = DeepSearchModeArg::Baseline)]
+    pub deep_search_mode: DeepSearchModeArg,
 
     #[arg(long = "natural-order")]
     pub natural_order: bool,
@@ -330,6 +350,7 @@ pub struct RunConfig {
     pub top_k: Option<usize>,
     pub prune_score: PruneScoreArg,
     pub gadget_depth: u8,
+    pub deep_search_mode: DeepSearchModeArg,
     pub natural_order: bool,
     pub retroactive_input: bool,
     pub max_gadget_solutions: usize,
@@ -432,6 +453,7 @@ pub fn parse_solve_run_config(solve_args: SolveArgs) -> Result<RunConfig, String
         top_k: solve_args.top_k,
         prune_score: solve_args.prune_score,
         gadget_depth: solve_args.gadget_depth,
+        deep_search_mode: solve_args.deep_search_mode,
         natural_order: solve_args.natural_order,
         retroactive_input: solve_args.retroactive_input,
         max_gadget_solutions: solve_args.max_gadget_solutions,
@@ -531,6 +553,7 @@ pub fn run_solver_with_session(
             "arch": config.arch.cli_name(),
             "dtype": config.dtype.cli_name(),
             "gadget_depth": config.gadget_depth,
+            "deep_search_mode": config.deep_search_mode.cli_name(),
             "natural_order": config.natural_order,
             "retroactive_input": config.retroactive_input,
             "max_gadget_solutions": config.max_gadget_solutions,
@@ -567,6 +590,7 @@ pub fn run_solver_with_session(
                 arch: config.arch,
                 dtype: config.dtype,
                 gadget_depth: config.gadget_depth,
+                deep_search_mode: config.deep_search_mode,
                 natural_order: config.natural_order,
                 retroactive_input: config.retroactive_input,
                 top_k: Some(rough_top_k),
@@ -1353,6 +1377,7 @@ pub fn build_dry_run_summary(config: &RunConfig) -> Result<DryRunSummary, String
         arch: config.arch,
         dtype: config.dtype,
         gadget_depth: config.gadget_depth,
+        deep_search_mode: config.deep_search_mode,
         natural_order: config.natural_order,
         retroactive_input: config.retroactive_input,
         top_k: config.top_k,
