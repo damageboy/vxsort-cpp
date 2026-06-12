@@ -8,6 +8,11 @@ vxsort is a fast, vectorized hybrid quicksort+bitonic sorting algorithm in C++. 
 
 The `vxsort/smallsort/codegen/` directory contains a Python-based super-optimizer that generates optimized bitonic sorter implementations using Z3 SMT solver for correctness verification.
 
+## Git History
+
+Merge commits are disallowed on `nextgen`. Use rebase, cherry-pick, or fast-forward updates instead
+of merging feature branches into `nextgen`.
+
 ## Build Commands
 
 ### C++ (Main Library)
