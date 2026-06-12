@@ -4,7 +4,7 @@ use std::path::Path;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use mermaid_rs_renderer::render as render_mermaid_to_svg;
+use merman::render::HeadlessRenderer;
 use rayon::prelude::*;
 use serde_json::Value;
 
@@ -203,9 +203,14 @@ fn render_html_document(records: &[(usize, Value)], title: &str) -> Result<Strin
 }
 
 fn render_mermaid_svg_base64(mermaid: &str) -> Result<String> {
-    let svg = render_mermaid_to_svg(mermaid).map_err(|source| VizError::MermaidRender {
-        source: source.to_string(),
-    })?;
+    let svg = HeadlessRenderer::new()
+        .render_svg_sync(mermaid)
+        .map_err(|source| VizError::MermaidRender {
+            source: source.to_string(),
+        })?
+        .ok_or_else(|| VizError::MermaidRender {
+            source: "no Mermaid diagram detected".to_owned(),
+        })?;
     Ok(BASE64_STANDARD.encode(svg.as_bytes()))
 }
 

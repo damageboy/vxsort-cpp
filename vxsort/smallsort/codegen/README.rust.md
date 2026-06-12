@@ -281,6 +281,8 @@ cargo run -q -p gadget_viz -- \
   --output /tmp/gadget-template-0.html
 ```
 
+Open `/tmp/gadget-template-0.html` in a browser. HTML output uses Merman's headless SVG renderer in-process, embeds rendered SVGs as base64 data URIs, and does not load Mermaid in the browser.
+
 Render all records to an HTML gallery:
 
 ```bash

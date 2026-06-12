@@ -10,7 +10,7 @@ clap = { version = "4", features = ["derive"] }
 comfy-table = "7"
 crossterm = "0.29"
 gadget_synth = { path = "../gadget_synth" }
-ratatui = "0.29"
+ratatui = "0.30"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["arbitrary_precision"] }
 uica-core = { path = "../uica/rust/uica-core", default-features = false }

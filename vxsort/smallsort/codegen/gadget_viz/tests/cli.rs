@@ -1,6 +1,9 @@
 use std::fs;
 use std::process::Command;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+
 fn gadget_viz_bin() -> String {
     std::env::var("CARGO_BIN_EXE_gadget_viz").unwrap_or_else(|_| {
         let mut path = std::env::current_exe().expect("test executable path");
@@ -44,8 +47,26 @@ fn cli_writes_html_for_selected_template_record() {
     let html = fs::read_to_string(output).expect("html output");
     assert!(html.contains("data:image/svg+xml;base64,"));
     assert!(html.contains("PHN2Zy"));
+    let svg = decode_embedded_svg(&html);
+    assert!(
+        svg.contains("aria-roledescription=\"flowchart-v2\""),
+        "{svg}"
+    );
+    assert!(svg.contains("role=\"graphics-document document\""), "{svg}");
     assert!(!html.contains("cdn.jsdelivr.net/npm/mermaid"));
     assert!(!html.contains("class=\"mermaid\""));
+}
+
+fn decode_embedded_svg(html: &str) -> String {
+    let data_start = html
+        .find("data:image/svg+xml;base64,")
+        .expect("embedded SVG data URI")
+        + "data:image/svg+xml;base64,".len();
+    let data_end = html[data_start..].find('"').expect("data URI terminator") + data_start;
+    let bytes = BASE64_STANDARD
+        .decode(&html[data_start..data_end])
+        .expect("valid base64 SVG");
+    String::from_utf8(bytes).expect("utf8 SVG")
 }
 
 #[test]
